@@ -1,0 +1,1028 @@
+# GlassCast 1.0
+
+A podcast player for Android, sibling to GlassBook. Kotlin + Compose, Media3,
+package `com.glasscast.app`.
+
+## Opening it
+
+Unzip, then **Android Studio → Open** and point at the `GlassCast` folder.
+Gradle sync will pull every dependency on first run. The wrapper is included
+(Gradle 8.9); if Studio offers to use its own bundled Gradle instead, either is
+fine.
+
+Nothing here has been compiled or run — the build environment had no access to
+Google's Maven, so Gradle could not resolve a single Android artifact. The
+sources parse cleanly under the Kotlin 2.0.21 compiler, which catches grammar
+but not API drift. Treat the first sync as the real test.
+
+## What milestone 1 does
+
+- Background playback through a `MediaSessionService`, with lock-screen
+  controls, audio focus, and becoming-noisy handling
+- Add a show by pasting an RSS URL; feeds parsed with `XmlPullParser` including
+  the `itunes:` namespace, deduped by `guid` with an enclosure-URL fallback
+- Conditional refresh via `ETag` / `If-Modified-Since`, per show and for all
+- Episode list with resume position, remaining time, played state
+- Player screen: artwork-driven drifting colour fields, scrubber, ±30s, speed
+  sheet, sleep timer, skip-to-next
+- Show page built as a poster: the cover blurred full-bleed behind it, the sharp
+  cover, title, and a centred action row over the dissolve
+- Player with full-bleed artwork dissolving into an animated mesh backdrop
+- Latest tab — everything new across every subscription, newest first
+- Library search filters what you already have; the Search tab browses iTunes
+  charts by genre
+- Frosted floating chrome — glass tab bar and mini player, blur ramp under the
+  status bar
+- Search reachable three ways from the Library: a resting pill under the title,
+  its collapsed self in the top bar once you scroll, and a pull past the top of
+  the grid
+- Two tabs — Library and Search — with the mini player welded to the top of the
+  bar, Apple Podcasts' shape drawn in Material
+- Up Next as a sheet off the player: play next, add to queue, swipe left to
+  remove, tap to play. Backed by ExoPlayer's own playlist and mirrored to disk
+  so it survives the process
+- Episode notes sheet with chapters, where a feed publishes them
+- Directory search on its own tab; tapping a result opens the show to browse,
+  with an explicit Add. Adding by RSS URL is a separate sheet in the Library
+- Mini player, splash, in-app light/dark, artwork cache management
+
+## The accent
+
+Purple, sampled from the mark's own gradient rather than picked independently:
+
+| | |
+|---|---|
+| Default (dark ground) | `#AF52DE` |
+| Light mode | `#9B37C3` |
+| Pressed | `#7D23A0` |
+
+The three stops hold the same value relationship GlassBook used across
+`#FF9500` / `#E07B00` / `#B86200`, so a button carries the same weight in both
+apps. Everything else in the palette is unchanged.
+
+## About a dark-mode launcher icon
+
+Android has no direct equivalent of iOS 18's dark app icon. Two things exist,
+and they are not the same:
+
+**Themed icons** (`<monochrome>`, API 33+) is the reliable one, and the icon
+already ships it. When someone turns on themed icons in Wallpaper & style, the
+launcher discards the purple background and tints the RSS glyph from the system
+palette, so it tracks light and dark for free. The trade is that the brand
+colour goes with it, and most people never enable the setting.
+
+**A `-night` qualified icon** is now in `drawable-night/`: the light icon
+inverted, near-black tile with a purple glyph, built from your concept.
+
+Only the two *drawable* layers are night-qualified — there is deliberately no
+night PNG set. Night-mode qualifiers outrank density in Android's resolution
+order, so a `mipmap-night-hdpi` PNG beats `mipmap-anydpi-v26` after dark: the
+launcher stopped using the adaptive icon at night and fell back to a flat,
+full-bleed image, which looked zoomed in next to the light one. Colours are sampled from it — `#22242D` to
+`#111319` on the tile, `#9B4ED0` on the mark, which sits between the light
+icon's `AccentPurple` and the dark end of its gradient so the two read as one
+brand rather than two purples.
+
+Treat it as a nicety rather than a feature. Launcher icons are resolved and
+cached by the launcher process, not the app, and that cache generally isn't
+invalidated when the system flips to dark, so the variant may not appear until
+the launcher's icon cache is rebuilt, and some launchers won't pick it up at
+all. It costs a few files and is harmless when ignored, which is the reason
+it's worth having anyway.
+
+There is no supported API for shipping two full icons and choosing between
+them at runtime. The usual trick — activity-alias entries swapped with
+`setComponentEnabledSetting` — makes the icon vanish from the home screen and
+drops any placed shortcuts, so it isn't worth it here.
+
+## Typeface
+
+Figtree, bundled in `res/font`, OFL — licence text at `FIGTREE-OFL.txt`.
+
+Google Sans is what the app is reaching for and it can't ship: it's proprietary
+to Google, isn't on Google Fonts, and isn't licensed for third-party apps. On a
+Pixel it's the system font and you get it for free; everywhere else you'd fall
+back to Roboto, which is what you were seeing. Figtree is the nearest open face
+— same geometric-humanist construction, single-storey g, tall x-height, open
+apertures. It reads as that family without being it.
+
+Bundled rather than fetched via downloadable fonts, which would add a Play
+Services dependency, a certificate array, and a frame of fallback text on every
+cold start.
+
+## On "AI animated artwork"
+
+Worth separating what Apple Music actually does from what it looks like it does.
+It isn't generating video. It pulls four colours out of the cover, draws them as
+soft blobs, and drifts them on slow orbits — that's the whole trick, and it's
+what `MeshBackdrop` now does behind the player.
+
+Generating real animation per episode would mean a video model, a per-render
+cost, a wait before the player could draw anything, and somewhere to cache
+thousands of clips for a library that turns over daily. The arithmetic doesn't
+work, and the result wouldn't look better than this.
+
+Two things separate the mesh from the older three-field drift: the orbits run on
+coprime periods (47s, 61s, 73s, 89s) so the pattern never visibly repeats inside
+a listening session, and a real blur pass smears the blobs together so no
+individual circle is legible.
+
+## Dragging the player away
+
+**The dismiss flash.** Resetting the drag offset immediately after calling
+`onCollapse()` looks harmless and is not: `onCollapse()` only *starts* the exit
+transition, and the composable stays alive until it finishes. Snapping the
+offset back to 0 on the next line put the player back at full height, on screen,
+and the exit then slid it away a second time — dismissed, redrawn, dismissed.
+
+The offset is left parked off-screen and reset on the way *in* instead, which is
+the one moment it can't be seen. GlassBook hit this too; same fix.
+
+
+The full player closes by dragging it down, not only by the chevron. Two more
+things make it feel right:
+
+- The offset is an `Animatable` read inside a `graphicsLayer` block rather than
+  composed state, so dragging invalidates drawing and not the tree. This screen
+  has artwork, a gradient and a marquee in it and cannot recompose per frame.
+- Dismissal is decided on release by distance **or** velocity. A short flick
+  should close it and a slow drag most of the way down should too; testing only
+  distance makes flicks feel ignored, and only velocity makes careful drags
+  snap back.
+
+It scales down ~6% on the way out, so it reads as a sheet being put down rather
+than a screen sliding off.
+
+## Android TV
+
+`TvActivity` plus the `tv/` package. Same APK, same version, same
+`PlaybackService` — a second Activity rather than a second module, because the
+data and playback layers are byte-identical and splitting the project would
+have bought a build-graph refactor and nothing else.
+
+**What carried over unchanged:** `FeedStore`, `RssParser`, `PodcastSearch`,
+`Opml`, `ImageStore`, `EpisodeExtras`, `QueueStore`, `Settings`,
+`PlaybackService`, `PlayerConnection`, the palette extraction, and `Artwork`.
+Roughly two thirds of the codebase never learned there was a television.
+
+**What could not carry over is every gesture**, because touch is the one thing a
+remote doesn't have:
+
+| Phone | TV |
+|---|---|
+| Swipe down to dismiss player | Back |
+| Swipe left to remove from queue | Focused row, D-pad centre |
+| Pull down to search | Search tab on the rail |
+| Long-press for actions | A focusable button on the row |
+| Bottom sheets | Full panes — sheets are a thumb idiom |
+| Bottom tab bar | Left rail, one Left press from anywhere |
+| Haptics | Nothing; TV boxes have no motor |
+
+**Focus requests must wait for their node.** `FocusRequester.requestFocus()`
+throws if the requester isn't attached to a composed node, and on TV that is the
+*normal* case rather than the exception: a rail tap changes the tab and asks the
+new screen for focus in the same frame, before it has composed. Most of these
+requesters also live on the first item of a lazy list, which doesn't exist until
+that list measures — and stops existing when it scrolls away.
+
+`requestWhenReady()` in `ui/Components.kt` tries, yields 40ms, retries, and
+gives up quietly. Focus landing a frame late is invisible; an exception is not.
+The phone's two call sites use it now as well — they were the same latent bug
+that simply hadn't fired.
+
+Every screen is handed a `FocusRequester` and **something must carry it**,
+including the empty states. A screen focus arrives at with nowhere to land
+leaves the remote apparently dead.
+
+**Focus is the whole design.** On a phone "where am I" is answered by where the
+finger is. On a TV nothing answers it unless the interface does, continuously,
+for every element. `tvFocusable` uses three signals together because any one
+alone fails at three metres: the item **grows** (reads first in peripheral
+vision), gains a **bright ring** (survives on busy artwork where scale doesn't),
+and **lifts** (separates it from neighbours of similar colour). Focus is
+requested explicitly on entry to every screen — without that the first D-pad
+press goes nowhere and the app looks frozen.
+
+Other decisions worth knowing:
+
+- **Left/right seek 30 seconds on the player without moving focus.** The
+  remote's horizontal axis is the natural scrub axis, and walking focus onto a
+  button to move through an episode would be exhausting. The scrubber is
+  therefore a read-only progress bar — making it focusable would add a stop for
+  an action the D-pad already performs.
+- **Light mode isn't offered.** A bright panel in a dark room is the one thing
+  every living-room interface agrees on, so Light and System resolve to Dark.
+  Lights out is still honoured.
+- **48dp × 27dp overscan margin.** Televisions still crop the edges; content
+  scrolls *under* that margin but never starts inside it.
+- **The rail draws over the content** rather than beside it, so expanding on
+  focus doesn't reflow the page.
+- **The glass does not survive.** It was the first thing tried and the first
+  thing removed. Haze works by copying what is behind a panel into a layer and
+  blurring it; on a phone that layer is a few hundred thousand pixels, on a 4K
+  television it is eight million — and `hazeSource` was wrapped around the
+  entire scrolling page, so every scroll paid for a full-screen readback whether
+  a panel was on screen or not. Panels are solid with a hairline edge now. What
+  the blur bought on a phone was depth against content sliding underneath, and
+  on TV the content behind these panels barely moves.
+
+- **No elevation shadows.** `graphicsLayer.shadowElevation` casts its shadow
+  from the *layer's* outline, which is a rectangle unless a shape is set on the
+  layer — so every focused pill wore a grey square. `Modifier.shadow(clip =
+  false)` produced the same artefact from the other direction. Scale and the
+  ring carry focus without either, and dropping them removes a render pass per
+  item per frame.
+
+- **One animation per focusable, not two.** Scale and ring always move together,
+  so on a grid of twenty tiles that halved the running animations from forty.
+
+- **Appearance settings are gone from TV.** Every surface draws from the artwork
+  palette, so Dark and Lights out had nothing left to change — switching to
+  Lights out visibly did nothing. An option that does nothing is worse than no
+  option.
+
+- **No mini player; a Playing entry in the rail instead.** A strip along the
+  bottom is a thumb affordance — reaching it by D-pad meant travelling past
+  everything on the page first. The rail entry appears only while something is
+  playing, carries the cover art in place of its glyph, and opens the full
+  player. Removing the bar also gave every list back about 130dp of height.
+
+- **Left and right are no longer intercepted on the player.** Consuming them for
+  seeking meant focus could never travel along the control row, so the ±30
+  buttons were visible, focusable in principle, and unreachable in practice.
+  The remote's dedicated media keys still seek; the D-pad moves focus.
+
+- **Controls resized to fit.** They were 56/64/86dp with 14dp gaps — 382dp of
+  controls in roughly 350dp of column — so the last button was compressed into
+  an oval. `Modifier.size` sets a *preferred* size, and a child short of width
+  is squeezed on that axis alone.
+
+- **Feeds can be added by URL on TV.** The Search field takes a pasted feed URL
+  as well as a name. Typing a URL on a remote is miserable, so it doesn't get
+  its own screen — but without it the TV cannot add a show the directory doesn't
+  list.
+
+- **The show header returns to the top.** A lazy list scrolls only far enough to
+  bring the newly focused item into view, so coming back up focus landed on the
+  Play button partway down the header and the cover stayed clipped. Focus
+  entering the header now asks for index 0.
+
+- **The search field is the focus target itself.** It was wrapped in a focusable
+  Row, which swallowed focus before the field could receive it — so the field
+  never focused and the system keyboard never appeared. A focusable container
+  around a focusable child is one focus stop too many.
+
+## 1.0
+
+Version bumped to `1.0` (`versionCode 10`). The jump from 0.1 skips the
+intermediate numbers deliberately — leaving room under a release build for
+hotfixes without colliding with anything already installed.
+
+Two additions in this pass:
+
+- **The player has skip-previous and skip-next.** Both are always drawn; next is
+  dimmed to 30% when nothing is queued. Hiding it instead would move the play
+  button sideways, and the play button is the one control on that screen people
+  hit without looking. Previous restarts the current episode, since the queue
+  keeps no history and there is nothing behind the playhead to return to.
+- **Latest has its own refresh.** Refreshing belonged only on the Library tab,
+  which is the wrong place — Latest is the screen you open to see whether
+  anything new arrived.
+
+## The notification row
+
+Two separate mistakes, and the first fix only corrected one of them.
+
+**A custom-layout button must carry a `SessionCommand`, not a player command.**
+`DefaultMediaNotificationProvider` walks the custom layout and keeps only
+buttons whose `sessionCommand` is a CUSTOM command — anything built with
+`setPlayerCommand` is silently dropped. Mine were dropped, so declaring a custom
+layout changed nothing at all.
+
+**Next only renders when there is a next item.** `COMMAND_SEEK_TO_NEXT` is
+unavailable on a single-item queue, so with nothing in Up Next there is no next
+button to draw. Combined with previous being withdrawn, that left play/pause
+alone — which is exactly what showed up.
+
+Now: back 30 and forward 30 are real `SessionCommand`s handled in
+`onCustomCommand`, with `COMMAND_KEY_COMPACT_VIEW_INDEX` putting them in the
+collapsed notification where there is only room for three. Previous is restored
+— on a one-item queue `seekToPrevious` restarts the episode, which is a real
+action rather than the dead button I took it for.
+
+**The icon resources are crossed over deliberately.** Media3's
+`media3_icon_skip_back_30` draws a *clockwise* arrow and
+`media3_icon_skip_forward_30` an anticlockwise one — the opposite of what the
+names suggest, confirmed on device. The names appear to describe the button's
+slot in their reference layout rather than the direction the arrow points. They
+are paired here by what they look like. If they ever flip again, that pairing is
+the line to revisit.
+
+Worth knowing: button *order* in the row isn't ours to control. Skinned lock
+screens re-lay-out media actions themselves, which is why the row isn't in the
+sequence the code declares.
+
+## Shake to restart the timer
+
+Ported from GlassBook, where it's already proven on device. Off by default;
+the toggle lives in the timer sheet. When the timer runs out and playback
+pauses, shake the phone and it re-arms the same duration and resumes.
+
+Three details that matter:
+
+- The accelerometer registers **only** while a timer is armed, plus two minutes
+  after it fires. A listener running all night for a once-a-night feature isn't
+  worth the battery.
+- Two distinct jolts within a second are required, so a phone sliding off a
+  pillow doesn't restart your episode.
+- Shaking during the 15-second fade works too, so nobody has to wait for silence
+  before reaching for the phone.
+
+"Sleep" is now "Timer" throughout, matching GlassBook.
+
+## Smoothness
+
+- **Judge it in the `fast` variant, never `debug`.** A debuggable build keeps
+  debugging hooks on and skips the optimisations Compose relies on; it can
+  stutter where the real app won't. `fast` is debug-signed (installs over the
+  debug build, data intact) but not debuggable. `profileinstaller` installs the
+  Compose libraries' baseline profiles so hot paths are compiled ahead of time.
+- **Position is read only where it's shown.** It ticks every 0.4s while
+  playing; collected at the root it rebuilt every screen at that rhythm. It's
+  now read inside a `WithPosition` boundary around the mini player, bubble and
+  full player only.
+- **The wave stops when paused.** It was an infinite transition that redrew
+  every frame even while flat.
+- **Refresh rate is requested through both APIs**: the preferred display mode
+  (and again on resume, since skins reset it), plus the Android 15
+  `REQUESTED_FRAME_RATE_CATEGORY_HIGH` hint.
+- **R8 keep rule for `CastOptionsProvider`.** The Cast SDK finds it by name from
+  a manifest string; a minified release would strip it and crash on first cast.
+
+## Storage, and the out-of-memory crash
+
+The library used to be one JSON blob in SharedPreferences, and it crashed the
+app out of memory (a 75MB allocation against a 256MB cap). Three things
+compounded:
+
+- every save serialised the **whole library** — each episode's full HTML show
+  notes included — into a single string of tens of megabytes;
+- SharedPreferences holds its **entire contents in memory** for the life of
+  the process, so a second full copy of the library sat on the heap permanently;
+- `savePosition` → `updateEpisode` → save, and position saves fire every few
+  seconds during playback, **each launched separately** — so two or three of
+  those giant strings could be building at once. A full refresh saved the whole
+  library once per show.
+
+With the heap already near its cap, any spike tipped it over — which is why it
+looked random, and like the back gesture's fault.
+
+Now each show's episodes live in their own file under `files/library/`, plus a
+small `feeds.json`. A change marks only what it touched; a burst of changes is
+coalesced into one write about a second later, under a mutex, so writes never
+overlap. Files are streamed an episode at a time (no giant string is ever
+built) through `AtomicFile`, so a process killed mid-write leaves the previous
+copy intact. The old blob is migrated to files on first launch and removed with
+`commit()`. The service flushes on destroy; the background job flushes before
+reporting success. Room is still the eventual home — this fixes the crash
+without that rewrite.
+
+## New-episode notifications
+
+A WorkManager job refreshes every show roughly every three hours, on a network
+and not on low battery, and notifies about what's new. Podcasts publish daily at
+most, so a tighter interval would only spend battery to tell you sooner about
+something you'd hear later anyway.
+
+"New" is deliberately strict, because a loose rule spams: the guid wasn't in
+the library before the run **and** the episode is newer than the show's newest
+episode before the run. Feeds re-list old episodes and change guids after a
+hosting move; a show with nothing stored yet is skipped, so a first successful
+fetch never fires two hundred notifications. Episodes the app itself refreshed
+while open are never notified — they're already in the library.
+
+Two things the background case needed from the store:
+- **`awaitLoaded()`** — the library loads asynchronously, and a job can start
+  the process cold. Without waiting it would refresh an empty library.
+- **`flushToDisk()`** — normal saves use `apply()`, which writes later; a
+  background process can be killed the moment the job reports success.
+
+Notifications carry the cover, group under a summary past one, cap at six per
+run, and open the show's page. Permission (Android 13+) is asked once, after the
+splash; Settings has the toggle and says plainly when the system is blocking it.
+
+**HyperOS:** Xiaomi stops background work aggressively. For reliable checks,
+GlassCast needs Autostart allowed and battery saver set to "No restrictions"
+in its app info.
+
+## Casting
+
+The Streamer didn't appear because an app only shows Cast devices if it speaks
+Google Cast; the device running Android doesn't enter into it. GlassCast now
+includes the Cast SDK with Google's Default Media Receiver, which plays a URL
+with a title and artwork — exactly what an episode is — without a receiver app
+of our own.
+
+Casting is a player swap, not a second code path. Media3's `CastPlayer` is a
+`Player` like any other: when a Cast session starts, the queue, episode,
+position and speed move to it and the session is pointed at it, so every
+control surface keeps working unaware. When casting ends it runs in reverse.
+Items now carry a MIME type, which the Cast converter requires. The sleep-timer
+fade is skipped on Cast, which has device volume but no player volume.
+
+The cast button opens GlassCast's own **Play on** sheet rather than the system
+picker (which on HyperOS showed only Bluetooth). Owning it is also the Mac
+groundwork: see `docs/handoff-sync-protocol.md`.
+
+## The Cider pass, part three
+
+**The backdrop is the cover over its own reflection.** The earlier blurred
+field was a separately framed copy — zoomed to the screen's height and centred —
+so whatever sat just below the cover's foot came from the middle of the image,
+and the colour broke at the seam before settling into a mud of the whole. Cider
+mirrors the cover vertically underneath itself: the first thing below the foot
+is the foot, reflected, so every colour carries straight on. The cover and its
+reflection are blurred as one image so the blur runs across the seam rather than
+stopping at it, and the sharp cover on top dissolves into its own blurred self.
+
+**The controls travel with the panel.** The title, transport and wave are drawn
+once each, and each has two rectangles — full layout and compact header — with
+position, size, corners and icon sizes interpolated by how far the panel is
+open. That fraction follows the finger, so they move with the drag every frame
+rather than fading out below and back in above. Restart and next narrow into the
+group's ends as they leave. The full layout is computed bottom-up from the
+panel's collapsed top so it holds on any screen height.
+
+**The panel is opaque, in the cover's hue,** under a *complete* dark colour
+scheme. The translucent first version let the artwork show through behind the
+queue; and patching the app's scheme left every unnamed colour at its light-mode
+value, which is why light mode looked worse. It now holds four tabs — Up Next,
+Info, Speed, Timer — and the moon appears beside cast only while a timer runs,
+opening the Timer tab. The queue rows are built for the panel: the old sheet's
+rows had the same always-visible "Remove" reveal the episode rows once had.
+
+**Covers fly between screens.** One `SharedTransitionLayout` spans the app.
+The now-playing cover has a fixed key shared by the mini player, the bubble and
+the full player, so opening the player is the cover growing into place; a show's
+cover is keyed by feed URL, so a library tile, a search result or a Discover
+card all fly into the same show header. Scopes are composition locals, so any
+artwork opts in with one modifier and no screen threads scopes through its
+parameters. Dismissing by drag hands the cover back from wherever the finger
+left it.
+
+**Discover** tallies each show's own `<itunes:category>` across the library — a
+show played in the last fortnight counts three times — and turns the strongest
+genres into shelves of that genre's chart, minus anything followed. Existing
+libraries are backfilled once with an unconditional fetch, since conditional
+refreshes never re-parse an unchanged feed.
+
+**Chrome takes the cover's hue.** Mini player and tab bar are dark in both
+themes and tinted by what's playing, as Cider's are.
+
+**Pull to refresh replaces pull to search.** The "ghost" search pill was the old
+pull-to-search indicator: scrolling back up past the top overscrolled, and the
+overscroll counted as a pull. The indicator is the bubble's cookie, winding up
+as you pull and spinning while it refreshes.
+
+**The notification follows the system.** Three hand-built layouts of back/forward
+30 all ended reversed on HyperOS, and the screenshots showed why the icon swap
+couldn't work — the glyphs sat in the same places before and after it. HyperOS
+draws its own icons there. The session now declares only what it can do and
+each surface renders that natively.
+
+## The Cider pass, part two
+
+**The pull-up panel.** Up Next and episode info live *inside* the player now, in
+one surface with two states. Collapsed, its header is the strip along the foot;
+pulled up, the same header rides to the top and the content comes into view.
+Because it's one object throughout, nothing ever closes and reopens — which is
+what made the old white sheet feel bolted on. Pulling up anywhere on the player
+raises it, as Cider's does; direction is decided at the start of a drag and
+held, so once the panel is moving it can't also dismiss the player. As it rises
+the full controls fade and a compact header — title, a small transport group,
+the wave — takes over at the top, so the player reads as making room rather
+than being covered.
+
+It is *tinted*, not painted: a dark translucent layer over the blurred artwork,
+so it takes the episode's colours without being given any. The queue and notes
+views are reused unchanged under a local colour scheme that makes them render
+light-on-dark there and normally everywhere else.
+
+Info moved into the panel; its old slot holds speed, timer, and an output
+button that opens the system's own output picker (`SystemOutputSwitcherDialog
+Controller`). That picker already lists speakers, Bluetooth, and Cast devices
+for apps that register them — real Google Cast is the next step, and it needs
+the media router this pulls in anyway.
+
+**Swipe to queue, fixed properly.** It froze and snapped because the row was
+allowed to *commit* to its dismissed position and then `snapTo(Settled)` —
+an instant jump. Now `confirmValueChange` runs the action and returns false, so
+the state never settles at "dismissed" and the box springs home by itself.
+One direction (left, Cider's), one obvious icon; the right-swipe's
+`QueuePlayNext` read as a monitor with a plus on it. Every queueing path goes
+through one helper that raises a small confirmation pill with the cover in it.
+
+**The tab bar** is one travelling pill on an underdamped spring, chasing the
+selected tab's live bounds while the tab widths themselves animate — the bounce
+is the physics of one object arriving, not an animation per item. **Pages
+slide** between tabs in the direction of travel and push/pop into shows, and
+each page renders from the destination it was created for, never live state —
+on the way back from a show the live selection is already null. A saveable
+state holder keeps the library's scroll across the round trip.
+
+**Play buttons change shape** with state — a full pill at rest, a squarer tile
+while playing — in the player, the compact header and the mini player.
+
+**The bubble's progress** now traces the scalloped outline instead of a circle
+around it: one function builds both the clip and the ring, so they can't
+disagree, and the progress is a `PathMeasure` segment of that curve from the
+top.
+
+**Themes are System / Light / Dark plus a dynamic-colour switch.** The old
+five-way list made artwork colour and brightness mutually exclusive. Stored
+values migrate: Lights out → Dark; Show colours → System with dynamic on.
+
+## The Cider pass
+
+A deliberate step away from strict Glass conformance toward Material 3
+Expressive, modelled on Cider's Android client.
+
+**The player's background is the artwork, blurred.** Every earlier version
+*derived* a background from the cover — a palette, then a four-swatch mesh, then
+clamps on the mesh — and every one had a seam somewhere, because a derived colour
+approximates the picture and approximations disagree with the original along
+some edge. A blurred copy of the same image can't disagree with it. The sharp
+cover dissolves (an alpha mask, as always) into an enlarged, blurred version of
+itself, so the transition is the picture losing focus rather than one surface
+meeting another. `MeshBackdrop` is gone for good.
+
+The blur layer decodes at 96px. It throws away all detail anyway, and on Android
+versions without `RenderEffect`, where `Modifier.blur` is a no-op, a tiny bitmap
+upscaled with bilinear filtering still reads as soft rather than as a sharp
+duplicate of the cover.
+
+**The wavy scrubber** (`WavySlider`) is Material 3 Expressive's wavy *progress*
+indicator, not an audio waveform — the wave carries no information about the
+audio, only that it is playing. It animates while playing and calms to a flat
+line on pause, which makes it the clearest play-state signal on the screen. The
+mini player carries a smaller one.
+
+**Connected button groups** (`ButtonGroup`) for the transport and for a show's
+actions. Only the group's outer ends get the large radius; inner corners are
+tight, so the parts read as one control. Pressing squashes a segment rather than
+rippling it, which survives on artwork where a ripple would vanish. The
+transport has five parts rather than Cider's three: a podcast needs the 30-second
+jumps more than track skipping, so those take the full-size slots.
+
+**The mini player collapses to a bubble while you scroll.** Driven by a
+`NestedScrollConnection` at the root, so every screen gets it without knowing:
+scroll down and the card folds toward its bottom-right as a cookie-shaped cover
+grows in beside the tab bar; scroll up and it comes back. The bubble's scalloped
+edge turns slowly while playing and stops where it is on pause — only the
+outline turns, the cover stays upright.
+
+**Episode rows are cards**, with an equaliser on whichever one is playing.
+
+**The swipe-to-queue bug, and why it happened.** The first version painted its
+"Add to Up Next" label on every row permanently and tinted the whole list.
+`SwipeToDismissBox` always composes its background and relies on the row above
+it being opaque to hide it. My rows were transparent. Two fixes: the background
+now draws nothing unless a swipe is in progress, and rows are opaque cards — the
+played-row fade applies to their contents only, since fading the card would let
+the reveal show through. The reveal is an icon in a tile, not a sentence.
+
+**The show page's doubled title.** The bar faded the show's name in as the
+header's scrolled away, and with no opaque surface under the bar both were
+visible at once, one sliding under the other. It's a floating back button now;
+the header already names the show.
+
+## Transcript follow-along
+
+`EpisodeExtras` has parsed SRT and VTT since the chapters work and nothing ever
+surfaced it. The info sheet is now tabbed — Notes, Chapters, Transcript — and
+only shows a tab with something behind it.
+
+The transcript follows the audio: the line being spoken is the only one at full
+strength, its neighbours recede to 42%, and the list keeps itself two lines
+ahead so you never hunt for your place. **Tapping a line seeks to it**, which is
+the real point — it turns a transcript from a wall of text into the navigation
+surface an hour-long episode most lacks.
+
+The spoken line also fills left to right, using a gradient brush on the text
+itself. That is honest here rather than decorative: SRT and VTT give a start and
+end per cue, so the fill is measured elapsed time within the line, not a guess
+at individual words.
+
+Coverage is the catch. `<podcast:transcript>` is rarer than chapters, so most
+episodes will show no Transcript tab at all. That's the correct outcome — a tab
+that opens onto "no transcript" is a worse answer than no tab.
+
+## Swipe a row to queue it
+
+Right to play next, left to add to the end, on both the show page and Latest.
+The long-press sheet stays; this is the shortcut for the two things people
+actually pick from it, and queueing was the only frequent action on a row that
+cost two taps and a read.
+
+The threshold is a quarter of the row rather than the default half — this is a
+flick, not a dismissal — and the row springs back afterwards, because nothing is
+being removed from the list and it has to say so.
+
+## Haptics
+
+`ui/Haptics.kt`. Call sites name what a touch *meant* — `Haptic.Resume`,
+`Haptic.SkipForward`, `Haptic.Select` — and the module decides the shape of the
+buzz and what the motor under it can reproduce. Without that split every call
+site ends up hardcoding a vibration pattern and they drift apart.
+
+Patterns are built from the three genuinely short primitives (tick, low tick,
+click). The platform also offers rises, falls and thuds, and all of those run
+80–500ms — long enough that a two-beat pattern would still be vibrating after
+the screen had finished responding. The longest pattern here is three beats
+inside ~50ms.
+
+Three tiers, resolved once per process: primitive **composition** on API 30+
+where supported, **amplitude waveform** where the motor has volume control, and
+a **plain waveform** otherwise — where pulses are stretched to be felt at all
+and three-beat patterns drop to their outer two rather than becoming a rumble.
+
+Placed on: play/pause (rising vs. falling pair), ±30s (accelerating triplet and
+its reverse), tab changes, pill toggles, scrub release, mini-player expand, and
+the pull-to-search threshold arming. Not on drag movement — a tick per pixel is
+a rattle, not feedback.
+
+## Loading skeletons
+
+`ui/Skeletons.kt`. Content-shaped grey placeholders with a highlight sweeping
+across, laid out to the same metrics as the real rows.
+
+A spinner says "something is happening". A skeleton says what is about to be
+there and how much of it, and removes the layout shift a spinner guarantees,
+because the spinner occupies nothing like the space the content will.
+
+The sweep is read inside the draw block, not the composable body — a screenful
+of these would otherwise recompose every animation frame when all any of them
+needs is a fresh gradient. Placeholder widths are ragged so a run of rows reads
+as text rather than as a barcode.
+
+## Coming from another podcast app
+
+Settings → Subscriptions → Import / export OPML, or share the file straight to
+GlassCast from the other app's share sheet — the manifest accepts `ACTION_SEND`
+and `ACTION_VIEW`, and a shared file opens the import sheet directly.
+
+For AntennaPod specifically: Settings → Import/Export → OPML export.
+
+**Subscriptions transfer; play positions don't.** OPML has no field for them and
+nobody has agreed on an extension. The alternative is reading AntennaPod's
+SQLite database out of its own backup, which does carry positions but means
+depending on the private schema of an app that's free to change it in any
+release. Not a trade worth making for a one-time migration.
+
+Two details that matter in practice: the file picker filters on `*/*` rather
+than an OPML MIME type, because exporters label these files as `text/xml`,
+`application/xml`, `application/octet-stream` or nothing at all and a strict
+filter greys out the very file you came to pick; and the import runs
+sequentially with visible progress, because firing a few hundred feed fetches in
+parallel from a phone gets you rate-limited by the larger hosts.
+
+## Four themes, not three
+
+`System`, `Light`, `Dark`, `Lights out`. Dark is a grey (`#17171B` base); Lights
+out is true black for OLED.
+
+`System` resolves to Dark, never Lights out. True black is something a
+particular kind of person seeks out for their panel — it isn't a default anyone
+should be handed by their phone's night setting.
+
+Because "dark" now has two flavours, nothing may hardcode a near-black ground.
+The artwork wash, the drifting field and the splash all read
+`MaterialTheme.colorScheme.background` instead; a fixed `#0A0A0C` would show as
+a seam against grey and as a slightly-wrong black against true black.
+
+## The colour system: hue carries identity, the theme pins lightness
+
+The palette used to preserve each cover's own lightness and clamp it into a wide
+band. That is unpredictable by construction — a dark cover gives a legible page,
+a bright one gives highlighter red, and every failing cover earns another clamp
+bolted onto the last.
+
+Inverted now. **Hue and saturation carry the identity; lightness is pinned by
+the theme.** Dark lands near L 0.13, light near L 0.91, always. The page is
+legible by construction, and the hue is what makes it this show's page — which
+is the part anyone recognises.
+
+`ArtworkColors` is a finished set — `background`, `wash`, `elevated`, `accent`,
+`content`, `contentVariant`, `divider` — rather than raw swatches each caller
+re-interprets. Two details inside it:
+
+- **`wash` is the flat mean of the artwork's bottom 18%**, which is what a blur
+  wide enough to lose the picture actually leaves at that edge. A mean and not a
+  quantised swatch, deliberately: a blur has no notion of which colour is
+  important, so the page has to match what the blur *produced*, not what the
+  picture is about. Starting the page from that colour is what removes the seam
+  under the artwork.
+- **The accent is scored by saturation × √population.** The square root is the
+  whole trick: without it a cover that's four-fifths black sky accents in black,
+  and with the area term gone entirely a single vivid pixel wins.
+
+`contentVariant` sits at 0.80 alpha, not the usual 0.60 — a tint is a coloured
+ground, not black, so secondary text needs more of the content colour to
+separate from it.
+
+## Two surfaces, two grounds
+
+The show page and the player deliberately do **not** share a ground, and the
+reason is worth stating because it looks like an inconsistency.
+
+The **show page** is a list. It has to stay legible next to the rest of the app,
+so it gets the theme-pinned gradient: `wash` settling into `background`, quiet
+by construction.
+
+The **player** is a poster. It fills the screen, carries no list, and its entire
+job is to look like the thing you're listening to. Pinning its lightness
+flattened exactly what made it worth looking at, so it keeps the mesh: four
+distinct swatches over the cover's own dominant colour, at its own lightness.
+
+`ArtworkColors` therefore carries both sets — `background`/`wash`/`content` for
+the app's grounds, `mesh`/`meshBase`/`onMesh`/`meshAccent` for the player. Same
+extraction, two clamps, because they answer different questions.
+
+## Matching the cover, not deriving from it
+
+The mesh used to clamp every colour into a 0.28–0.58 lightness band and multiply
+saturation. That's borrowed from a music player, where covers are photographs
+with no single flat field and a rich mesh is the goal. Podcast covers are not
+photographs — they're illustrations sitting on one flat background colour, and
+that colour is how you recognise the show.
+
+Measured against real covers, the clamp was doing this:
+
+| Cover background | Mesh it produced |
+|---|---|
+| `#FCF5FD` pale lavender | `#20158F` deep indigo |
+| `#3F6067` teal | `#63614C` olive |
+| `#6E251F` red | `#3F3832` brown-grey |
+
+Derived from the artwork, and visibly nothing to do with it.
+
+The mesh now leads with the cover's **dominant** swatch, kept close to true —
+saturation nudged 1.12×, lightness only pulled back from the extremes that can't
+hold text at all. Blob alpha dropped from 0.85 to 0.55 so the base stays
+recognisable through them.
+
+What used to be handled by forcing everything dark is handled by picking the
+text colour instead: dark type on a pale cover, light type on a deep one, with
+the scrim following suit and the status-bar icons with it. Forcing dark was the
+other half of the problem — it darkened the very colour the page was trying to
+match, to protect white text that never had to be white.
+
+## The player ignores the theme
+
+Not an oversight. Its background is the artwork's colours, not the theme's, and
+those land wherever the cover lands — so "is this readable" cannot be answered
+by a setting. The fix both references use is the same: a dimmed floor under the
+mesh, a black scrim over it, white type on top, in every theme. It is also why
+dark mode looked right and light mode looked broken; the surface was never
+really light, so light-mode text colours were being asked to work over a dark
+picture.
+
+Everything else still follows the theme. Only the player opts out, and it
+restores the status-bar icon colours on the way out.
+
+## Why the mesh was one flat colour
+
+Three causes, all showing as the same symptom:
+
+- **Radii were measured against the screen's longest side.** At 0.46 of the
+  height every blob covered the whole screen, and four screen-sized gradients at
+  high alpha average to a single tone. They are sized against the layer now, and
+  the layer is scaled 1.3× so the blur's clamped edges fall off-screen.
+- **The colours weren't actually different.** `vibrantSwatch` and friends are a
+  convenience over the full swatch set, and on a dark or desaturated cover most
+  come back null — so three "different" field colours were often one colour
+  three times. The whole swatch list is read by population now, near-duplicates
+  dropped by hue and lightness distance, and any shortfall derived from the art
+  itself rather than borrowed from the brand.
+- **Saturation and lightness weren't clamped.** Pastel covers gave a mesh you
+  couldn't see; near-black ones gave a mesh you couldn't read over.
+
+The blobs also no longer orbit forever. Re-blurring a full-screen layer at
+120Hz for as long as the player is open was the most expensive thing in the
+app, for motion nobody watches. They drift on open and on episode change, then
+settle. The resting frame is identical.
+
+Only the mesh gets the saturation tuning. The show-page wash and the mini player
+sit on the app's own ground, where boosting them would overshoot a wash that
+already works.
+
+## A bug the reference found for me
+
+The scrubber had two `pointerInput` blocks — `detectTapGestures` and
+`detectHorizontalDragGestures`. That does not work: the drag detector claims the
+pointer on the way down, and a tap has no drag to report. **Tapping the bar to
+seek silently did nothing.** Dragging worked, which is why neither of us noticed
+for several rounds.
+
+It is one `awaitEachGesture` loop now, taking the position from the initial
+down — so a tap seeks, and a drag starts from where your finger actually landed
+rather than waiting for the first movement.
+
+## The seam, third time — and the general rule
+
+The show page grew the line back, at the header's bottom edge. Same family as
+the player's, and the diagnosis generalises:
+
+> An overlay gradient runs 0→1 over **its own composable**. The page ground runs
+> 0→1 over **the screen**. Two gradients in different coordinate spaces cannot
+> agree at their shared boundary, whatever colours you give them.
+
+The backdrop now masks the blurred image's own alpha with `BlendMode.DstIn` and
+paints no colour at all, so the page ground is the single colour source across
+the whole screen and there is nothing left to disagree. The player learned this
+first; the show page had to learn it separately because the fade there was
+introduced as a colour, not as a mask.
+
+The rule, stated once: **when something sits over a live or full-screen
+background, erase it — never tint it.**
+
+## The seam, and why an overlay can never fix it
+
+Twice I tried to blend the player's artwork into the mesh by painting a
+gradient *over* it — first ending on the theme's ground colour, then on the
+mesh's dark base. Both produced a hard line exactly one screen-width down the
+page, which is the artwork's bottom edge.
+
+An overlay cannot work here. Whatever colour it ends on at the artwork's last
+row is a fixed colour, and the mesh one pixel below it is a live, moving,
+artwork-derived one. They will never agree.
+
+The artwork's own alpha is masked instead: `CompositingStrategy.Offscreen`, then
+a vertical gradient drawn with `BlendMode.DstIn`. The gradient supplies alpha
+and no colour, the artwork's bottom rows become genuinely transparent, and the
+mesh shows through both halves because it was always the only thing back there.
+
+Also worth naming: resource qualifiers have a fixed order, and `night` comes
+before density. `mipmap-hdpi-night` is silently not a valid folder;
+`mipmap-night-hdpi` is.
+
+## A fix worth remembering
+
+The player's artwork used to fade to the *ground colour* at its foot. The mesh
+behind it is a saturated, moving field, so the artwork ended in flat `#F7F7F9`
+while the page underneath carried on in olive or purple — and the two met as a
+hard line at exactly the artwork's bottom edge, one screen-width down.
+
+The dissolve now fades to transparent and lets the same mesh carry through both
+halves. Anything drawn over an artwork-derived background has to dissolve into
+*nothing*, never into a colour, or it will find an edge to disagree on.
+
+The mesh itself was also averaging into a single flat wash: blob radii at 0.72
+of the screen with a 44dp blur on top leaves no variation to see. Radii are now
+0.46 with less blur, which is what makes it read as a field rather than a tint.
+
+## The glass pass
+
+The chrome is frosted and floating rather than welded to the screen edges: a
+tab bar and a mini player as two stacked rounded panels sharing a gutter and a
+corner radius, with the page scrolling underneath them, and a blur ramp under
+the status bar instead of a background that switches on at some scroll offset.
+
+Real backdrop blur in Compose needs `dev.chrisbanes.haze` (Apache 2.0) — doing
+it by hand with `RenderEffect` doesn't compose with scrolling content. Only the
+scrolling page is tagged as the haze source; tagging the chrome too would have
+the panels blurring each other.
+
+Three things that make it read as glass rather than as a smudge:
+
+- **A hairline top edge** on every panel. A real pane catches light along its
+  edge; without it a blurred panel just looks out of focus.
+- **The top ramp stops short of full blur.** A blur has nothing to sample past
+  the top of its own layer, so pushed all the way it becomes a band of flat
+  material colour spreading down the page — the exact artefact it was added to
+  remove. It is also keyed to the *page's* colour, which on a show page means
+  the artwork wash, not the theme background.
+- **The mini player's artwork tint stays low.** The point of glass is seeing the
+  page move underneath; a heavy tint turns the panel back into a solid.
+
+Below API 31 there is no `RenderEffect` and Haze falls back to a translucent
+scrim. That's expected — the layout is identical either way.
+
+The BitChord source that inspired this is GPL-3.0. Nothing was copied from it;
+what's here is the design language and the choice of blur library, both of which
+are free to take. Keep it that way unless GlassCast goes GPL.
+
+## Pull-to-search, and the gesture it spends
+
+Pulling down past the top of the Library jumps to Search, with the keyboard
+already up. On Android that gesture normally means refresh, and it is free here
+only because refreshing is an explicit button in the top bar.
+
+**That has to stay true.** Adding pull-to-refresh later would put two meanings
+on one gesture and the wrong one would win. If background refresh via
+`WorkManager` lands as planned, manual refresh matters less anyway.
+
+Two details make it feel deliberate rather than twitchy: dragged distance is
+halved, so the indicator lags the finger and reads as weighted; and the trigger
+fires on release rather than on crossing the threshold, so an overscrolled
+fling can't launch Search by accident.
+
+The morph from the concept is approximated rather than literal — the resting
+pill scrolls away while a collapsed search button fades into the bar on the same
+scroll fraction the large title already animates on. A true continuous morph
+would need the pill to live outside the list and be positioned by hand against
+scroll offset, which is a lot of fragile arithmetic for a difference you'd have
+to be looking for.
+
+The pill sits *below* the title, not above it as in the reference. The page
+should say what it is before it offers to leave.
+
+## Divergences from GlassBook
+
+- **No Coil.** `ImageStore` already downloads, disk-caches, downsamples and
+  memoises artwork, and Palette needs a real `Bitmap` anyway. Running two image
+  pipelines side by side would have meant the caching rule holding in one of
+  them and not the other. Coil is not in the dependency list.
+- **`PlayerConnection` is a new file** in `player/`. A `MediaSessionService`
+  needs a `MediaController` on the UI side; leaving the future-and-listener
+  plumbing in composables would have spread Media3 across the whole `ui`
+  package.
+- **`GlassCastRoot.kt` and `Components.kt`** are additions — routing state and
+  the `Pill` / formatting helpers respectively.
+- **No Room yet**, per "no Room in the first milestone". It contradicts the note
+  about introducing Room the moment episodes are involved, so: the JSON blob is
+  a milestone-1 convenience and `FeedStore`'s surface is entirely StateFlows and
+  suspend functions, so milestone 2 can swap the guts without the UI noticing.
+  Do not let the blob survive past milestone 2 — a few thousand episodes
+  serialised on every position write will not hold.
+- **Chapters are cut, not deferred.** They were pulled from the player at your
+  call — an episode isn't a book, and there's no second scope to switch to, so
+  the scrubber is simply the episode and the label under it is gone.
+- **Directory search pulled forward from milestone 2.** `data/PodcastSearch.kt`
+  is an interface with an iTunes implementation, scoped to the device locale's
+  store so local shows actually appear. Podcast Index slots in beside it when
+  you want credentials.
+- **Queue pulled forward from milestone 3.** It is ExoPlayer's playlist, not a
+  list kept beside it — a parallel list only gives you two things that can
+  disagree about what's playing. `data/QueueStore.kt` mirrors the guids and the
+  current index so the queue survives a cold start; positions already live
+  per-episode in `FeedStore`.
+- **No manual reordering.** The drag handle was cut, and with it reordering —
+  swipe-to-remove and tap-to-play cover the cases that come up, and the queue is
+  short by design.
+- **The queue has no history.** The playing item is always index 0 and
+  everything after it is Up Next; anything you move away from is dropped. That
+  invariant is what stops finishing an episode from walking backwards into one
+  you already heard.
+- **Browsing is not subscribing** — but playing is. A show opened from search
+  is fetched into transient state and never touches the library until Add is
+  tapped. Hitting play does subscribe, because the queue and the resume position
+  need a row in the store to live in.
+- **Chapters are best-effort.** `<podcast:chapters>` first, then timestamps
+  parsed out of the show notes. Nothing in the iTunes API carries chapters or
+  transcripts, and only a minority of feeds publish either, so the notes parser
+  does most of the real work. `EpisodeExtras` can also read SRT/VTT transcripts
+  where a feed declares one; nothing surfaces them yet.
+- **Sleep timer pulled forward from milestone 4.** It runs in the service
+  (lesson 6) and talks to the UI through `player/SleepTimer.kt`, a process-wide
+  object rather than session commands — the service is in the app's own process.
+  If it ever moves to `:playback`, that object becomes a `SessionCommand` pair
+  and nothing else changes.
+- `ShakeDetector.kt` is not present; it belongs to milestone 4.
+
+## Hard-won lessons, where each one landed
+
+1. `LocalContentColor` — `PlayerScreen` draws into a bare `Box`, so it wraps in
+   a `CompositionLocalProvider`. Everything else sits under a `Surface`.
+2. Both schemes fully specified — `ui/theme/Theme.kt`, including every
+   `surfaceContainer*` step and `onSurfaceVariant`.
+3. Image decoding — `data/ImageStore.kt`. Keyed by URL *and* size, synchronous
+   peek for the first frame, and the cache re-checked after decode so two
+   racing coroutines return the same instance.
+4. Duration — `PlaybackService.reconcileDuration()` on `STATE_READY`, written
+   back to the store. `formatRemaining` returns `--:--` rather than `-0:00` when
+   duration is still zero.
+5. Artwork on the `MediaItem` — `PlayerConnection.mediaItemFor()`, with
+   `refreshMetadata()` doing the capture-replace-seek dance.
+6. Sleep timer in the service — `PlaybackService.startSleepTicker()`, fading
+   volume over the last 15 seconds. End-of-episode waits for `STATE_ENDED`
+   rather than computing a deadline, which gets playback speed right for free.
+7. `LinearProgressIndicator` — `drawStopIndicator = {}` and `gapSize = 0.dp` at
+   both call sites.
+8. Refresh rate — `MainActivity.requestHighRefreshRate()`, in `onCreate` and
+   `onResume`, noting the system may refuse.
+
+## Worth knowing before you run it
+
+- `usesCleartextTraffic` is on. A meaningful share of podcast enclosures are
+  still plain HTTP and would otherwise fail silently.
+- Notification permission is requested on first launch. Playback works without
+  it; you just lose the notification controls.
+- Feeds vary wildly. If one parses badly, the URL is the thing to send back.
+
+## Next
+
+Next: OPML import and export, `WorkManager` background refresh, downloads with
+`SimpleCache`, per-show settings — and Room, before the JSON blob starts
+hurting. The queue restoring a few thousand episodes off a JSON blob at launch
+is the first place that will show.

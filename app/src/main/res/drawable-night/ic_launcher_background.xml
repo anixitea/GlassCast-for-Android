@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Dark-launcher variant: the light icon inverted. Near-black tile, purple glyph.
+  Gradient sampled from the supplied concept — #22242D at the top falling to
+  #111319, which keeps a little of the light version's top-lit feel rather than
+  going flat black.
+
+  Whether a launcher uses this at all is up to the launcher; see the README.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path android:pathData="M0,0h108v108h-108z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="54" android:startY="0"
+                android:endX="54" android:endY="108"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#FF22242D" />
+                <item android:offset="0.55" android:color="#FF191B23" />
+                <item android:offset="1.0" android:color="#FF111319" />
+            </gradient>
+        </aapt:attr>
+    </path>
+</vector>
