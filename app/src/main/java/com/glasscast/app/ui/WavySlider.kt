@@ -1,6 +1,5 @@
 package com.glasscast.app.ui
 
-import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -58,7 +57,15 @@ fun WavySlider(
     showThumb: Boolean = true,
     onScrubStart: () -> Unit = {},
     onScrub: (Float) -> Unit = {},
-    onScrubEnd: (Float) -> Unit = {}
+    onScrubEnd: (Float) -> Unit = {},
+    /** Wave updates per second; 0 = every frame. */
+    frameRate: Int = 0,
+    /**
+     * Loudness of what's playing, 0–1 (see VoiceLevel). When given, the wave's
+     * height follows the voice — up on the words, down to a gentle ripple in
+     * the pauses — instead of a constant swell. Read only while drawing.
+     */
+    voice: (() -> Float)? = null
 ) {
     var dragging by remember { mutableStateOf(false) }
     var local by remember { mutableStateOf(0f) }
@@ -73,22 +80,13 @@ fun WavySlider(
     )
 
     /*
-     * The wave's travel runs only while playing. It was an infinite transition,
-     * which kept ticking — and redrawing this canvas every frame — even when
-     * paused and flattened to a line, where the motion is invisible anyway.
-     * Wrapped to one period each loop so the value never grows without bound.
+     * The wave's travel runs only while playing, from a clock that stops
+     * dead when paused (the flat line doesn't redraw at all). [frameRate]
+     * caps how often it advances: the mini player uses 30 so a list with
+     * something playing isn't redrawn 144 times a second for a slow wave;
+     * the full player leaves it uncapped.
      */
-    val phaseAnim = remember { Animatable(0f) }
-    LaunchedEffect(playing) {
-        val period = (2 * PI).toFloat()
-        while (playing) {
-            phaseAnim.snapTo(phaseAnim.value % period)
-            phaseAnim.animateTo(
-                targetValue = phaseAnim.value + period,
-                animationSpec = tween(1_400, easing = LinearEasing)
-            )
-        }
-    }
+    val clock = rememberFrameClock(running = playing, fps = frameRate)
 
     Canvas(
         modifier
@@ -125,8 +123,8 @@ fun WavySlider(
         val w = size.width
         val cy = size.height / 2f
         val stroke = strokeWidth.toPx()
-        val phase = phaseAnim.value
-        val a = amplitude.toPx() * amp
+        val phase = ((clock.value % 1.4f) / 1.4f) * (2f * PI.toFloat())
+        val a = amplitude.toPx() * amp * (if (voice != null) 0.3f + 0.7f * voice() else 1f)
         val k = (2 * PI / wavelength.toPx()).toFloat()
         val head = (w * shown).coerceIn(0f, w)
         val gap = if (showThumb) 7.dp.toPx() else 3.dp.toPx()

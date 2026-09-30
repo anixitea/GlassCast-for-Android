@@ -29,6 +29,10 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -61,10 +65,13 @@ fun LatestScreen(
     onEpisodeActions: (Episode) -> Unit,
     onPlayNext: (Episode) -> Unit = {},
     onAddToQueue: (Episode) -> Unit = {},
+    onTogglePlayed: (Episode) -> Unit = {},
     playingGuid: String? = null,
-    isPlaying: Boolean = false
+    isPlaying: Boolean = false,
+    downloads: Map<String, com.glasscast.app.data.DownloadEntry> = emptyMap()
 ) {
     val haptics = rememberHaptics()
+    var downloadedOnly by rememberSaveable { mutableStateOf(false) }
     val feedsByUrl = remember(feeds) { feeds.associateBy { it.url } }
 
     val all = remember(episodeMap, feeds) {
@@ -78,8 +85,9 @@ fun LatestScreen(
             .take(200)
     }
 
-    val latest = remember(all, hidePlayed) {
-        if (hidePlayed) all.filterNot { it.effectivelyPlayed } else all
+    val latest = remember(all, hidePlayed, downloadedOnly, downloads) {
+        (if (hidePlayed) all.filterNot { it.effectivelyPlayed } else all)
+            .let { list -> if (downloadedOnly) list.filter { downloads[it.guid]?.state == com.glasscast.app.data.DownloadState.DONE } else list }
     }
 
     Column(Modifier.fillMaxSize()) {
@@ -134,6 +142,13 @@ fun LatestScreen(
                     active = hidePlayed,
                     onClick = { onHidePlayedChange(!hidePlayed) }
                 )
+                if (downloads.values.any { it.state == com.glasscast.app.data.DownloadState.DONE }) {
+                    Pill(
+                        label = "Downloaded",
+                        active = downloadedOnly,
+                        onClick = { downloadedOnly = !downloadedOnly }
+                    )
+                }
             }
             Spacer(Modifier.height(14.dp))
         }
@@ -143,6 +158,8 @@ fun LatestScreen(
                 SwipeToQueue(
                     accent = MaterialTheme.colorScheme.primary,
                     onAddToQueue = { onAddToQueue(episode) },
+                    played = episode.effectivelyPlayed,
+                    onTogglePlayed = { onTogglePlayed(episode) },
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 3.dp)
                 ) {
                     LatestRow(
@@ -150,6 +167,7 @@ fun LatestScreen(
                         feed = feedsByUrl[episode.feedUrl],
                         playing = episode.guid == playingGuid,
                         isPlaying = isPlaying,
+                        download = downloads[episode.guid],
                         onClick = { onPlay(episode) },
                         onLongClick = { onEpisodeActions(episode) }
                     )
@@ -166,6 +184,7 @@ private fun LatestRow(
     feed: Feed?,
     playing: Boolean,
     isPlaying: Boolean,
+    download: com.glasscast.app.data.DownloadEntry? = null,
     onClick: () -> Unit,
     onLongClick: () -> Unit
 ) {
@@ -232,6 +251,10 @@ private fun LatestRow(
                         formatCompact(episode.durationMs)
                     }
                 )
+                if (download != null) {
+                    Spacer(Modifier.width(8.dp))
+                    DownloadBadge(download)
+                }
                 if (started) {
                     Spacer(Modifier.padding(horizontal = 6.dp))
                     LinearProgressIndicator(

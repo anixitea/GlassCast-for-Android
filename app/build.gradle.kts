@@ -12,13 +12,17 @@ android {
         applicationId = "com.glasscast.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 10
-        versionName = "1.0"
+        versionCode = 13
+        versionName = "1.2"
     }
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // R8: strips unused code and optimises what's left — inlining,
+            // devirtualisation, removing Compose's debug paths. The biggest
+            // single speed-up for a weak CPU like the Streamer's.
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
         // Debug's convenience without debug's brakes. A debuggable build keeps

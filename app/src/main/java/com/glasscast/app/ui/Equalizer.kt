@@ -25,28 +25,26 @@ import androidx.compose.ui.unit.dp
  */
 @Composable
 fun Equalizer(color: Color, playing: Boolean, modifier: Modifier = Modifier, size: Dp = 16.dp) {
-    val transition = rememberInfiniteTransition(label = "eq")
-
-    @Composable
-    fun bar(period: Int, label: String): Float {
-        val v by transition.animateFloat(
-            initialValue = 0.25f,
-            targetValue = 1f,
-            animationSpec = infiniteRepeatable(tween(period, easing = LinearEasing), RepeatMode.Reverse),
-            label = label
-        )
-        return if (playing) v else 0.45f
-    }
-
-    val a = bar(430, "b1")
-    val b = bar(610, "b2")
-    val c = bar(520, "b3")
+    // Was an infinite transition that kept running while paused — it only
+    // *displayed* a still pose — and fed its values through composition, so
+    // any list showing the current episode recomposed every frame, forever.
+    // Now: a 30fps clock that stops when paused, read only in draw.
+    val clock = rememberFrameClock(running = playing, fps = 30)
 
     Canvas(modifier.size(size)) {
+        val t = clock.value
+        fun level(periodSeconds: Float): Float {
+            if (!playing) return 0.45f
+            // Triangle wave 0.25 → 1 → 0.25, matching the old reversing tween.
+            val x = (t % (periodSeconds * 2f)) / periodSeconds
+            val tri = if (x <= 1f) x else 2f - x
+            return 0.25f + 0.75f * tri
+        }
+        val levels = floatArrayOf(level(0.43f), level(0.61f), level(0.52f))
         val gap = this.size.width * 0.14f
         val barW = (this.size.width - gap * 2) / 3f
-        listOf(a, b, c).forEachIndexed { i, level ->
-            val h = this.size.height * level
+        levels.forEachIndexed { i, value ->
+            val h = this.size.height * value
             drawRoundRect(
                 color = color,
                 topLeft = Offset(i * (barW + gap), this.size.height - h),

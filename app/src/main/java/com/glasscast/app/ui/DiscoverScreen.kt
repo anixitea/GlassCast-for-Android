@@ -1,5 +1,25 @@
 package com.glasscast.app.ui
 
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.outlined.ThumbDown
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -63,8 +83,9 @@ private val SubCategoryHints = mapOf(
     "commentary" to 1489, "politics" to 1489, "daily news" to 1489
 )
 
+/** One Discover shelf. Shared with the TV's Discover screen. */
 @Immutable
-private data class Shelf(val title: String, val subtitle: String, val items: List<DirectoryResult>)
+internal data class Shelf(val title: String, val subtitle: String, val items: List<DirectoryResult>)
 
 /**
  * Discover: recommendations built from what you already follow.
@@ -72,39 +93,36 @@ private data class Shelf(val title: String, val subtitle: String, val items: Lis
  * No account, no listening data leaves the phone. Each show carries its own
  * categories in its feed; those are tallied across the library — a show you've
  * played in the last fortnight counts three times — and the strongest genres
- * become shelves of that genre's current chart, minus anything already
- * subscribed. The top of each shelf feeds the picks carousel.
+ * become shelves of that genre's chart, minus anything already followed. The
+ * head of each shelf feeds the picks carousel.
  *
- * It's deliberately simple. Charts within your genres are a better starting
- * point than a clever model with nothing to learn from, and every shelf says
- * plainly why it's there.
+ * **Refresh** deals a new hand: each round shuffles deeper into every genre's
+ * chart and rotates in a genre you follow a little less. **Long-press** any
+ * card for *Not interested*; it leaves at once and never comes back (Settings
+ * can bring hidden shows back). Results are kept between visits, so returning
+ * to the tab doesn't refetch or flash the skeleton.
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun DiscoverScreen(
     feeds: List<Feed>,
     store: FeedStore,
     bottomInset: Dp,
     previewingUrl: String?,
-    onPreview: (DirectoryResult) -> Unit
+    onPreview: (DirectoryResult) -> Unit,
+    dismissed: Set<String> = emptySet(),
+    onNotInterested: (DirectoryResult) -> Unit = {}
 ) {
-    var shelves by remember { mutableStateOf<List<Shelf>?>(null) }
-
-    /*
-     * Only the card you tapped carries its cover's flight key.
-     *
-     * Every card used to, and the picks carousel is built from the first items
-     * of the shelves below it — so the same show sat on screen twice under one
-     * key. Shared-element keys must be unique among what's visible; with two,
-     * covers were drawn at the other card's size and place as rows scrolled in
-     * and out. That was the large stray artwork floating over the page.
-     *
-     * "slot|feedUrl", so a show that appears in two shelves still flies from
-     * the one you actually touched. Saveable, so the flight home lands there.
-     */
-    var tapped by rememberSaveable { mutableStateOf<String?>(null) }
-    fun keyFor(slot: String, result: DirectoryResult) =
-        if (tapped == slot + "|" + result.feedUrl) coverKey(result.feedUrl) else null
+    var round by rememberSaveable { mutableIntStateOf(0) }
+    val genreKey = feeds.joinToString { it.categories.joinToString() + it.lastPlayedAt / 86_400_000 }
+    val cacheKey = "$genreKey#$round"
+    var shelves by remember { mutableStateOf(DiscoverCache.shelvesFor(cacheKey)) }
     var backfilled by rememberSaveable { mutableStateOf(false) }
+    val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    val haptics = rememberHaptics()
+    // Which card's menu is open, as "slot|feedUrl" — a show can sit in two rows.
+    var menuFor by remember { mutableStateOf<String?>(null) }
 
     // Libraries from before category parsing: fetch those feeds once so their
     // categories exist. Conditional refreshes would never re-parse them.
@@ -115,85 +133,162 @@ fun DiscoverScreen(
         }
     }
 
-    val genreKey = feeds.joinToString { it.categories.joinToString() + it.lastPlayedAt / 86_400_000 }
-    LaunchedEffect(genreKey) {
-        shelves = runCatching { buildShelves(feeds) }.getOrDefault(emptyList())
+    LaunchedEffect(cacheKey) {
+        val cached = DiscoverCache.shelvesFor(cacheKey)
+        if (cached != null) {
+            shelves = cached
+            return@LaunchedEffect
+        }
+        shelves = null
+        val built = runCatching { buildShelves(feeds, round) }.getOrDefault(emptyList())
+        DiscoverCache.put(cacheKey, built)
+        shelves = built
     }
 
-    val loaded = shelves
+    // Hidden shows are filtered at render, so Not interested takes effect at
+    // once without refetching anything.
+    val visible = shelves?.map { shelf -> shelf.copy(items = shelf.items.filterNot { it.feedUrl in dismissed }) }
+        ?.filter { it.items.isNotEmpty() }
+
+    fun longPress(slot: String, result: DirectoryResult) {
+        haptics.play(Haptic.Select)
+        menuFor = slot + "|" + result.feedUrl
+    }
+    val notInterested: (DirectoryResult) -> Unit = { result ->
+        menuFor = null
+        onNotInterested(result)
+    }
+
     LazyColumn(
+        state = listState,
         contentPadding = PaddingValues(bottom = bottomInset + 24.dp),
         modifier = Modifier.fillMaxSize()
     ) {
-        item {
-            Column(
+        item(key = "header") {
+            Row(
                 Modifier
                     .statusBarsPadding()
                     .padding(horizontal = 24.dp)
-                    .padding(top = 44.dp, bottom = 16.dp)
+                    .padding(top = 44.dp, bottom = 16.dp),
+                verticalAlignment = Alignment.Bottom
             ) {
-                Text(
-                    text = "Discover",
-                    style = MaterialTheme.typography.displaySmall,
-                    color = MaterialTheme.colorScheme.onBackground
-                )
-                Text(
-                    text = if (feeds.isEmpty()) "What people are listening to"
-                    else "Picked from the shows you follow",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        text = "Discover",
+                        style = MaterialTheme.typography.displaySmall,
+                        color = MaterialTheme.colorScheme.onBackground
+                    )
+                    Text(
+                        text = if (feeds.isEmpty()) "What people are listening to"
+                        else "Picked from the shows you follow",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Box(
+                    Modifier
+                        .size(44.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                        .clickable(enabled = shelves != null) {
+                            haptics.play(Haptic.Select)
+                            round += 1
+                            scope.launch { listState.animateScrollToItem(0) }
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (shelves == null) {
+                        CircularProgressIndicator(
+                            strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    } else {
+                        Icon(
+                            Icons.Filled.Refresh,
+                            contentDescription = "New recommendations",
+                            tint = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                }
             }
         }
 
-        if (loaded == null) {
-            item { DiscoverSkeleton() }
+        if (visible == null) {
+            item(key = "skeleton") { DiscoverSkeleton() }
         } else {
-            val picks = loaded.flatMap { it.items.take(2) }.distinctBy { it.feedUrl }.take(6)
+            val picks = visible.flatMap { it.items.take(2) }.distinctBy { it.feedUrl }.take(6)
             // The picks aren't repeated in the shelves beneath them.
             val pickUrls = picks.map { it.feedUrl }.toSet()
             if (picks.isNotEmpty()) {
-                item { ShelfTitle("Top picks for you", "The best of your strongest genres") }
-                item {
+                item(key = "picks-title") { ShelfTitle("Top picks for you", "The best of your strongest genres") }
+                item(key = "picks") {
                     LazyRow(
                         contentPadding = PaddingValues(horizontal = 20.dp),
                         horizontalArrangement = Arrangement.spacedBy(14.dp)
                     ) {
                         items(picks, key = { "pick:" + it.feedUrl }) { result ->
-                            PickCard(result, busy = previewingUrl == result.feedUrl, sharedKey = keyFor("pick", result)) {
-                                tapped = "pick|" + result.feedUrl
-                                onPreview(result)
-                            }
+                            PickCard(
+                                result = result,
+                                busy = previewingUrl == result.feedUrl,
+                                menuOpen = menuFor == "pick|" + result.feedUrl,
+                                onClick = { onPreview(result) },
+                                onLongClick = { longPress("pick", result) },
+                                onDismissMenu = { menuFor = null },
+                                onNotInterested = { notInterested(result) }
+                            )
                         }
                     }
                     Spacer(Modifier.height(28.dp))
                 }
             }
 
-            loaded.map { it.copy(items = it.items.filterNot { r -> r.feedUrl in pickUrls }) }
+            visible.map { it.copy(items = it.items.filterNot { r -> r.feedUrl in pickUrls }) }
                 .filter { it.items.isNotEmpty() }
                 .forEach { shelf ->
-                item(key = "title:" + shelf.title) { ShelfTitle(shelf.title, shelf.subtitle) }
-                item(key = "row:" + shelf.title) {
-                    LazyRow(
-                        contentPadding = PaddingValues(horizontal = 20.dp),
-                        horizontalArrangement = Arrangement.spacedBy(14.dp)
-                    ) {
-                        items(shelf.items, key = { shelf.title + it.feedUrl }) { result ->
-                            ShowCard(result, busy = previewingUrl == result.feedUrl, sharedKey = keyFor(shelf.title, result)) {
-                                tapped = shelf.title + "|" + result.feedUrl
-                                onPreview(result)
+                    item(key = "title:" + shelf.title) { ShelfTitle(shelf.title, shelf.subtitle) }
+                    item(key = "row:" + shelf.title) {
+                        LazyRow(
+                            contentPadding = PaddingValues(horizontal = 20.dp),
+                            horizontalArrangement = Arrangement.spacedBy(14.dp)
+                        ) {
+                            items(shelf.items, key = { shelf.title + it.feedUrl }) { result ->
+                                ShowCard(
+                                    result = result,
+                                    busy = previewingUrl == result.feedUrl,
+                                    menuOpen = menuFor == shelf.title + "|" + result.feedUrl,
+                                    onClick = { onPreview(result) },
+                                    onLongClick = { longPress(shelf.title, result) },
+                                    onDismissMenu = { menuFor = null },
+                                    onNotInterested = { notInterested(result) }
+                                )
                             }
                         }
+                        Spacer(Modifier.height(26.dp))
                     }
-                    Spacer(Modifier.height(26.dp))
                 }
-            }
         }
     }
 }
 
-private suspend fun buildShelves(feeds: List<Feed>): List<Shelf> = coroutineScope {
+/**
+ * Built shelves, kept for the life of the process. Leaving the tab disposes
+ * the screen; without this, every return refetched every chart and showed the
+ * skeleton again — at whatever scroll position the list had been left.
+ */
+private object DiscoverCache {
+    private var key: String? = null
+    private var shelves: List<Shelf>? = null
+    fun shelvesFor(k: String): List<Shelf>? = if (k == key) shelves else null
+    fun put(k: String, value: List<Shelf>) {
+        key = k
+        shelves = value
+    }
+}
+
+/** Shelves from the library's genres. Shared by the phone and TV Discover screens. */
+internal suspend fun buildShelves(feeds: List<Feed>, round: Int = 0): List<Shelf> = coroutineScope {
     val now = System.currentTimeMillis()
     val scores = mutableMapOf<Int, Double>()
     feeds.forEach { feed ->
@@ -210,8 +305,17 @@ private suspend fun buildShelves(feeds: List<Feed>): List<Shelf> = coroutineScop
         it.feedUrl.lowercase() !in followed && it.title.lowercase() !in followedTitles
     }
 
-    val topGenres = scores.entries.sortedByDescending { it.value }.take(3).map { it.key }
+    val ranked = scores.entries.sortedByDescending { it.value }.map { it.key }
+    // Round 0 is your three strongest genres. Each refresh rotates in one more
+    // from further down the list, so a refresh brings a genuinely new shelf.
+    val wildcard = if (round > 0 && ranked.size > 3) ranked[3 + (round - 1) % (ranked.size - 3)] else null
+    val topGenres = (ranked.take(3) + listOfNotNull(wildcard))
         .ifEmpty { listOf(1303, 1489) } // nothing known yet: two broad starting points
+
+    // Round 0 is the charts' own order. Later rounds dig deeper — the top 50,
+    // shuffled with the round as the seed — so a refresh isn't the same list.
+    fun List<DirectoryResult>.dealt(seed: Int): List<DirectoryResult> =
+        if (round == 0) take(15) else shuffled(kotlin.random.Random(round * 7919 + seed)).take(15)
 
     val genreShelves = topGenres.map { id ->
         async {
@@ -220,7 +324,8 @@ private suspend fun buildShelves(feeds: List<Feed>): List<Shelf> = coroutineScop
             Shelf(
                 title = "More in $label",
                 subtitle = because?.let { "Because you follow $it" } ?: "Popular right now",
-                items = runCatching { ITunesDirectory.top(id, 30) }.getOrDefault(emptyList()).fresh().take(15)
+                items = runCatching { ITunesDirectory.top(id, if (round == 0) 30 else 50) }
+                    .getOrDefault(emptyList()).fresh().dealt(id)
             )
         }
     }
@@ -228,7 +333,8 @@ private suspend fun buildShelves(feeds: List<Feed>): List<Shelf> = coroutineScop
         Shelf(
             title = "Top podcasts",
             subtitle = "What everyone's listening to",
-            items = runCatching { ITunesDirectory.top(0, 30) }.getOrDefault(emptyList()).fresh().take(15)
+            items = runCatching { ITunesDirectory.top(0, if (round == 0) 30 else 50) }
+                .getOrDefault(emptyList()).fresh().dealt(0)
         )
     }
     (genreShelves.awaitAll() + top.await()).filter { it.items.isNotEmpty() }
@@ -257,84 +363,136 @@ private fun ShelfTitle(title: String, subtitle: String) {
 }
 
 /** The large carousel card: cover full-bleed, name set over a darkening foot. */
+/** The large carousel card: cover full-bleed, name set over a darkening foot. */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun PickCard(result: DirectoryResult, busy: Boolean, sharedKey: String?, onClick: () -> Unit) {
-    Box(
-        Modifier
-            .width(260.dp)
-            .height(330.dp)
-            .clip(RoundedCornerShape(26.dp))
-            .clickable(onClick = onClick)
-    ) {
-        Artwork(
-            url = result.artworkUrl,
-            sizeDp = 330.dp,
-            corner = 0.dp,
-            modifier = Modifier
-                .fillMaxSize()
-                .then(sharedKey?.let { Modifier.sharedArtwork(it, LocalNavScope.current) } ?: Modifier)
-        )
+private fun PickCard(
+    result: DirectoryResult,
+    busy: Boolean,
+    menuOpen: Boolean,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+    onDismissMenu: () -> Unit,
+    onNotInterested: () -> Unit
+) {
+    Box {
         Box(
             Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.verticalGradient(
-                        0.45f to Color.Transparent,
-                        1f to Color.Black.copy(alpha = 0.78f)
+                .width(260.dp)
+                .height(330.dp)
+                .clip(RoundedCornerShape(26.dp))
+                .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+        ) {
+            Artwork(
+                url = result.artworkUrl,
+                sizeDp = 330.dp,
+                corner = 0.dp,
+                modifier = Modifier.fillMaxSize()
+            )
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            0.45f to Color.Transparent,
+                            1f to Color.Black.copy(alpha = 0.78f)
+                        )
                     )
+            )
+            Column(
+                Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(18.dp)
+            ) {
+                Text(
+                    text = result.title,
+                    style = MaterialTheme.typography.titleLarge,
+                    color = Color.White,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
                 )
-        )
+                Text(
+                    text = if (busy) "Opening…" else result.author,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color.White.copy(alpha = 0.78f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+        NotInterestedMenu(menuOpen, onDismissMenu, onNotInterested)
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun ShowCard(
+    result: DirectoryResult,
+    busy: Boolean,
+    menuOpen: Boolean,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+    onDismissMenu: () -> Unit,
+    onNotInterested: () -> Unit
+) {
+    // No rounded clip on the card. It was clipped to a 16dp rounded rectangle
+    // for the ripple, and the bottom-left curve sliced the first letter off
+    // whatever line sat in that corner — "NPR", "New York Times". The cover
+    // rounds its own corners; the card answers a press by squashing slightly.
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val squash by animateFloatAsState(
+        targetValue = if (pressed) 0.96f else 1f,
+        animationSpec = spring(dampingRatio = 0.6f),
+        label = "cardPress"
+    )
+    Box {
         Column(
             Modifier
-                .align(Alignment.BottomStart)
-                .padding(18.dp)
+                .width(148.dp)
+                .graphicsLayer {
+                    scaleX = squash
+                    scaleY = squash
+                }
+                .combinedClickable(
+                    interactionSource = interaction,
+                    indication = null,
+                    onClick = onClick,
+                    onLongClick = onLongClick
+                )
         ) {
+            Artwork(
+                url = result.artworkUrl,
+                sizeDp = 148.dp,
+                corner = 16.dp
+            )
+            Spacer(Modifier.height(8.dp))
             Text(
                 text = result.title,
-                style = MaterialTheme.typography.titleLarge,
-                color = Color.White,
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onBackground,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis
             )
             Text(
                 text = if (busy) "Opening…" else result.author,
                 style = MaterialTheme.typography.bodySmall,
-                color = Color.White.copy(alpha = 0.78f),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
         }
+        NotInterestedMenu(menuOpen, onDismissMenu, onNotInterested)
     }
 }
 
 @Composable
-private fun ShowCard(result: DirectoryResult, busy: Boolean, sharedKey: String?, onClick: () -> Unit) {
-    Column(
-        Modifier
-            .width(148.dp)
-            .clip(RoundedCornerShape(16.dp))
-            .clickable(onClick = onClick)
-    ) {
-        Artwork(
-            url = result.artworkUrl,
-            sizeDp = 148.dp,
-            corner = 16.dp,
-            modifier = sharedKey?.let { Modifier.sharedArtwork(it, LocalNavScope.current) } ?: Modifier
-        )
-        Spacer(Modifier.height(8.dp))
-        Text(
-            text = result.title,
-            style = MaterialTheme.typography.titleSmall,
-            color = MaterialTheme.colorScheme.onBackground,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis
-        )
-        Text(
-            text = if (busy) "Opening…" else result.author,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
+private fun NotInterestedMenu(open: Boolean, onDismiss: () -> Unit, onNotInterested: () -> Unit) {
+    DropdownMenu(expanded = open, onDismissRequest = onDismiss) {
+        DropdownMenuItem(
+            text = { Text("Not interested") },
+            leadingIcon = { Icon(Icons.Outlined.ThumbDown, contentDescription = null) },
+            onClick = onNotInterested
         )
     }
 }

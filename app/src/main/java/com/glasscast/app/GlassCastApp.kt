@@ -24,6 +24,10 @@ class GlassCastApp : Application() {
         private set
     lateinit var player: PlayerConnection
         private set
+    lateinit var updates: com.glasscast.app.update.AppUpdater
+        private set
+    lateinit var downloads: com.glasscast.app.data.Downloads
+        private set
 
     /** Set when the app is opened by a shared or opened OPML file. */
     val pendingOpml = MutableStateFlow<android.net.Uri?>(null)
@@ -37,7 +41,9 @@ class GlassCastApp : Application() {
         imageStore = ImageStore(this)
         settings = Settings(this)
         queueStore = QueueStore(this)
-        player = PlayerConnection(this, feedStore, queueStore)
+        downloads = com.glasscast.app.data.Downloads(this)
+        player = PlayerConnection(this, feedStore, queueStore, downloads)
+        updates = com.glasscast.app.update.AppUpdater(this)
         initCast()
 
         // The channel exists from the start so it appears in system settings

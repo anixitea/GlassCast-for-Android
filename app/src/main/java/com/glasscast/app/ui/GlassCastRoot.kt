@@ -2,6 +2,18 @@ package com.glasscast.app.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.material.icons.outlined.DownloadForOffline
+import androidx.compose.material.icons.outlined.ThumbDown
+import androidx.compose.animation.core.Spring
+import androidx.compose.foundation.clickable
+import kotlin.math.roundToInt
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.material.icons.filled.RemoveDone
+import androidx.compose.material.icons.filled.Done
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.animation.animateColorAsState
@@ -67,7 +79,7 @@ import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeSource
 import kotlinx.coroutines.launch
 
-private enum class Tab { LIBRARY, LATEST, DISCOVER, SEARCH }
+private enum class Tab { LIBRARY, LATEST, DOWNLOADS, DISCOVER, SEARCH }
 
 /**
  * Where the content area is. [tab] orders the horizontal slide between tabs;
@@ -83,8 +95,9 @@ private sealed interface Dest {
         override val tab = 0; override val depth = 1; override val key = "show:$url"
     }
     data object Latest : Dest { override val tab = 1; override val depth = 0; override val key = "latest" }
-    data object Discover : Dest { override val tab = 2; override val depth = 0; override val key = "discover" }
-    data object Search : Dest { override val tab = 3; override val depth = 0; override val key = "search" }
+    data object Downloads : Dest { override val tab = 2; override val depth = 0; override val key = "downloads" }
+    data object Discover : Dest { override val tab = 3; override val depth = 0; override val key = "discover" }
+    data object Search : Dest { override val tab = 4; override val depth = 0; override val key = "search" }
     /** A show you don't follow yet, opened from [tab] — Discover or Search. */
     data class Preview(val fetch: com.glasscast.app.data.FeedFetch, override val tab: Int) : Dest {
         override val depth = 1; override val key = "preview:${fetch.feed.url}"
@@ -129,6 +142,9 @@ fun GlassCastRoot(
     val hidePlayed by settings.hidePlayedInLatest.collectAsStateWithLifecycle()
     val hidePlayedInShows by settings.hidePlayedInShows.collectAsStateWithLifecycle()
     val shakeToRestart by settings.shakeToRestart.collectAsStateWithLifecycle()
+    val skipSilence by settings.skipSilence.collectAsStateWithLifecycle()
+    val discoverHidden by settings.discoverHidden.collectAsStateWithLifecycle()
+    val voiceBoost by settings.voiceBoost.collectAsStateWithLifecycle()
 
     // The service reads this off SleepTimer rather than taking a dependency on
     // Settings, so it has to be mirrored across whenever it changes.
@@ -157,6 +173,15 @@ fun GlassCastRoot(
      * on. Denying leaves the setting on and simply silent; Settings says so.
      */
     val context = androidx.compose.ui.platform.LocalContext.current
+    val updater = (context.applicationContext as com.glasscast.app.GlassCastApp).updates
+    val downloadStore = (context.applicationContext as com.glasscast.app.GlassCastApp).downloads
+    val downloads by downloadStore.entries.collectAsStateWithLifecycle()
+    val updateBanner by updater.banner.collectAsStateWithLifecycle()
+    var updateSheetOpen by remember { mutableStateOf(false) }
+    // A quiet check once the splash is gone — at most twice a day.
+    LaunchedEffect(showSplash) {
+        if (!showSplash) updater.checkIfDue()
+    }
     val notificationPermission = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
     ) { }
@@ -193,6 +218,17 @@ fun GlassCastRoot(
     // One confirmation pill for the whole app; every queueing path goes
     // through queueEpisode so none of them can forget to answer.
     val toast = remember { ToastState() }
+    // Right-swipe: flip played, and say which way it went.
+    fun togglePlayed(episode: com.glasscast.app.data.Episode) {
+        val nowPlayed = !episode.effectivelyPlayed
+        feedStore.setPlayed(episode, nowPlayed)
+        toast.show(
+            text = if (nowPlayed) "Marked as played" else "Marked as unplayed",
+            artUrl = episode.imageUrl.ifBlank { feedStore.feedFor(episode)?.imageUrl.orEmpty() },
+            icon = if (nowPlayed) Icons.Filled.Done else Icons.Filled.RemoveDone
+        )
+    }
+
     fun queueEpisode(episode: com.glasscast.app.data.Episode, next: Boolean) {
         val feed = feedStore.feedFor(episode)
         if (next) player.playNext(episode, feed) else player.addToQueue(episode, feed)
@@ -210,19 +246,48 @@ fun GlassCastRoot(
      *
      * The 8px dead band keeps a resting finger's jitter from flapping it.
      */
+    // Stays as it is across pages: bubble on Library stays a bubble on
+    // Discover. Only scrolling changes it (it used to reset to the card on
+    // every page change).
     var chromeCollapsed by remember { mutableStateOf(false) }
-    LaunchedEffect(tab, selectedFeedUrl) { chromeCollapsed = false }
-    val collapseOnScroll = remember {
+    /*
+     * Collapse on a deliberate scroll, not a twitch. This flipped on any 8px of
+     * movement, so nudging a short list back and forth swapped card and bubble
+     * again and again — a full transition each time. Now it takes ~48dp of
+     * travel in one direction, and changing direction starts the count over.
+     */
+    val collapseThreshold = with(androidx.compose.ui.platform.LocalDensity.current) { 48.dp.toPx() }
+    val collapseOnScroll = remember(collapseThreshold) {
         object : NestedScrollConnection {
+            var travel = 0f
             override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
-                when {
-                    available.y < -8f -> chromeCollapsed = true
-                    available.y > 8f -> chromeCollapsed = false
+                val dy = available.y
+                if ((dy < 0f && travel > 0f) || (dy > 0f && travel < 0f)) travel = 0f
+                travel += dy
+                if (travel < -collapseThreshold) {
+                    chromeCollapsed = true
+                    travel = 0f
+                } else if (travel > collapseThreshold) {
+                    chromeCollapsed = false
+                    travel = 0f
                 }
                 return Offset.Zero
             }
         }
     }
+    // Card ⇄ bubble as one animated value, read only while placing and drawing
+    // (see MiniPlayer). The bar's measured bounds place the bubble on it.
+    val chromeIsCollapsed = chromeCollapsed && currentEpisode != null
+    // Critically damped: it must never overshoot. An underdamped spring dipped
+    // just below 0 on the way back, the bubble slot below read that as a
+    // negative width, and Compose crashed on it.
+    val collapseAnim = animateFloatAsState(
+        targetValue = if (chromeIsCollapsed) 1f else 0f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 380f),
+        label = "chromeCollapse"
+    )
+    var barBounds by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
+
     var settingsOpen by remember { mutableStateOf(false) }
     var actionEpisode by remember { mutableStateOf<Episode?>(null) }
 
@@ -282,6 +347,7 @@ fun GlassCastRoot(
                             tab == Tab.LATEST -> Dest.Latest
                             preview != null && tab == previewTab ->
                                 Dest.Preview(preview!!, previewTab.ordinal)
+                            tab == Tab.DOWNLOADS -> Dest.Downloads
                             tab == Tab.DISCOVER -> Dest.Discover
                             else -> Dest.Search
                         }
@@ -355,9 +421,11 @@ fun GlassCastRoot(
                                 onEpisodeActions = { actionEpisode = it },
                                 onPlayNext = { queueEpisode(it, next = true) },
                                 onAddToQueue = { queueEpisode(it, next = false) },
+                                onTogglePlayed = { togglePlayed(it) },
                                 playingGuid = currentEpisode?.guid,
                                 isPlaying = isPlaying,
-                                hazeState = hazeState
+                                hazeState = hazeState,
+                                downloads = downloads
                             ) }
 
                             Dest.Library -> SubscriptionsScreen(
@@ -386,8 +454,10 @@ fun GlassCastRoot(
                                 onEpisodeActions = { actionEpisode = it },
                                 onPlayNext = { queueEpisode(it, next = true) },
                                 onAddToQueue = { queueEpisode(it, next = false) },
+                                onTogglePlayed = { togglePlayed(it) },
                                 playingGuid = currentEpisode?.guid,
-                                isPlaying = isPlaying
+                                isPlaying = isPlaying,
+                                downloads = downloads
                             )
 
                             is Dest.Preview -> {
@@ -427,11 +497,33 @@ fun GlassCastRoot(
                                 )
                             }
 
+                            Dest.Downloads -> DownloadsScreen(
+                                downloads = downloads,
+                                episodeMap = episodeMap,
+                                feeds = feeds,
+                                bottomInset = bottomInset,
+                                playingGuid = currentEpisode?.guid,
+                                onPlay = { episode ->
+                                    player.play(episode, feedStore.feedFor(episode))
+                                    playerOpen = true
+                                },
+                                onRemove = { guid -> downloadStore.remove(guid) }
+                            )
+
                             Dest.Discover -> DiscoverScreen(
                                 feeds = feeds,
                                 store = feedStore,
                                 bottomInset = bottomInset,
                                 previewingUrl = previewingUrl,
+                                dismissed = discoverHidden,
+                                onNotInterested = { result ->
+                                    settings.hideFromDiscover(result.feedUrl)
+                                    toast.show(
+                                        text = "You won't see this in Discover again",
+                                        artUrl = result.artworkUrl,
+                                        icon = Icons.Outlined.ThumbDown
+                                    )
+                                },
                                 onPreview = { result ->
                                     previewingUrl = result.feedUrl
                                     scope.launch {
@@ -495,26 +587,14 @@ fun GlassCastRoot(
                         ) {
                             val collapsed = chromeCollapsed && currentEpisode != null
 
-                            // The card folds down toward its bottom-right, which
-                            // is where the bubble appears — so the two read as
-                            // one object changing shape rather than a swap.
+                            // One element, card ⇄ bubble (see MiniPlayer). It only
+                            // fades for the player opening and closing; the
+                            // collapse itself is its own morph, not a transition.
                             currentEpisode?.let { episode ->
                                 AnimatedVisibility(
-                                    visible = !collapsed && !playerOpen,
-                                    enter = expandVertically(
-                                        expandFrom = Alignment.Bottom,
-                                        animationSpec = spring(dampingRatio = 0.8f, stiffness = 500f)
-                                    ) + fadeIn() + scaleIn(
-                                        initialScale = 0.7f,
-                                        transformOrigin = TransformOrigin(1f, 1f)
-                                    ),
-                                    exit = shrinkVertically(
-                                        shrinkTowards = Alignment.Bottom,
-                                        animationSpec = spring(dampingRatio = 0.9f, stiffness = 600f)
-                                    ) + fadeOut() + scaleOut(
-                                        targetScale = 0.6f,
-                                        transformOrigin = TransformOrigin(1f, 1f)
-                                    )
+                                    visible = !playerOpen,
+                                    enter = fadeIn(tween(180)),
+                                    exit = fadeOut(tween(140))
                                 ) {
                                     CompositionLocalProvider(LocalPlayerScope provides this) {
                                     WithPosition(player) { positionMs ->
@@ -524,9 +604,10 @@ fun GlassCastRoot(
                                         isPlaying = isPlaying,
                                         positionMs = positionMs,
                                         durationMs = durationMs,
+                                        collapse = collapseAnim,
+                                        collapsed = collapsed,
+                                        barBounds = { barBounds },
                                         onPlayPause = player::togglePlayPause,
-                                        onSkipForward = { player.seekBy(30_000) },
-                                        hazeState = hazeState,
                                         onOpen = { playerOpen = true },
                                         modifier = Modifier.fillMaxWidth()
                                     )
@@ -543,10 +624,18 @@ fun GlassCastRoot(
                             ) {
                                 GlassTabBar(
                                 compact = collapsed,
-                                modifier = Modifier.weight(1f),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .onGloballyPositioned { coordinates ->
+                                        val bounds = coordinates.boundsInRoot()
+                                        if (bounds.top != barBounds?.top || bounds.height != barBounds?.height) {
+                                            barBounds = bounds
+                                        }
+                                    },
                                 tabs = listOf(
                                     GlassTab("Library", Icons.Outlined.GridView),
                                     GlassTab("Latest", Icons.Outlined.Inbox),
+                                    GlassTab("Downloads", Icons.Outlined.DownloadForOffline),
                                     GlassTab("Discover", Icons.Outlined.Explore),
                                     GlassTab("Search", Icons.Filled.Search)
                                 ),
@@ -560,7 +649,8 @@ fun GlassCastRoot(
                                             tab = Tab.LIBRARY
                                         }
                                         1 -> tab = Tab.LATEST
-                                        2 -> {
+                                        2 -> tab = Tab.DOWNLOADS
+                                        3 -> {
                                             // Re-tapping Discover while in a show
                                             // it opened goes back to the shelves.
                                             if (tab == Tab.DISCOVER && previewTab == Tab.DISCOVER) preview = null
@@ -574,41 +664,39 @@ fun GlassCastRoot(
                                 }
                             )
 
-                                // Grows in from nothing as the bar narrows to
-                                // make room: expandHorizontally is what animates
-                                // the tab bar's width, the scale is the pop.
-                                currentEpisode?.let { episode ->
-                                    AnimatedVisibility(
-                                        visible = collapsed && !playerOpen,
-                                        enter = expandHorizontally(
-                                            expandFrom = Alignment.Start,
-                                            animationSpec = spring(dampingRatio = 0.8f, stiffness = 500f)
-                                        ) + scaleIn(
-                                            initialScale = 0.3f,
-                                            animationSpec = spring(dampingRatio = 0.55f, stiffness = 420f)
-                                        ) + fadeIn(),
-                                        exit = shrinkHorizontally(shrinkTowards = Alignment.Start) +
-                                            scaleOut(targetScale = 0.3f) + fadeOut()
-                                    ) {
-                                        CompositionLocalProvider(LocalPlayerScope provides this) {
-                                        WithPosition(player) { positionMs ->
-                                        MiniBubble(
-                                            episode = episode,
-                                            feed = currentFeed,
-                                            isPlaying = isPlaying,
-                                            progress = if (durationMs > 0) {
-                                                (positionMs.toFloat() / durationMs).coerceIn(0f, 1f)
-                                            } else {
-                                                0f
-                                            },
-                                            accent = MaterialTheme.colorScheme.primary,
-                                            track = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f),
-                                            onOpen = { playerOpen = true },
-                                            modifier = Modifier.padding(end = GlassGutter, bottom = 8.dp)
-                                        )
-                                        }
-                                        }
+                                // The room the bar gives up for the bubble: its width
+                                // follows the collapse, measured each frame — the
+                                // bar narrows with it, nothing recomposes. The
+                                // bubble itself is drawn by MiniPlayer; this is
+                                // what you tap.
+                                if (currentEpisode != null) {
+                                    val slotWidth = with(androidx.compose.ui.platform.LocalDensity.current) {
+                                        (58.dp + GlassGutter).toPx()
                                     }
+                                    val slotHeight = with(androidx.compose.ui.platform.LocalDensity.current) {
+                                        58.dp.roundToPx()
+                                    }
+                                    Box(
+                                        Modifier
+                                            .layout { measurable, _ ->
+                                                val w = (slotWidth * collapseAnim.value.coerceIn(0f, 1f))
+                                                    .roundToInt().coerceAtLeast(0)
+                                                val placeable = measurable.measure(
+                                                    androidx.compose.ui.unit.Constraints.fixed(w, slotHeight)
+                                                )
+                                                layout(w, slotHeight) { placeable.place(0, 0) }
+                                            }
+                                            .then(
+                                                if (collapsed && !playerOpen) {
+                                                    Modifier.clickable(
+                                                        interactionSource = remember { MutableInteractionSource() },
+                                                        indication = null
+                                                    ) { playerOpen = true }
+                                                } else {
+                                                    Modifier
+                                                }
+                                            )
+                                    )
                                 }
                             }
                         }
@@ -617,6 +705,17 @@ fun GlassCastRoot(
                         // about the queue shouldn't cover the thing it's about.
                         ToastHost(
                             state = toast,
+                            modifier = Modifier
+                                .align(Alignment.TopCenter)
+                                .statusBarsPadding()
+                                .padding(top = 10.dp)
+                        )
+
+                        UpdateBanner(
+                            release = updateBanner,
+                            visible = !playerOpen && !updateSheetOpen,
+                            onOpen = { updateSheetOpen = true },
+                            onDismiss = { updater.dismissBanner() },
                             modifier = Modifier
                                 .align(Alignment.TopCenter)
                                 .statusBarsPadding()
@@ -641,6 +740,7 @@ fun GlassCastRoot(
                         currentEpisode?.let { episode ->
                             WithPosition(player) { positionMs ->
                             PlayerScreen(
+                                artKey = MiniArtKey,
                                 episode = episode,
                                 feed = currentFeed,
                                 isPlaying = isPlaying,
@@ -661,6 +761,10 @@ fun GlassCastRoot(
                                 onRestartEpisode = player::restartEpisode,
                                 onSkipNext = player::skipToNext,
                                 shakeToRestart = shakeToRestart,
+                                skipSilence = skipSilence,
+                                voiceBoost = voiceBoost,
+                                onSkipSilenceChange = settings::setSkipSilence,
+                                onVoiceBoostChange = settings::setVoiceBoost,
                                 onShakeToggle = settings::setShakeToRestart,
                                 onCollapse = { playerOpen = false }
                             )
@@ -680,12 +784,24 @@ fun GlassCastRoot(
                 theme = theme,
                 sort = sort,
                 showSort = showSort,
+                appVersion = updater.currentVersion,
+                onCheckUpdates = {
+                    settingsOpen = false
+                    if (updater.state.value !is com.glasscast.app.update.UpdateState.Available) {
+                        updater.check(manual = true)
+                    }
+                    updateSheetOpen = true
+                },
                 onOpenOpml = {
                     settingsOpen = false
                     opmlOpen = true
                 },
                 onDismiss = { settingsOpen = false }
             )
+        }
+
+        if (updateSheetOpen) {
+            UpdateSheet(updater = updater, onDismiss = { updateSheetOpen = false })
         }
 
         // A shared OPML opens this by itself — arriving from AntennaPod's share
@@ -726,6 +842,16 @@ fun GlassCastRoot(
                 onAddToQueue = { queueEpisode(episode, next = false) },
                 onRemoveFromQueue = { player.removeFromQueue(episode.guid) },
                 onTogglePlayed = { feedStore.setPlayed(episode, !episode.effectivelyPlayed) },
+                download = downloads[episode.guid],
+                onDownload = {
+                    downloadStore.start(episode, feedStore.feedFor(episode))
+                    toast.show(
+                        text = "Downloading",
+                        artUrl = episode.imageUrl.ifBlank { feedStore.feedFor(episode)?.imageUrl.orEmpty() },
+                        icon = Icons.Outlined.DownloadForOffline
+                    )
+                },
+                onRemoveDownload = { downloadStore.remove(episode.guid) },
                 onDismiss = { actionEpisode = null }
             )
         }

@@ -1,5 +1,14 @@
 package com.glasscast.app.ui
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -86,9 +95,34 @@ fun GlassTabBar(
     tint: Color = BarFill
 ) {
     val haptics = rememberHaptics()
-    val density = LocalDensity.current
     val shape = RoundedCornerShape(percent = 50)
-    val bounds = remember { mutableStateMapOf<Int, Pair<Float, Float>>() }
+
+    /*
+     * Everything that moves here is driven by two animated numbers, read only
+     * while measuring and drawing — the bar never recomposes to animate.
+     *
+     * It used to: each tab wrote its position into state after layout, the
+     * pill read those positions during composition and chased them with
+     * springs, and each tab's width was its own spring read the same way. Any
+     * change of size ran layout → positions written → recompose → springs
+     * restarted → layout again, frame after frame until it settled. The morph
+     * narrows the bar on every frame of a collapse, which kept that loop going
+     * on every scroll.
+     *
+     * [pill] is the selected tab as a travelling index — 1.4 is forty percent
+     * of the way from tab 1 to tab 2 — so the pill glides between tabs and the
+     * widths hand over between them from the same value. [labelled] is how much
+     * the selected tab's label is showing (0 while compact).
+     */
+    val pill = remember { Animatable(selectedIndex.toFloat()) }
+    LaunchedEffect(selectedIndex) { pill.animateTo(selectedIndex.toFloat(), barSpring()) }
+    val labelled = remember { Animatable(if (compact) 0f else 1f) }
+    LaunchedEffect(compact) { labelled.animateTo(if (compact) 0f else 1f, barSpring()) }
+
+    // Each tab's x and width, written during placement and read while drawing
+    // the pill. Plain floats, not state: nothing should recompose from them.
+    val slots = remember(tabs.size) { FloatArray(tabs.size * 2) }
+    val pillColor = BarContent.copy(alpha = 0.16f)
 
     Box(
         modifier
@@ -97,54 +131,78 @@ fun GlassTabBar(
             .padding(horizontal = GlassGutter)
             .padding(bottom = 8.dp)
             .clip(shape)
-            .hazeEffect(state = hazeState, style = HazeMaterials.thick(tint))
+            // Opaque, as Cider's is. The page's blur shows around and beneath
+            // the bar (BottomGlassFade), not through it — the bar itself is a
+            // solid object in the cover's hue.
+            .background(tint)
             .border(0.5.dp, Color.White.copy(alpha = 0.08f), shape)
             .padding(6.dp)
     ) {
-        // The travelling pill. Only composed once the selected tab has been
-        // measured, so its springs start from the right place instead of
-        // sliding in from the left edge on first launch.
-        bounds[selectedIndex]?.let { target ->
-            val x by animateFloatAsState(target.first, barSpring(), label = "pillX")
-            val w by animateFloatAsState(target.second, barSpring(), label = "pillW")
-            Box(
-                Modifier
-                    .offset { IntOffset(x.roundToInt(), 0) }
-                    .width(with(density) { w.toDp() })
-                    .height(48.dp)
-                    .clip(shape)
-                    .background(BarContent.copy(alpha = 0.16f))
-            )
-        }
-
-        Row(
-            Modifier
+        Layout(
+            content = {
+                tabs.forEachIndexed { index, tab ->
+                    val selected = index == selectedIndex
+                    TabItem(
+                        tab = tab,
+                        selected = selected,
+                        showLabel = selected && !compact,
+                        modifier = Modifier,
+                        onClick = {
+                            if (!selected) haptics.play(Haptic.Select)
+                            onTabSelected(index)
+                        }
+                    )
+                }
+            },
+            modifier = Modifier
                 .fillMaxWidth()
-                .height(48.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            tabs.forEachIndexed { index, tab ->
-                val selected = index == selectedIndex
-                val weight by animateFloatAsState(
-                    targetValue = if (selected && !compact) 2.2f else 1f,
-                    animationSpec = barSpring(),
-                    label = "tabWeight"
-                )
-                TabItem(
-                    tab = tab,
-                    selected = selected,
-                    showLabel = selected && !compact,
-                    modifier = Modifier
-                        .weight(weight)
-                        .fillMaxHeight()
-                        .onGloballyPositioned {
-                            bounds[index] = it.positionInParent().x to it.size.width.toFloat()
-                        },
-                    onClick = {
-                        if (!selected) haptics.play(Haptic.Select)
-                        onTabSelected(index)
+                .height(48.dp)
+                .drawBehind {
+                    val last = (tabs.size - 1).coerceAtLeast(0)
+                    val p = pill.value.coerceIn(0f, last.toFloat())
+                    val i = p.toInt().coerceAtMost(last)
+                    val j = (i + 1).coerceAtMost(last)
+                    val f = p - i
+                    val x = slots[i * 2] + (slots[j * 2] - slots[i * 2]) * f
+                    val w = slots[i * 2 + 1] + (slots[j * 2 + 1] - slots[i * 2 + 1]) * f
+                    drawRoundRect(
+                        color = pillColor,
+                        topLeft = Offset(x, 0f),
+                        size = Size(w, size.height),
+                        cornerRadius = CornerRadius(size.height / 2f)
+                    )
+                }
+        ) { measurables, constraints ->
+            val total = constraints.maxWidth
+            val height = constraints.maxHeight
+            val p = pill.value
+            val lab = labelled.value.coerceIn(0f, 1f)
+            // Every tab gets 1; the tab the pill sits on gets up to 1.2 more,
+            // shared between two tabs while the pill travels.
+            val weights = FloatArray(measurables.size) { index ->
+                1f + 1.2f * lab * (1f - kotlin.math.abs(p - index)).coerceAtLeast(0f)
+            }
+            val sum = weights.sum().coerceAtLeast(0.0001f)
+            var used = 0
+            val placeables = measurables.mapIndexed { index, measurable ->
+                val w = if (index == measurables.lastIndex) {
+                    (total - used).coerceAtLeast(0)
+                } else {
+                    (total * weights[index] / sum).roundToInt().coerceAtLeast(0)
+                }
+                used += w
+                measurable.measure(Constraints.fixed(w, height))
+            }
+            layout(total, height) {
+                var x = 0
+                placeables.forEachIndexed { index, placeable ->
+                    placeable.place(x, 0)
+                    if (index * 2 + 1 < slots.size) {
+                        slots[index * 2] = x.toFloat()
+                        slots[index * 2 + 1] = placeable.width.toFloat()
                     }
-                )
+                    x += placeable.width
+                }
             }
         }
     }
@@ -184,10 +242,12 @@ private fun TabItem(
             tint = tint,
             modifier = Modifier.size(22.dp)
         )
+        // Fade only: the tab's width is animated by the bar's layout, so the
+        // label doesn't need to animate its own size as well.
         AnimatedVisibility(
             visible = showLabel,
-            enter = expandHorizontally(barSpring()) + fadeIn(),
-            exit = shrinkHorizontally(barSpring()) + fadeOut()
+            enter = fadeIn(tween(160, delayMillis = 60)),
+            exit = fadeOut(tween(90))
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Spacer(Modifier.width(8.dp))

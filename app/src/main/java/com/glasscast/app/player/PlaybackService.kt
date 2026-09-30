@@ -9,10 +9,20 @@ import androidx.media3.cast.CastPlayer
 import androidx.media3.cast.DefaultMediaItemConverter
 import androidx.media3.cast.SessionAvailabilityListener
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.audio.SilenceSkippingAudioProcessor
+import androidx.media3.common.audio.SonicAudioProcessor
+import androidx.media3.common.audio.AudioProcessor
+import androidx.media3.exoplayer.audio.TeeAudioProcessor
+import androidx.media3.exoplayer.audio.DefaultAudioSink
+import androidx.media3.exoplayer.audio.AudioSink
+import androidx.media3.exoplayer.DefaultRenderersFactory
+import android.content.Context
 import com.google.android.gms.cast.framework.CastContext
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import com.glasscast.app.GlassCastApp
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import com.glasscast.app.MainActivity
 
 /**
@@ -28,6 +38,11 @@ import com.glasscast.app.MainActivity
  */
 class PlaybackService : MediaSessionService() {
 
+    private val effectsScope = kotlinx.coroutines.CoroutineScope(
+        kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Main.immediate
+    )
+    private var voiceBoost: android.media.audiofx.LoudnessEnhancer? = null
+
     /** Whichever player the session is driving right now: local or Cast. */
     private var player: Player? = null
     private var localPlayer: ExoPlayer? = null
@@ -42,13 +57,56 @@ class PlaybackService : MediaSessionService() {
 
     private companion object {
         const val FADE_MS = 15_000L
+        /**
+         * Skip silence tuned for speech. ExoPlayer's defaults suit music:
+         * any 0.1s under the threshold starts a trim, only 20% of each pause
+         * survives, and the threshold is high enough that soft words and
+         * breaths count as silence — which made conversation sound choppy.
+         * Here only real dead air goes:
+         *  - a pause must last 0.3s before it's touched (gaps between words
+         *    and phrases are left alone);
+         *  - 40% of each pause is kept, capped at 1s;
+         *  - the threshold is halved, so only near-true silence qualifies and
+         *    quiet speakers keep their syllables.
+         */
+        fun speechSilenceSkipper() = SilenceSkippingAudioProcessor(
+            /* minimumSilenceDurationUs = */ 300_000L,
+            /* silenceRetentionRatio = */ 0.4f,
+            /* maxSilenceToKeepDurationUs = */ 1_000_000L,
+            /* minVolumeToKeepPercentageWhenMuting = */ 10,
+            /* silenceThresholdLevel = */ 512.toShort()
+        )
+
+        /** +7dB with limiting: noticeable on quiet voices, never harsh. */
+        const val VOICE_BOOST_MB = 700
         const val SHAKE_GRACE_MS = 120_000L
     }
 
     override fun onCreate() {
         super.onCreate()
 
-        val exo = ExoPlayer.Builder(this)
+        // The audio pipeline with one addition: a pass-through tap that
+        // measures the voice's loudness for the wave (see VoiceLevel). It sits
+        // ahead of skip-silence and speed, which ExoPlayer's chain still adds.
+        val renderers = object : DefaultRenderersFactory(this) {
+            override fun buildAudioSink(
+                context: Context,
+                enableFloatOutput: Boolean,
+                enableAudioTrackPlaybackParams: Boolean
+            ): AudioSink = DefaultAudioSink.Builder(context)
+                .setEnableFloatOutput(enableFloatOutput)
+                .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
+                .setAudioProcessorChain(
+                    DefaultAudioSink.DefaultAudioProcessorChain(
+                        arrayOf<AudioProcessor>(TeeAudioProcessor(VoiceLevel)),
+                        speechSilenceSkipper(),
+                        SonicAudioProcessor()
+                    )
+                )
+                .build()
+        }
+
+        val exo = ExoPlayer.Builder(this, renderers)
             .setAudioAttributes(
                 AudioAttributes.Builder()
                     .setUsage(C.USAGE_MEDIA)
@@ -60,6 +118,38 @@ class PlaybackService : MediaSessionService() {
             .setSeekBackIncrementMs(30_000)
             .setSeekForwardIncrementMs(30_000)
             .build()
+
+        /*
+         * Skip silence and voice boost — the two Pocket Casts features people
+         * miss. Both follow the settings live, so a toggle in the player takes
+         * effect mid-sentence.
+         *
+         * Skip silence is ExoPlayer's own: it drops the gaps between
+         * sentences, and never the speech itself.
+         *
+         * Voice boost is Android's LoudnessEnhancer on the player's audio
+         * session: it raises quiet passages and limits loud ones, so a soft
+         * guest and a loud host land near each other. The session id is fixed
+         * up front so the effect can attach before the first sound plays.
+         */
+        val audioSession = (getSystemService(AUDIO_SERVICE) as android.media.AudioManager)
+            .generateAudioSessionId()
+        exo.setAudioSessionId(audioSession)
+        voiceBoost = runCatching { android.media.audiofx.LoudnessEnhancer(audioSession) }.getOrNull()
+        val settings = (application as GlassCastApp).settings
+        effectsScope.launch {
+            settings.skipSilence.collect { on -> exo.skipSilenceEnabled = on }
+        }
+        effectsScope.launch {
+            settings.voiceBoost.collect { on ->
+                voiceBoost?.let { effect ->
+                    runCatching {
+                        effect.setTargetGain(if (on) VOICE_BOOST_MB else 0)
+                        effect.setEnabled(on)
+                    }
+                }
+            }
+        }
 
         val listener = object : Player.Listener {
             override fun onPlaybackStateChanged(state: Int) {
@@ -139,7 +229,16 @@ class PlaybackService : MediaSessionService() {
         val current = player ?: return
         if (current === target) return
 
-        val items = List(current.mediaItemCount) { current.getMediaItemAt(it) }
+        // A Cast device can't read this phone's storage: downloaded items go
+        // over as their online address instead.
+        val items = List(current.mediaItemCount) { current.getMediaItemAt(it) }.map { item ->
+            val remote = item.mediaMetadata.extras?.getString(PlayerConnection.REMOTE_URL)
+            if (target is CastPlayer && item.localConfiguration?.uri?.scheme == "file" && remote != null) {
+                item.buildUpon().setUri(remote).build()
+            } else {
+                item
+            }
+        }
         val index = current.currentMediaItemIndex.coerceAtLeast(0)
         val position = current.currentPosition.coerceAtLeast(0L)
         val playWhenReady = current.playWhenReady
@@ -186,6 +285,9 @@ class PlaybackService : MediaSessionService() {
     }
 
     override fun onDestroy() {
+        effectsScope.cancel()
+        runCatching { voiceBoost?.release() }
+        voiceBoost = null
         savePosition(force = true)
         // Saves are coalesced a second behind; the service's process may not
         // live that long once it's destroyed, so the final position is written

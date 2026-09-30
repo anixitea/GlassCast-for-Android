@@ -1,5 +1,31 @@
 package com.glasscast.app.tv
 
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.material.icons.automirrored.filled.QueueMusic
+import androidx.compose.material.icons.filled.Bedtime
+import androidx.compose.material.icons.filled.Speed
+import androidx.compose.runtime.produceState
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.FilterQuality
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.ContentScale
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.delay
+import com.glasscast.app.player.SleepTimer
+import com.glasscast.app.ui.LocalImageStore
+import com.glasscast.app.ui.WavySlider
+import com.glasscast.app.ui.chromeButton
+import com.glasscast.app.ui.formatSpeed
+import com.glasscast.app.ui.formatCompact
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusable
@@ -82,36 +108,65 @@ fun TvPlayerScreen(
     isPlaying: Boolean,
     positionMs: Long,
     durationMs: Long,
-    upNextCount: Int,
+    upNext: List<Episode>,
+    feedFor: (Episode) -> Feed?,
+    speed: Float,
     colors: ArtworkColors,
     onPlayPause: () -> Unit,
     onSeekBy: (Long) -> Unit,
     onSeekTo: (Long) -> Unit,
     onSkipNext: () -> Unit,
     onRestart: () -> Unit,
+    onSpeedChange: (Float) -> Unit,
+    onPlayFromUpNext: (Int) -> Unit,
+    onRemoveFromUpNext: (Episode) -> Unit,
     onClose: () -> Unit
 ) {
     val art = episode.imageUrl.ifBlank { feed?.imageUrl.orEmpty() }
     val playFocus = remember { FocusRequester() }
-    val ground = remember(colors) { artworkGround(colors) }
     val progress = if (durationMs > 0) (positionMs.toFloat() / durationMs).coerceIn(0f, 1f) else 0f
 
+    /*
+     * The player sits on the blurred cover, darkened, so its type is white in
+     * every case — and its accent is the phone mini player's: the pale tone of
+     * the cover's colour, with a dark glyph on it. Built once per palette.
+     */
+    val pc = remember(colors) {
+        colors.copy(
+            content = Color.White,
+            contentVariant = Color.White.copy(alpha = 0.68f),
+            accent = colors.chromeButton
+        )
+    }
+
     var showNotes by remember { mutableStateOf(false) }
+    var showUpNext by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { playFocus.requestWhenReady() }
+
+    // Sleep timer state, shared with the phone's timer. The label ticks once a
+    // second, and only while a timer is running.
+    val sleepEndsAt by SleepTimer.endsAtMs.collectAsStateWithLifecycle()
+    val sleepAtEnd by SleepTimer.endOfEpisode.collectAsStateWithLifecycle()
+    val now by produceState(System.currentTimeMillis(), sleepEndsAt) {
+        while (sleepEndsAt != null) {
+            value = System.currentTimeMillis()
+            delay(1_000)
+        }
+    }
+    val sleepLabel = when {
+        sleepAtEnd -> "End of episode"
+        sleepEndsAt != null -> formatTime(((sleepEndsAt ?: now) - now).coerceAtLeast(0L))
+        else -> "Sleep"
+    }
 
     Box(
         Modifier
             .fillMaxSize()
-            .background(ground)
             .onPreviewKeyEvent { event ->
                 if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                 when (event.key) {
-                    // Left and right are NOT intercepted any more. Consuming
-                    // them meant focus could never travel along the control
-                    // row, so the seek buttons were visible, focusable in
-                    // principle, and unreachable in practice. The remote's
-                    // dedicated media keys still seek; the D-pad now moves
-                    // focus, which is what a D-pad is for.
+                    // Left and right are NOT intercepted: the D-pad moves focus
+                    // along the controls. The remote's media keys still seek.
                     Key.MediaPlay, Key.MediaPause, Key.MediaPlayPause -> { onPlayPause(); true }
                     Key.MediaFastForward -> { onSeekBy(30_000); true }
                     Key.MediaRewind -> { onSeekBy(-30_000); true }
@@ -121,15 +176,44 @@ fun TvPlayerScreen(
                 }
             }
     ) {
-        // Notes live behind one button in the corner. Rarely wanted, and on a
-        // ten-foot screen there is room to keep it out of the control row
-        // rather than adding a fifth stop people must pass through.
-        Box(
+        TvCoverBackdrop(url = art, colors = colors)
+
+        /*
+         * Up Next, speed, sleep and notes: the phone's pull-up panel, as a row
+         * of pills at the top right. Up from the transport reaches them; they
+         * stay out of the row you actually use during an episode. Speed and
+         * sleep cycle on each press — on a remote, one button that steps
+         * through the common values beats a list to scroll.
+         */
+        Row(
             Modifier
                 .align(Alignment.TopEnd)
-                .padding(TvSpacing.overscanV)
+                .padding(top = TvSpacing.overscanV, end = TvSpacing.overscanH),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            TvControl(Icons.Outlined.Info, "Episode notes", colors, 52.dp) { showNotes = true }
+            TvPillButton(
+                label = if (upNext.isEmpty()) "Up Next" else "Up Next · ${upNext.size}",
+                icon = Icons.AutoMirrored.Filled.QueueMusic,
+                colors = pc
+            ) { showUpNext = true }
+            TvPillButton(
+                label = formatSpeed(speed),
+                icon = Icons.Filled.Speed,
+                colors = pc
+            ) { onSpeedChange(nextSpeed(speed)) }
+            TvPillButton(
+                label = sleepLabel,
+                icon = Icons.Filled.Bedtime,
+                colors = pc,
+                filled = sleepEndsAt != null || sleepAtEnd
+            ) {
+                cycleSleep(
+                    remainingMs = sleepEndsAt?.let { it - System.currentTimeMillis() },
+                    atEnd = sleepAtEnd
+                )
+            }
+            TvControl(Icons.Outlined.Info, "Episode notes", pc, 52.dp) { showNotes = true }
         }
 
         Row(
@@ -140,15 +224,24 @@ fun TvPlayerScreen(
         ) {
             // Artwork large and left, controls right. On a landscape panel a
             // centred stack wastes two thirds of the width.
-            Artwork(url = art, sizeDp = 360.dp, corner = 20.dp)
+            Box(
+                Modifier.shadow(
+                    elevation = 36.dp,
+                    shape = RoundedCornerShape(22.dp),
+                    ambientColor = Color.Black,
+                    spotColor = Color.Black
+                )
+            ) {
+                Artwork(url = art, sizeDp = 380.dp, corner = 22.dp)
+            }
 
-            Spacer(Modifier.width(44.dp))
+            Spacer(Modifier.width(56.dp))
 
             Column(Modifier.weight(1f)) {
                 Text(
                     text = feed?.title.orEmpty().uppercase(),
                     style = MaterialTheme.typography.labelMedium,
-                    color = colors.contentVariant,
+                    color = pc.contentVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -156,42 +249,40 @@ fun TvPlayerScreen(
                 Text(
                     text = episode.title,
                     style = MaterialTheme.typography.displaySmall,
-                    color = colors.content,
+                    color = pc.content,
                     maxLines = 3,
                     overflow = TextOverflow.Ellipsis
                 )
 
-                Spacer(Modifier.height(34.dp))
+                Spacer(Modifier.height(30.dp))
 
-                // Read-only on TV: the left/right keys are the scrubber, so this
-                // is a progress display and never takes focus. A focusable bar
-                // would be one more stop between the play button and everything
-                // else, for an action the D-pad already does.
-                Box(
-                    Modifier
-                        .fillMaxWidth()
-                        .height(6.dp)
-                        .background(colors.content.copy(alpha = 0.20f), CircleShape)
-                ) {
-                    Box(
-                        Modifier
-                            .fillMaxWidth(progress)
-                            .fillMaxHeight()
-                            .background(colors.accent, CircleShape)
-                    )
-                }
-                Spacer(Modifier.height(10.dp))
+                // The phone's wave: travelling while it plays, flat when
+                // paused. Display-only — the remote's media keys seek, and a
+                // focusable bar would be one more stop in the way.
+                WavySlider(
+                    progress = progress,
+                    playing = isPlaying,
+                    color = pc.accent,
+                    enabled = false,
+                    height = 26.dp,
+                    amplitude = 4.5.dp,
+                    wavelength = 36.dp,
+                    strokeWidth = 5.dp,
+                    showThumb = false,
+                    voice = { com.glasscast.app.player.VoiceLevel.current() }
+                )
+                Spacer(Modifier.height(8.dp))
                 Row(Modifier.fillMaxWidth()) {
                     Text(
                         text = formatTime(positionMs),
                         style = MaterialTheme.typography.bodySmall,
-                        color = colors.contentVariant
+                        color = pc.contentVariant
                     )
                     Spacer(Modifier.weight(1f))
                     Text(
                         text = formatRemaining(positionMs, durationMs),
                         style = MaterialTheme.typography.bodySmall,
-                        color = colors.contentVariant
+                        color = pc.contentVariant
                     )
                 }
 
@@ -199,40 +290,29 @@ fun TvPlayerScreen(
 
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    /*
-                     * Sized to fit, deliberately.
-                     *
-                     * These were 56/64/86 with 14dp gaps — 382dp of controls in
-                     * roughly 350dp of column, so the last button was squeezed
-                     * by the layout and rendered as an oval rather than a
-                     * circle. Modifier.size sets a preferred size, not a
-                     * guaranteed one; when the parent runs out of width the
-                     * child is compressed on that axis alone.
-                     */
+                    // Sized to fit the column: Modifier.size is a preference,
+                    // and a row that overflows squeezes its last button oval.
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    TvControl(Icons.Filled.SkipPrevious, "Restart episode", colors, 52.dp, onRestart)
-                    TvControl(Icons.Filled.Replay30, "Back 30 seconds", colors, 60.dp) {
+                    TvControl(Icons.Filled.SkipPrevious, "Restart episode", pc, 52.dp, onRestart)
+                    TvControl(Icons.Filled.Replay30, "Back 30 seconds", pc, 60.dp) {
                         onSeekBy(-30_000)
                     }
-                    TvControl(
-                        icon = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                        description = if (isPlaying) "Pause" else "Play",
-                        colors = colors,
-                        size = 82.dp,
-                        filled = true,
+                    TvPlayButton(
+                        isPlaying = isPlaying,
+                        colors = pc,
                         modifier = Modifier.focusRequester(playFocus),
                         onClick = onPlayPause
                     )
-                    TvControl(Icons.Filled.Forward30, "Forward 30 seconds", colors, 60.dp) {
+                    TvControl(Icons.Filled.Forward30, "Forward 30 seconds", pc, 60.dp) {
                         onSeekBy(30_000)
                     }
                     TvControl(
                         icon = Icons.Filled.SkipNext,
-                        description = if (upNextCount > 0) "Next episode" else "Nothing queued",
-                        colors = colors,
+                        description = if (upNext.isNotEmpty()) "Next episode" else "Nothing queued",
+                        colors = pc,
                         size = 52.dp,
-                        enabled = upNextCount > 0,
+                        enabled = upNext.isNotEmpty(),
                         onClick = onSkipNext
                     )
                 }
@@ -241,7 +321,7 @@ fun TvPlayerScreen(
                 Text(
                     text = "BACK to close",
                     style = MaterialTheme.typography.bodySmall,
-                    color = colors.contentVariant.copy(alpha = 0.7f)
+                    color = pc.contentVariant.copy(alpha = 0.7f)
                 )
             }
         }
@@ -254,6 +334,241 @@ fun TvPlayerScreen(
             colors = colors,
             onClose = { showNotes = false }
         )
+    }
+
+    if (showUpNext) {
+        TvUpNextPanel(
+            upNext = upNext,
+            feedFor = feedFor,
+            colors = colors,
+            onPlay = { index ->
+                onPlayFromUpNext(index)
+                showUpNext = false
+            },
+            onRemove = onRemoveFromUpNext,
+            onClose = { showUpNext = false }
+        )
+    }
+}
+
+private val TvSpeeds = listOf(0.8f, 1f, 1.2f, 1.5f, 1.8f, 2f)
+
+/** The next speed up, wrapping from the fastest back to the slowest. */
+private fun nextSpeed(current: Float): Float {
+    val index = TvSpeeds.indexOfFirst { kotlin.math.abs(it - current) < 0.01f }
+    return if (index < 0) 1f else TvSpeeds[(index + 1) % TvSpeeds.size]
+}
+
+/**
+ * Off → 15 → 30 → 45 → 60 minutes → end of episode → off. Worked out from the
+ * time remaining rather than remembered, so it also steps correctly from a
+ * timer set on the phone: the next preset past what's left.
+ */
+private fun cycleSleep(remainingMs: Long?, atEnd: Boolean) {
+    when {
+        atEnd -> SleepTimer.cancel()
+        remainingMs == null -> SleepTimer.armMinutes(15)
+        else -> {
+            val remainingMinutes = remainingMs / 60_000f
+            val next = listOf(15, 30, 45, 60).firstOrNull { it > remainingMinutes + 1f }
+            if (next != null) SleepTimer.armMinutes(next) else SleepTimer.armEndOfEpisode()
+        }
+    }
+}
+
+/**
+ * The cover, blurred to fill the screen — the phone's and the Mac's backdrop in
+ * its landscape form, built for the Streamer.
+ *
+ * Not `Modifier.blur`. The wave animates while playing, so this screen redraws
+ * every frame, and a RenderEffect blur over the full panel would be recomputed
+ * by the GPU on each one. Instead the cover is shrunk to 32px and box-blurred
+ * once, off the main thread, and that tiny bitmap is stretched across the
+ * screen with bilinear filtering — which is itself a heavy blur. Per frame it
+ * costs one bitmap draw.
+ */
+@Composable
+private fun TvCoverBackdrop(url: String, colors: ArtworkColors) {
+    val store = LocalImageStore.current
+    var soft by remember(url) { mutableStateOf<android.graphics.Bitmap?>(null) }
+    LaunchedEffect(url) {
+        if (url.isBlank()) return@LaunchedEffect
+        val source = store.peek(url, 96) ?: store.load(url, 96) ?: return@LaunchedEffect
+        soft = withContext(Dispatchers.Default) { com.glasscast.app.ui.softened(source) }
+    }
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(colors.meshBase)
+    ) {
+        soft?.let { bmp ->
+            val image = remember(bmp) { bmp.asImageBitmap() }
+            Image(
+                bitmap = image,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                filterQuality = FilterQuality.Low,   // bilinear: the blur is the point
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.horizontalGradient(
+                        0f to Color.Black.copy(alpha = 0.30f),
+                        0.45f to Color.Black.copy(alpha = 0.48f),
+                        1f to Color.Black.copy(alpha = 0.66f)
+                    )
+                )
+        )
+    }
+}
+
+/**
+ * Play/pause that morphs like the phone's: a circle at rest, a squarer tile
+ * while playing. The focus ring follows the same shape.
+ */
+@Composable
+private fun TvPlayButton(
+    isPlaying: Boolean,
+    colors: ArtworkColors,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    val corner by animateDpAsState(
+        targetValue = if (isPlaying) 26.dp else 41.dp,
+        animationSpec = spring(dampingRatio = 0.55f, stiffness = 380f),
+        label = "tvPlayShape"
+    )
+    val shape = RoundedCornerShape(corner)
+    Box(
+        modifier
+            .size(82.dp)
+            .tvFocusable(shape = shape, accent = colors.accent, scale = 1.12f, onClick = onClick)
+            .background(colors.accent, shape),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            imageVector = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+            contentDescription = if (isPlaying) "Pause" else "Play",
+            tint = colors.onAccent,
+            modifier = Modifier.size(38.dp)
+        )
+    }
+}
+
+/**
+ * Up Next as a panel over the player, like the notes: pick an episode to play
+ * it now, or remove it. Playing one closes the panel — you picked what's next,
+ * so the player is what you want to see.
+ */
+@Composable
+private fun TvUpNextPanel(
+    upNext: List<Episode>,
+    feedFor: (Episode) -> Feed?,
+    colors: ArtworkColors,
+    onPlay: (Int) -> Unit,
+    onRemove: (Episode) -> Unit,
+    onClose: () -> Unit
+) {
+    val firstFocus = remember { FocusRequester() }
+    LaunchedEffect(Unit) { firstFocus.requestWhenReady() }
+    BackHandler { onClose() }
+
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.72f)),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            Modifier
+                .fillMaxWidth(0.62f)
+                .fillMaxHeight(0.78f)
+                .tvPanel(RoundedCornerShape(24.dp), colors.elevated)
+                .padding(36.dp)
+        ) {
+            Text(
+                text = "Up Next",
+                style = MaterialTheme.typography.headlineMedium,
+                color = colors.content
+            )
+            Text(
+                text = when (upNext.size) {
+                    0 -> "Nothing queued"
+                    1 -> "1 episode"
+                    else -> "${upNext.size} episodes"
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.contentVariant
+            )
+            Spacer(Modifier.height(20.dp))
+
+            if (upNext.isEmpty()) {
+                Text(
+                    text = "Queue episodes from any show's page and they'll line up here.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = colors.contentVariant,
+                    modifier = Modifier.weight(1f)
+                )
+            } else {
+                LazyColumn(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    contentPadding = PaddingValues(vertical = 8.dp, horizontal = 6.dp)
+                ) {
+                    itemsIndexed(upNext, key = { _, ep -> ep.guid }) { index, ep ->
+                        val epFeed = feedFor(ep)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Row(
+                                Modifier
+                                    .weight(1f)
+                                    .then(if (index == 0) Modifier.focusRequester(firstFocus) else Modifier)
+                                    .tvFocusable(accent = colors.accent) { onPlay(index) }
+                                    .padding(10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Artwork(
+                                    url = ep.imageUrl.ifBlank { epFeed?.imageUrl.orEmpty() },
+                                    sizeDp = 64.dp,
+                                    corner = 12.dp
+                                )
+                                Spacer(Modifier.width(16.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text(
+                                        text = ep.title,
+                                        style = MaterialTheme.typography.titleSmall,
+                                        color = colors.content,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = epFeed?.title.orEmpty(),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = colors.contentVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                Text(
+                                    text = formatCompact(ep.durationMs),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = colors.contentVariant
+                                )
+                            }
+                            Spacer(Modifier.width(12.dp))
+                            TvControl(Icons.Filled.Close, "Remove from Up Next", colors, 44.dp) { onRemove(ep) }
+                        }
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(20.dp))
+            Box(if (upNext.isEmpty()) Modifier.focusRequester(firstFocus) else Modifier) {
+                TvControl(Icons.Filled.Close, "Close Up Next", colors, 52.dp, onClose)
+            }
+        }
     }
 }
 

@@ -30,6 +30,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -38,6 +39,7 @@ import androidx.compose.ui.unit.dp
 import com.glasscast.app.ui.theme.LocalIsDark
 import dev.chrisbanes.haze.HazeProgressive
 import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.HazeInputScale
 import dev.chrisbanes.haze.hazeEffect
 import dev.chrisbanes.haze.materials.ExperimentalHazeMaterialsApi
 import dev.chrisbanes.haze.materials.HazeMaterials
@@ -69,10 +71,12 @@ fun Modifier.glassPanel(
     shape: RoundedCornerShape,
     container: Color = MaterialTheme.colorScheme.surfaceContainer
 ): Modifier {
+    // Solid now, like Cider's surfaces. A live blur here re-rendered whatever
+    // was behind it on every frame; an opaque tint costs a single fill.
     val edge = glassEdge()
     return this
         .clip(shape)
-        .hazeEffect(state = hazeState, style = HazeMaterials.regular(container))
+        .background(container.copy(alpha = 0.97f))
         .border(0.5.dp, edge, shape)
 }
 
@@ -94,10 +98,16 @@ fun Modifier.glassPanel(
 fun TopGlassFade(
     hazeState: HazeState,
     pageColor: Color,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    /** False while the page is at its top — see below. */
+    active: Boolean = true
 ) {
     val statusInset = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
 
+    // Only while there's something scrolled under it: at the top of a page
+    // the strip would blur the page's own still header, which reads the same
+    // unblurred — so it costs nothing until you scroll.
+    if (!active) return
     Box(
         modifier
             .fillMaxWidth()
@@ -107,8 +117,10 @@ fun TopGlassFade(
                     startIntensity = 0.72f,
                     endIntensity = 0f
                 )
-                // Uniform across the layer, so it would show as texture over the
-                // untouched foot of the ramp — the edge being hidden.
+                // Blur a scaled-down copy. Haze's own benchmarks put the saving
+                // at 5-20% of its cost — small, but free, and the result is
+                // indistinguishable under a blur this soft.
+                inputScale = HazeInputScale.Auto
                 noiseFactor = 0f
             }
     )
@@ -131,6 +143,12 @@ fun BottomGlassFade(
     height: Dp,
     modifier: Modifier = Modifier
 ) {
+    /*
+     * The one blur behind all the bottom chrome. The tab bar used to run its
+     * own blur on top of this one — two passes over the same pixels. Now the
+     * bar is a tinted pane over this blur, which still reads as frosted glass,
+     * and the ramp runs a little stronger at its foot to carry the bar alone.
+     */
     Box(
         modifier
             .fillMaxWidth()
@@ -138,8 +156,9 @@ fun BottomGlassFade(
             .hazeEffect(state = hazeState, style = HazeMaterials.ultraThin(pageColor)) {
                 progressive = HazeProgressive.verticalGradient(
                     startIntensity = 0f,
-                    endIntensity = 0.72f
+                    endIntensity = 0.9f
                 )
+                inputScale = HazeInputScale.Auto
                 noiseFactor = 0f
             }
     )

@@ -94,6 +94,37 @@ class Settings(context: Context) {
         com.glasscast.app.background.BackgroundRefresh.apply(appContext, enabled)
     }
 
+    /** Skip the silences between sentences — ExoPlayer does this natively. */
+    private val _skipSilence = MutableStateFlow(prefs.getBoolean(KEY_SKIP_SILENCE, false))
+    val skipSilence: StateFlow<Boolean> = _skipSilence.asStateFlow()
+    fun setSkipSilence(on: Boolean) {
+        _skipSilence.value = on
+        prefs.edit().putBoolean(KEY_SKIP_SILENCE, on).apply()
+    }
+
+    /** Lift quiet voices without clipping loud ones. */
+    private val _voiceBoost = MutableStateFlow(prefs.getBoolean(KEY_VOICE_BOOST, false))
+    val voiceBoost: StateFlow<Boolean> = _voiceBoost.asStateFlow()
+    fun setVoiceBoost(on: Boolean) {
+        _voiceBoost.value = on
+        prefs.edit().putBoolean(KEY_VOICE_BOOST, on).apply()
+    }
+
+    /** Shows marked "Not interested" in Discover — never suggested again. */
+    private val _discoverHidden = MutableStateFlow(
+        prefs.getStringSet(KEY_DISCOVER_HIDDEN, emptySet())?.toSet() ?: emptySet()
+    )
+    val discoverHidden: StateFlow<Set<String>> = _discoverHidden.asStateFlow()
+    fun hideFromDiscover(feedUrl: String) {
+        val next = _discoverHidden.value + feedUrl
+        _discoverHidden.value = next
+        prefs.edit().putStringSet(KEY_DISCOVER_HIDDEN, next).apply()
+    }
+    fun clearDiscoverHidden() {
+        _discoverHidden.value = emptySet()
+        prefs.edit().remove(KEY_DISCOVER_HIDDEN).apply()
+    }
+
     /** The notification permission is asked for once, not on every launch. */
     val notificationPromptShown: Boolean get() = prefs.getBoolean(KEY_NOTIF_PROMPT, false)
     fun markNotificationPromptShown() {
@@ -139,6 +170,9 @@ class Settings(context: Context) {
         const val KEY_THEME = "theme"
         const val KEY_DYNAMIC = "dynamic_color"
         const val KEY_NEW_EPISODES = "new_episode_notifications"
+        const val KEY_SKIP_SILENCE = "skip_silence"
+        const val KEY_VOICE_BOOST = "voice_boost"
+        const val KEY_DISCOVER_HIDDEN = "discover_hidden"
         const val KEY_NOTIF_PROMPT = "notification_prompt_shown"
         const val KEY_SORT = "sort"
         const val KEY_SHOW_SORT = "show_sort"

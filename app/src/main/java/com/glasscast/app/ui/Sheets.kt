@@ -36,6 +36,9 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.material.icons.outlined.DeleteOutline
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.DownloadForOffline
 import androidx.compose.runtime.Composable
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.LaunchedEffect
@@ -396,7 +399,10 @@ fun EpisodeActionsSheet(
     onAddToQueue: () -> Unit,
     onRemoveFromQueue: () -> Unit,
     onTogglePlayed: () -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    download: com.glasscast.app.data.DownloadEntry? = null,
+    onDownload: () -> Unit = {},
+    onRemoveDownload: () -> Unit = {}
 ) {
     val played = episode.effectivelyPlayed
 
@@ -436,6 +442,14 @@ fun EpisodeActionsSheet(
                 if (played) Icons.Filled.UnfoldMore else Icons.Filled.CheckCircle,
                 if (played) "Mark as unplayed" else "Mark as played"
             ) { onTogglePlayed(); onDismiss() }
+            when (download?.state) {
+                com.glasscast.app.data.DownloadState.DONE ->
+                    ActionRow(Icons.Outlined.DeleteOutline, "Remove download") { onRemoveDownload(); onDismiss() }
+                com.glasscast.app.data.DownloadState.QUEUED, com.glasscast.app.data.DownloadState.RUNNING ->
+                    ActionRow(Icons.Outlined.Close, "Cancel download") { onRemoveDownload(); onDismiss() }
+                else ->
+                    ActionRow(Icons.Outlined.DownloadForOffline, "Download") { onDownload(); onDismiss() }
+            }
         }
     }
 }
@@ -475,6 +489,8 @@ fun SettingsSheet(
     theme: ThemeMode,
     sort: EpisodeSort,
     showSort: ShowSort,
+    appVersion: String = "",
+    onCheckUpdates: () -> Unit = {},
     onOpenOpml: () -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -641,6 +657,62 @@ fun SettingsSheet(
                     label = "Oldest first",
                     active = sort == EpisodeSort.OLDEST_FIRST,
                     onClick = { settings.setSort(EpisodeSort.OLDEST_FIRST) }
+                )
+            }
+
+            val hiddenFromDiscover by settings.discoverHidden.collectAsStateWithLifecycle()
+            if (hiddenFromDiscover.isNotEmpty()) {
+                Spacer(Modifier.height(24.dp))
+                SheetLabel("DISCOVER")
+                Spacer(Modifier.height(6.dp))
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clickable { settings.clearDiscoverHidden() }
+                        .padding(vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "${hiddenFromDiscover.size} show${if (hiddenFromDiscover.size == 1) "" else "s"} marked not interested",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Text(
+                        text = "Show again",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(24.dp))
+            SheetLabel("ABOUT")
+            Spacer(Modifier.height(6.dp))
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onCheckUpdates)
+                    .padding(vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        text = "GlassCast $appVersion",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = "Updates come straight from GitHub, verified before they install.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Spacer(Modifier.width(12.dp))
+                Text(
+                    text = "Check for updates",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary
                 )
             }
         }

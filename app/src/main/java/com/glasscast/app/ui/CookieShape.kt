@@ -33,14 +33,15 @@ fun cookiePath(
     rotation: Float = 0f,
     inset: Float = 0f,
     lobes: Int = CookieLobes,
-    depth: Float = CookieDepth
+    depth: Float = CookieDepth,
+    /** Points around the edge. 216 suits a large cover; a small bubble needs far fewer. */
+    steps: Int = 216
 ): Path {
     val cx = width / 2f
     val cy = height / 2f
     // Shrunk by the depth so the lobes' crests land on the (inset) bounds.
     val base = (min(cx, cy) - inset) / (1f + depth)
     val path = Path()
-    val steps = 216
     for (i in 0..steps) {
         val t = (-PI / 2 + 2 * PI * i / steps).toFloat()
         val r = base * (1f + depth * cos(lobes * (t + rotation)))

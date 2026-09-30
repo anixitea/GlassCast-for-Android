@@ -86,8 +86,9 @@ fun SearchScreen(
     // Only the row you tapped carries the cover's flight key. Results can
     // include shows already in the library, and two elements with one key on
     // screen at once — a tile and a row during a tab slide — make covers fly
-    // between them. Saveable so the flight home lands on the same row.
-    var tappedUrl by rememberSaveable { mutableStateOf<String?>(null) }
+    // between them. Forgotten when the page is left, so there's no return
+    // flight — coming back just fades (see SubscriptionsScreen).
+    var tappedUrl by remember { mutableStateOf<String?>(null) }
     val openPreview: (DirectoryResult) -> Unit = {
         tappedUrl = it.feedUrl
         onPreviewFeed(it)
@@ -362,8 +363,7 @@ private fun DirectoryRow(
         Artwork(
             url = result.artworkUrl,
             sizeDp = 58.dp,
-            corner = 10.dp,
-            modifier = sharedKey?.let { Modifier.sharedArtwork(it, LocalNavScope.current) } ?: Modifier
+            corner = 10.dp
         )
         Spacer(Modifier.size(14.dp))
         Column(Modifier.weight(1f)) {

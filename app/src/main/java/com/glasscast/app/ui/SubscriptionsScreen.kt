@@ -36,7 +36,14 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.shrinkHorizontally
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
@@ -108,12 +115,17 @@ fun SubscriptionsScreen(
     }
 
     // Large title collapses into the bar. Fully faded by ~72dp of scroll.
-    val collapse by remember {
+    // Kept as a State and read in layers, not in composition: read directly,
+    // it rebuilt this whole screen on every frame of the first 190px of scroll.
+    val collapse = remember {
         androidx.compose.runtime.derivedStateOf {
             if (gridState.firstVisibleItemIndex > 0) 1f
             else (gridState.firstVisibleItemScrollOffset / 190f).coerceIn(0f, 1f)
         }
     }
+    // The search field has scrolled away: its icon joins the pill. A boolean,
+    // so this recomposes once at the crossing, not per frame.
+    val searchInBar by remember { androidx.compose.runtime.derivedStateOf { collapse.value > 0.6f } }
 
     PullToRefreshBox(
         isRefreshing = refreshing,
@@ -166,7 +178,7 @@ fun SubscriptionsScreen(
                 }
             }
 
-            items(feeds, key = { it.url }) { feed ->
+            items(feeds, key = { it.url }, contentType = { "show" }) { feed ->
                 ShowTile(
                     feed = feed,
                     onClick = { onOpenFeed(feed) },
@@ -178,40 +190,70 @@ fun SubscriptionsScreen(
         // Glass under the bar instead of a solid background that switches on at
         // some scroll offset. The ramp is always there; what changes is only
         // whether there is anything behind it to blur.
+        val scrolled by remember {
+            derivedStateOf { gridState.firstVisibleItemIndex > 0 || gridState.firstVisibleItemScrollOffset > 0 }
+        }
         TopGlassFade(
             hazeState = hazeState,
             pageColor = MaterialTheme.colorScheme.background,
-            modifier = Modifier.align(Alignment.TopCenter)
+            modifier = Modifier.align(Alignment.TopCenter),
+            active = scrolled
         )
 
+        /*
+         * The bar, as Cider draws it: controls sit in pills rather than
+         * straight on the content, so they read over any cover scrolling
+         * beneath. Left, the title pill — Cider's "Home" — which arrives only
+         * once the big "Podcasts" heading has scrolled away (the two used to
+         * overlap mid-scroll). Right, the icons, always in their pill.
+         */
+        val pillColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.94f)
         Row(
             Modifier
                 .fillMaxWidth()
                 .statusBarsPadding()
-                .height(56.dp)
-                .padding(horizontal = 16.dp),
+                .height(60.dp)
+                .padding(horizontal = 14.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                text = "Podcasts",
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onBackground,
-                modifier = Modifier
-                    .weight(1f)
-                    .alpha(collapse)
-            )
-            // The morph, approximated: as the full pill leaves, its collapsed
-            // form arrives in the bar. One affordance, two sizes.
-            Box(Modifier.alpha(collapse)) {
-                BarButton(Icons.Filled.Search, "Search library", onClick = onSearch)
+            Box(
+                Modifier
+                    .graphicsLayer {
+                        val shown = ((collapse.value - 0.55f) / 0.45f).coerceIn(0f, 1f)
+                        alpha = shown
+                        translationY = (1f - shown) * 8.dp.toPx()
+                    }
+                    .clip(RoundedCornerShape(percent = 50))
+                    .background(pillColor)
+                    .padding(horizontal = 20.dp, vertical = 11.dp)
+            ) {
+                Text(
+                    text = "Podcasts",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
             }
-            BarButton(Icons.Filled.Refresh, "Refresh all", spinning = refreshing) {
-                scope.launch { store.refreshAll() }
+            Spacer(Modifier.weight(1f))
+            Row(
+                Modifier
+                    .clip(RoundedCornerShape(percent = 50))
+                    .background(pillColor)
+                    .padding(horizontal = 4.dp, vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                AnimatedVisibility(
+                    visible = searchInBar,
+                    enter = expandHorizontally() + fadeIn(),
+                    exit = shrinkHorizontally() + fadeOut()
+                ) {
+                    BarButton(Icons.Filled.Search, "Search library", onClick = onSearch)
+                }
+                BarButton(Icons.Filled.Refresh, "Refresh all", spinning = refreshing) {
+                    scope.launch { store.refreshAll() }
+                }
+                BarButton(Icons.Filled.Add, "Add by RSS") { showAdd = true }
+                BarButton(Icons.Filled.Tune, "Settings", onClick = onOpenSettings)
             }
-            // Back to a plus. The RSS mark sits a few millimetres below the
-            // status bar's wifi glyph and at that size they are the same shape.
-            BarButton(Icons.Filled.Add, "Add by RSS") { showAdd = true }
-            BarButton(Icons.Filled.Tune, "Settings", onClick = onOpenSettings)
         }
     }
 
@@ -299,9 +341,7 @@ private fun ShowTile(
             url = feed.imageUrl,
             sizeDp = 180.dp,
             corner = 12.dp,
-            fill = true,
-            // Keyed by feed: this tile's cover flies into the show page header.
-            modifier = Modifier.sharedArtwork(coverKey(feed.url), LocalNavScope.current)
+            fill = true
         )
         Spacer(Modifier.height(8.dp))
         Text(

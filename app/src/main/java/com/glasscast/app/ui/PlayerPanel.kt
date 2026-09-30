@@ -9,6 +9,8 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -173,7 +175,7 @@ fun PlayerPanel(
                         Text(
                             text = when (shown) {
                                 PanelTab.INFO -> "Episode info"
-                                PanelTab.SPEED -> "Playback speed"
+                                PanelTab.SPEED -> "Speed & sound"
                                 PanelTab.TIMER -> "Sleep timer"
                                 else -> "Playing Next"
                             },
@@ -438,10 +440,20 @@ private val SpeedPresets = listOf(0.8f, 1f, 1.2f, 1.5f, 1.8f, 2f)
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun SpeedPanel(speed: Float, accent: Color, onSpeedChange: (Float) -> Unit, bottomInset: Dp) {
+fun SpeedPanel(
+    speed: Float,
+    accent: Color,
+    onSpeedChange: (Float) -> Unit,
+    bottomInset: Dp,
+    skipSilence: Boolean = false,
+    voiceBoost: Boolean = false,
+    onSkipSilence: (Boolean) -> Unit = {},
+    onVoiceBoost: (Boolean) -> Unit = {}
+) {
     Column(
         Modifier
             .fillMaxSize()
+            .verticalScroll(rememberScrollState())
             .padding(horizontal = 26.dp)
             .padding(top = 12.dp, bottom = bottomInset + 16.dp)
     ) {
@@ -465,23 +477,94 @@ fun SpeedPanel(speed: Float, accent: Color, onSpeedChange: (Float) -> Unit, bott
             )
         )
         Spacer(Modifier.height(14.dp))
-        FlowRow(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+        // One row, six equal chips — a lone 2× wrapping onto a second line
+        // looked like an afterthought. Equal widths fill the row exactly.
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             SpeedPresets.forEach { preset ->
-                PanelChip(
-                    label = formatSpeed(preset),
-                    active = kotlin.math.abs(preset - speed) < 0.001f,
-                    accent = accent
-                ) { onSpeedChange(preset) }
+                val active = kotlin.math.abs(preset - speed) < 0.001f
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .height(44.dp)
+                        .clip(RoundedCornerShape(percent = 50))
+                        .background(if (active) accent else Ink.copy(alpha = 0.10f))
+                        .clickable { onSpeedChange(preset) },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = formatSpeed(preset),
+                        style = MaterialTheme.typography.titleSmall,
+                        color = if (active && accent.luminance() > 0.62f) Color(0xFF101014) else Ink,
+                        maxLines = 1
+                    )
+                }
             }
         }
-        Spacer(Modifier.height(18.dp))
+        Spacer(Modifier.height(8.dp))
         Text(
             text = "Voices keep their natural pitch at every speed.",
             style = MaterialTheme.typography.bodySmall,
             color = InkDim
+        )
+
+        Spacer(Modifier.height(22.dp))
+        Text(
+            text = "SOUND",
+            style = MaterialTheme.typography.labelMedium,
+            color = InkDim
+        )
+        Spacer(Modifier.height(4.dp))
+        PanelSwitchRow(
+            title = "Skip silence",
+            detail = "Trims the pauses between sentences, never the speech.",
+            checked = skipSilence,
+            accent = accent,
+            onChange = onSkipSilence
+        )
+        PanelSwitchRow(
+            title = "Boost voices",
+            detail = "Lifts quiet speakers so a soft guest and a loud host sit level.",
+            checked = voiceBoost,
+            accent = accent,
+            onChange = onVoiceBoost
+        )
+    }
+}
+
+@Composable
+private fun PanelSwitchRow(
+    title: String,
+    detail: String,
+    checked: Boolean,
+    accent: Color,
+    onChange: (Boolean) -> Unit
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .clickable { onChange(!checked) }
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.titleSmall, color = Ink)
+            Text(detail, style = MaterialTheme.typography.bodySmall, color = InkDim)
+        }
+        Spacer(Modifier.width(12.dp))
+        Switch(
+            checked = checked,
+            onCheckedChange = onChange,
+            colors = SwitchDefaults.colors(
+                checkedTrackColor = accent,
+                checkedThumbColor = Color(0xFF16141A),
+                uncheckedTrackColor = Ink.copy(alpha = 0.14f),
+                uncheckedThumbColor = InkDim,
+                uncheckedBorderColor = Color.Transparent
+            )
         )
     }
 }

@@ -42,7 +42,8 @@ import kotlinx.coroutines.launch
 class PlayerConnection(
     private val context: Context,
     private val store: FeedStore,
-    private val queueStore: QueueStore
+    private val queueStore: QueueStore,
+    private val downloads: com.glasscast.app.data.Downloads? = null
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var controller: MediaController? = null
@@ -329,11 +330,16 @@ class PlayerConnection(
             .setIsBrowsable(false)
             .setIsPlayable(true)
             .apply { if (art.isNotBlank()) setArtworkUri(Uri.parse(art)) }
+            // The online address travels with every item, so a Cast hand-off
+            // can swap a downloaded file back to something the TV can reach.
+            .setExtras(android.os.Bundle().apply { putString(REMOTE_URL, episode.audioUrl) })
             .build()
 
+        // Downloaded: play the file. Otherwise, stream.
+        val local = downloads?.fileFor(episode.guid)
         return MediaItem.Builder()
             .setMediaId(episode.guid)
-            .setUri(episode.audioUrl)
+            .setUri(local?.let { Uri.fromFile(it) } ?: Uri.parse(episode.audioUrl))
             // Required for Cast: the receiver is told what it's playing rather
             // than sniffing it, and the Cast converter refuses items without a
             // type. ExoPlayer only treats it as a hint, and still sniffs.
@@ -394,5 +400,10 @@ class PlayerConnection(
         val clamped = speed.coerceIn(0.5f, 3f)
         controller?.setPlaybackSpeed(clamped)
         _speed.value = clamped
+    }
+
+    companion object {
+        /** MediaMetadata extra: the episode's online address. */
+        const val REMOTE_URL = "glasscast.remoteUrl"
     }
 }

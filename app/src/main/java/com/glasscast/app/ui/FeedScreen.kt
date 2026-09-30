@@ -36,6 +36,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -78,8 +79,10 @@ fun FeedScreen(
     onEpisodeActions: (Episode) -> Unit,
     onPlayNext: (Episode) -> Unit = {},
     onAddToQueue: (Episode) -> Unit = {},
+    onTogglePlayed: (Episode) -> Unit = {},
     playingGuid: String? = null,
     isPlaying: Boolean = false,
+    downloads: Map<String, com.glasscast.app.data.DownloadEntry> = emptyMap(),
     hazeState: HazeState
 ) {
     val scope = rememberCoroutineScope()
@@ -94,8 +97,12 @@ fun FeedScreen(
 
     // Only for shows you actually subscribe to — a preview has no played state
     // worth filtering, and hiding rows there would just look like a short feed.
-    val ordered = remember(sorted, hidePlayed, subscribed) {
-        if (hidePlayed && subscribed) sorted.filterNot { it.effectivelyPlayed } else sorted
+    // "Downloaded" narrows the list to what's on the phone — for a flight, or
+    // a commute underground. Not saved: it's a moment's filter, not a setting.
+    var downloadedOnly by rememberSaveable { mutableStateOf(false) }
+    val ordered = remember(sorted, hidePlayed, subscribed, downloadedOnly, downloads) {
+        (if (hidePlayed && subscribed) sorted.filterNot { it.effectivelyPlayed } else sorted)
+            .let { list -> if (downloadedOnly) list.filter { downloads[it.guid]?.state == com.glasscast.app.data.DownloadState.DONE } else list }
     }
 
     val (washColors, _) = rememberArtworkColors(feed.imageUrl)
@@ -146,14 +153,11 @@ fun FeedScreen(
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         Spacer(Modifier.statusBarsPadding().height(60.dp))
-                        // The landing spot for a cover flying in from a library
-                        // tile, a search result or a Discover card.
                         Artwork(
                             url = feed.imageUrl,
                             sizeDp = 268.dp,
                             corner = 22.dp,
-                            onBitmap = { coverBitmap = it },
-                            modifier = Modifier.sharedArtwork(coverKey(feed.url), LocalNavScope.current)
+                            onBitmap = { coverBitmap = it }
                         )
                         Spacer(Modifier.height(18.dp))
 
@@ -273,6 +277,14 @@ fun FeedScreen(
                             accent = washColors.accent,
                             onClick = { onHidePlayedChange(!hidePlayed) }
                         )
+                        if (downloads.values.any { it.feedUrl == feed.url && it.state == com.glasscast.app.data.DownloadState.DONE }) {
+                            Pill(
+                                label = "Downloaded",
+                                active = downloadedOnly,
+                                accent = washColors.accent,
+                                onClick = { downloadedOnly = !downloadedOnly }
+                            )
+                        }
                         val unplayed = sorted.count { !it.effectivelyPlayed }
                         if (unplayed > 0) Pill(label = "$unplayed unplayed")
                     }
@@ -283,6 +295,8 @@ fun FeedScreen(
                 SwipeToQueue(
                     accent = washColors.accent,
                     onAddToQueue = { onAddToQueue(episode) },
+                    played = episode.effectivelyPlayed,
+                    onTogglePlayed = { onTogglePlayed(episode) },
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 3.dp),
                     enabled = subscribed
                 ) {
@@ -291,6 +305,7 @@ fun FeedScreen(
                         colors = washColors,
                         playing = episode.guid == playingGuid,
                         isPlaying = isPlaying,
+                        download = downloads[episode.guid],
                         onClick = { onPlay(episode) },
                         onLongClick = { onEpisodeActions(episode) }
                     )
@@ -300,9 +315,13 @@ fun FeedScreen(
 
         // The soft blur only once the header has scrolled away, as Cider does —
         // over the header itself it would just smear the artwork.
+        val feedScrolled by remember {
+            derivedStateOf { listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 0 }
+        }
         TopGlassFade(
             hazeState = hazeState,
             pageColor = washColors.wash,
+            active = feedScrolled,
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .alpha(collapse)
@@ -344,6 +363,7 @@ private fun EpisodeRow(
     colors: ArtworkColors,
     playing: Boolean,
     isPlaying: Boolean,
+    download: com.glasscast.app.data.DownloadEntry? = null,
     onClick: () -> Unit,
     onLongClick: () -> Unit
 ) {
@@ -411,6 +431,10 @@ private fun EpisodeRow(
                 formatCompact(episode.durationMs)
             }
             if (label.isNotBlank()) Pill(label = label)
+            if (download != null) {
+                Spacer(Modifier.width(8.dp))
+                DownloadBadge(download)
+            }
 
             if (episode.positionMs > 1_000 && !played && episode.durationMs > 0) {
                 Spacer(Modifier.width(12.dp))

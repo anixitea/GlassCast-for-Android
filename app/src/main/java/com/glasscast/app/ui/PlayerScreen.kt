@@ -1,6 +1,9 @@
 package com.glasscast.app.ui
 
 import android.app.Activity
+import androidx.compose.runtime.key
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -124,6 +127,8 @@ private val PlayGlyph = Color(0xFF141418)
  */
 @Composable
 fun PlayerScreen(
+    /** The key of whichever the player grows from: the card or the bubble. */
+    artKey: String = MiniArtKey,
     episode: Episode,
     feed: Feed?,
     isPlaying: Boolean,
@@ -144,6 +149,10 @@ fun PlayerScreen(
     onRestartEpisode: () -> Unit,
     onSkipNext: () -> Unit,
     shakeToRestart: Boolean,
+    skipSilence: Boolean = false,
+    voiceBoost: Boolean = false,
+    onSkipSilenceChange: (Boolean) -> Unit = {},
+    onVoiceBoostChange: (Boolean) -> Unit = {},
     onShakeToggle: (Boolean) -> Unit,
     onCollapse: () -> Unit
 ) {
@@ -332,7 +341,7 @@ fun PlayerScreen(
             PlayerArtwork(
                 url = art,
                 modifier = Modifier
-                    .sharedArtwork(NowPlayingArtKey, LocalPlayerScope.current)
+                    .sharedArtwork(artKey, LocalPlayerScope.current, clip = FlightClip)
                     .fillMaxWidth()
                     .height(artHeight)
             )
@@ -422,13 +431,45 @@ fun PlayerScreen(
                         transformOrigin = TransformOrigin(0f, 0f)
                     }
             ) {
-                Text(
-                    text = episode.title,
-                    style = MaterialTheme.typography.headlineMedium,
-                    color = OnPlayer,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+                /*
+                 * A long title scrolls through once, Apple Music style: a
+                 * beat after the player opens it glides across to show the
+                 * whole name, comes back round to the start, and stops. Not a
+                 * perpetual ticker — it runs again only when the player is
+                 * opened again (the player is composed fresh each time), or
+                 * when the episode changes (the key). A short title never
+                 * moves. The right edge fades rather than cutting the text off
+                 * mid-letter, while it scrolls and after it rests.
+                 */
+                key(episode.guid) {
+                    Text(
+                        text = episode.title,
+                        style = MaterialTheme.typography.headlineMedium,
+                        color = OnPlayer,
+                        maxLines = 1,
+                        modifier = Modifier
+                            // Full width, so the fade sits at the edge of the
+                            // space, not the end of the words: a short title
+                            // ends well before it and is never touched.
+                            .fillMaxWidth()
+                            .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+                            .drawWithContent {
+                                drawContent()
+                                drawRect(
+                                    brush = Brush.horizontalGradient(
+                                        0f to Color.Black,
+                                        0.9f to Color.Black,
+                                        1f to Color.Transparent
+                                    ),
+                                    blendMode = BlendMode.DstIn
+                                )
+                            }
+                            .basicMarquee(
+                                iterations = 1,
+                                initialDelayMillis = 1_500
+                            )
+                    )
+                }
                 Text(
                     text = feed?.title.orEmpty(),
                     style = MaterialTheme.typography.titleMedium,
@@ -477,6 +518,7 @@ fun PlayerScreen(
                 wavelength = mix(30.dp, 26.dp, e),
                 strokeWidth = mix(4.5.dp, 3.5.dp, e),
                 showThumb = e < 0.5f,
+                voice = { com.glasscast.app.player.VoiceLevel.current() },
                 onScrubStart = {
                     scrubbing = true
                     scrubValue = progress
@@ -661,7 +703,11 @@ fun PlayerScreen(
                         speed = speed,
                         accent = panelAccent,
                         onSpeedChange = onSpeedChange,
-                        bottomInset = navInset
+                        bottomInset = navInset,
+                        skipSilence = skipSilence,
+                        voiceBoost = voiceBoost,
+                        onSkipSilence = onSkipSilenceChange,
+                        onVoiceBoost = onVoiceBoostChange
                     )
                     PanelTab.TIMER -> TimerPanel(
                         armed = timerArmed,
@@ -789,58 +835,54 @@ private fun MorphButton(
 @Composable
 private fun PlayerBackdrop(url: String, artHeight: Dp, modifier: Modifier = Modifier) {
     val store = LocalImageStore.current
-    var field by remember(url) { mutableStateOf(store.peek(url, 96)) }
-    var mirror by remember(url) { mutableStateOf(store.peek(url, 480)) }
+    // Both layers are made once per cover, off the main thread, as tiny
+    // pre-blurred bitmaps (see SoftBitmaps.kt). They used to be live
+    // Modifier.blur layers — two full-screen GPU blurs recomputed on every
+    // frame, and the player redraws every frame while the wave moves.
+    var field by remember(url) { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
+    var mirror by remember(url) { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
     LaunchedEffect(url) {
         if (url.isBlank()) return@LaunchedEffect
-        if (field == null) field = store.load(url, 96)
-        if (mirror == null) mirror = store.load(url, 480)
+        val source = store.peek(url, 160) ?: store.load(url, 160) ?: return@LaunchedEffect
+        withContext(Dispatchers.Default) {
+            val soft = softened(source).asImageBitmap()
+            val pair = softenedMirror(source, aspect = 1.2f).asImageBitmap()
+            withContext(Dispatchers.Main) {
+                field = soft
+                mirror = pair
+            }
+        }
     }
 
     Box(modifier) {
-        field?.let { bmp ->
+        field?.let { image ->
             Image(
-                bitmap = bmp.asImageBitmap(),
+                bitmap = image,
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
-                filterQuality = FilterQuality.High,
+                filterQuality = FilterQuality.Low,   // bilinear: the stretch is the blur
                 modifier = Modifier
                     .fillMaxSize()
                     .graphicsLayer {
                         scaleX = 1.3f
                         scaleY = 1.3f
                     }
-                    .blur(64.dp)
             )
         }
 
-        mirror?.let { bmp ->
-            val image = bmp.asImageBitmap()
-            // Cover and reflection as one column, blurred together. The blur
-            // clamps at the column's own edges, so nothing darkens at the seam.
-            Column(
-                Modifier
+        // Cover over its own reflection, softened as one image — so the blur
+        // runs across the seam — and stretched to the cover band plus its
+        // mirror below.
+        mirror?.let { image ->
+            Image(
+                bitmap = image,
+                contentDescription = null,
+                contentScale = ContentScale.FillBounds,
+                filterQuality = FilterQuality.Low,
+                modifier = Modifier
                     .fillMaxWidth()
-                    .blur(30.dp)
-            ) {
-                Image(
-                    bitmap = image,
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(artHeight)
-                )
-                Image(
-                    bitmap = image,
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(artHeight)
-                        .graphicsLayer { scaleY = -1f }
-                )
-            }
+                    .height(artHeight * 2)
+            )
         }
 
         // Clear over the cover, deepening through the reflection toward the

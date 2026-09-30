@@ -12,6 +12,10 @@ import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.material3.SwipeToDismissBoxState
+import androidx.compose.material.icons.filled.RemoveDone
+import androidx.compose.material.icons.filled.Done
 import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
@@ -25,26 +29,18 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
 
 /**
- * Swipe a row left to add it to Up Next.
+ * The two swipes on an episode row: **left adds it to Up Next**, **right marks
+ * it played** (or unplayed, if it already is).
  *
- * One direction now, not two. The right-swipe "play next" used
- * QueuePlayNext, an icon that reads as a monitor with a plus on it and told
- * nobody what it did; one gesture with one obvious icon beats two where one is
- * a riddle. Play next is still in the long-press sheet.
+ * Right-swipe came back with a clear job. It was once "play next", behind an
+ * icon nobody could read, and went; marking played is the thing people reach
+ * for most after queueing (a Pocket Casts user asked for exactly this), and a
+ * check mark says what it does.
  *
- * **Why it used to freeze and snap.** The row was allowed to *commit* to its
- * dismissed position — slid fully out — and then a LaunchedEffect called
- * `snapTo(Settled)`, which is an instant jump with no animation at all. Hence
- * the stall at the end of the swipe followed by a teleport.
- *
- * Now the commit is refused: `confirmValueChange` runs the action and returns
- * false, so the state never settles at "dismissed". The box then springs back
- * to rest by its own animation, which is what a flick that did something (but
- * removed nothing) should look like.
- *
- * The reveal tile scales up with the drag so the threshold feels approached
- * rather than hit, and it only draws while a drag is in progress — the row
- * above it is an opaque card, so there's nothing to hide at rest.
+ * Neither swipe commits: `confirmValueChange` runs the action and returns
+ * false, so the row springs back by its own animation instead of sliding out
+ * and snapping home. The reveal tile grows toward the threshold, and its scale
+ * is read in the layer — a swipe redraws the tile, it doesn't recompose it.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -54,16 +50,28 @@ fun SwipeToQueue(
     modifier: Modifier = Modifier,
     /** Off for shows that aren't in the library: there is no queue to put them in. */
     enabled: Boolean = true,
+    /** Whether the episode is played now — decides which way the right swipe flips it. */
+    played: Boolean = false,
+    /** Null disables the right swipe. */
+    onTogglePlayed: (() -> Unit)? = null,
     content: @Composable () -> Unit
 ) {
     val haptics = rememberHaptics()
     val latestAdd by rememberUpdatedState(onAddToQueue)
+    val latestToggle by rememberUpdatedState(onTogglePlayed)
 
     val state = rememberSwipeToDismissBoxState(
         confirmValueChange = { value ->
-            if (value == SwipeToDismissBoxValue.EndToStart) {
-                haptics.play(Haptic.ToggleOn)
-                latestAdd()
+            when (value) {
+                SwipeToDismissBoxValue.EndToStart -> {
+                    haptics.play(Haptic.ToggleOn)
+                    latestAdd()
+                }
+                SwipeToDismissBoxValue.StartToEnd -> {
+                    haptics.play(Haptic.ToggleOn)
+                    latestToggle?.invoke()
+                }
+                else -> Unit
             }
             false
         },
@@ -74,35 +82,61 @@ fun SwipeToQueue(
     SwipeToDismissBox(
         state = state,
         modifier = modifier,
-        enableDismissFromStartToEnd = false,
+        enableDismissFromStartToEnd = enabled && onTogglePlayed != null,
         enableDismissFromEndToStart = enabled,
         backgroundContent = {
-            if (state.dismissDirection == SwipeToDismissBoxValue.EndToStart) {
-                // Grows toward full size as the drag nears the threshold.
-                val grow = 0.55f + 0.45f * (state.progress * 4f).coerceIn(0f, 1f)
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.CenterEnd) {
-                    Box(
-                        Modifier
-                            .fillMaxHeight()
-                            .width(84.dp)
-                            .graphicsLayer {
-                                scaleX = grow
-                                scaleY = grow
-                            }
-                            .clip(RoundedCornerShape(22.dp))
-                            .background(accent.copy(alpha = 0.30f)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.PlaylistAdd,
-                            contentDescription = "Add to Up Next",
-                            tint = accent,
-                            modifier = Modifier.size(26.dp)
-                        )
-                    }
-                }
+            when (state.dismissDirection) {
+                SwipeToDismissBoxValue.EndToStart -> RevealTile(
+                    state = state,
+                    alignment = Alignment.CenterEnd,
+                    accent = accent,
+                    icon = Icons.AutoMirrored.Filled.PlaylistAdd,
+                    description = "Add to Up Next"
+                )
+                SwipeToDismissBoxValue.StartToEnd -> RevealTile(
+                    state = state,
+                    alignment = Alignment.CenterStart,
+                    accent = accent,
+                    icon = if (played) Icons.Filled.RemoveDone else Icons.Filled.Done,
+                    description = if (played) "Mark as unplayed" else "Mark as played"
+                )
+                else -> Unit
             }
         },
         content = { content() }
     )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun RevealTile(
+    state: SwipeToDismissBoxState,
+    alignment: Alignment,
+    accent: Color,
+    icon: ImageVector,
+    description: String
+) {
+    Box(Modifier.fillMaxSize(), contentAlignment = alignment) {
+        Box(
+            Modifier
+                .fillMaxHeight()
+                .width(84.dp)
+                .graphicsLayer {
+                    // Grows toward full size as the drag nears the threshold.
+                    val grow = 0.55f + 0.45f * (state.progress * 4f).coerceIn(0f, 1f)
+                    scaleX = grow
+                    scaleY = grow
+                }
+                .clip(RoundedCornerShape(22.dp))
+                .background(accent.copy(alpha = 0.30f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = description,
+                tint = accent,
+                modifier = Modifier.size(26.dp)
+            )
+        }
+    }
 }

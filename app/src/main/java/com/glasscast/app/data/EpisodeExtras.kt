@@ -58,10 +58,14 @@ object EpisodeExtras {
         }
     }
 
-    /** Handles both SRT and WebVTT; they differ only in the header and the decimal mark. */
+    /**
+     * SRT, WebVTT, or Podcasting 2.0 JSON — told apart by content, since
+     * feeds' declared types are unreliable.
+     */
     suspend fun fetchTranscript(url: String): List<TranscriptCue> = withContext(Dispatchers.IO) {
         if (url.isBlank()) return@withContext emptyList()
         val body = get(url) ?: return@withContext emptyList()
+        if (body.trimStart().startsWith("{")) return@withContext parseJsonTranscript(body)
         try {
             val cues = mutableListOf<TranscriptCue>()
             var pendingStart = -1L
@@ -96,6 +100,46 @@ object EpisodeExtras {
         } catch (_: Exception) {
             emptyList()
         }
+    }
+
+    /**
+     * The Podcasting 2.0 JSON transcript: `{"segments": [{"startTime", "body",
+     * "speaker"?}, …]}`, times in seconds. Hosts often emit one segment per
+     * word or phrase, which would make a list you can't read, so segments are
+     * joined into lines that end at a full stop, a change of speaker, or about
+     * twelve seconds — close to how SRT files break.
+     */
+    private fun parseJsonTranscript(body: String): List<TranscriptCue> = try {
+        val segments = org.json.JSONObject(body).optJSONArray("segments")
+        val cues = mutableListOf<TranscriptCue>()
+        if (segments != null) {
+            var start = -1L
+            var speaker = ""
+            val text = StringBuilder()
+            fun flush() {
+                if (start >= 0 && text.isNotBlank()) cues += TranscriptCue(start, text.toString().trim())
+                start = -1L
+                text.setLength(0)
+            }
+            for (i in 0 until segments.length()) {
+                val seg = segments.optJSONObject(i) ?: continue
+                val words = seg.optString("body").trim()
+                if (words.isEmpty()) continue
+                val at = (seg.optDouble("startTime", -1.0) * 1000).toLong()
+                val who = seg.optString("speaker")
+                if (who.isNotEmpty() && who != speaker && text.isNotEmpty()) flush()
+                if (who.isNotEmpty()) speaker = who
+                if (start < 0) start = at.coerceAtLeast(0L)
+                if (text.isNotEmpty()) text.append(' ')
+                text.append(words)
+                val sentenceEnds = words.endsWith('.') || words.endsWith('?') || words.endsWith('!')
+                if (sentenceEnds || (at >= 0 && at - start > 12_000)) flush()
+            }
+            flush()
+        }
+        cues.sortedBy { it.startMs }
+    } catch (_: Exception) {
+        emptyList()
     }
 
     /** "00:01:23,456" or "01:23.456". */

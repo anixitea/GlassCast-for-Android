@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Downloaded updates live in the app's own cache, and only that folder is
+     shared — with Android's installer, for the moment it reads the APK. -->
+<paths>
+    <cache-path name="updates" path="updates/" />
+</paths>

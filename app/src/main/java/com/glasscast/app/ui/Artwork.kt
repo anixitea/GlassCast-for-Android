@@ -30,6 +30,7 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
@@ -326,6 +327,20 @@ val ArtworkColors.chromeBar: Color
 val ArtworkColors.chromeButton: Color
     get() = meshAccent.withHsl({ it.coerceIn(0.22f, 0.62f) }, { 0.82f })
 
+/*
+ * The bubble's progress ring, in two colours from the cover — as Cider's is.
+ * The played arc is the cover's vibrant accent; the unplayed track is a second,
+ * deeper colour from the same cover (its next palette swatch), not a white
+ * haze. Both sit at mid lightness, so the ring reads on a light page and a dark
+ * one alike; the old 18%-white track disappeared in light mode.
+ */
+val ArtworkColors.ringPlayed: Color
+    get() = meshAccent.withHsl({ it.coerceIn(0.45f, 0.9f) }, { 0.60f })
+
+val ArtworkColors.ringTrack: Color
+    get() = (mesh.getOrNull(2) ?: mesh.getOrNull(1) ?: meshBase)
+        .withHsl({ it.coerceIn(0.2f, 0.55f) }, { 0.36f })
+
 /** The player's pull-up panel: darker again, and opaque enough to read on. */
 val ArtworkColors.panelSurface: Color
     get() = meshBase.withHsl({ it.coerceAtMost(0.30f) }, { 0.12f })
@@ -391,10 +406,16 @@ fun ArtworkBackdrop(
     modifier: Modifier = Modifier
 ) {
     val store = LocalImageStore.current
-    var bitmap by remember(url) { mutableStateOf(store.peek(url, BACKDROP_PX)) }
+    // Softened once, off the main thread (SoftBitmaps.kt). This was a live
+    // 56dp Modifier.blur that scrolled with the page, recomputed every frame.
+    var soft by remember(url) { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
 
     LaunchedEffect(url) {
-        if (bitmap == null && url.isNotBlank()) bitmap = store.load(url, BACKDROP_PX)
+        if (url.isBlank()) return@LaunchedEffect
+        val source = store.peek(url, BACKDROP_PX) ?: store.load(url, BACKDROP_PX) ?: return@LaunchedEffect
+        soft = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+            softened(source, width = 40).asImageBitmap()
+        }
     }
 
     /*
@@ -428,18 +449,16 @@ fun ArtworkBackdrop(
                 )
             }
     ) {
-        val bmp = bitmap
-        if (bmp != null) {
+        val image = soft
+        if (image != null) {
             Image(
-                bitmap = bmp.asImageBitmap(),
+                bitmap = image,
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
+                filterQuality = FilterQuality.Low,   // bilinear: the stretch is the blur
                 modifier = Modifier
                     .fillMaxSize()
-                    // Scaled past the bounds so the blur has real pixels to
-                    // sample at the edges instead of smearing the frame inward.
                     .scale(1.35f)
-                    .blur(56.dp)
             )
         }
     }

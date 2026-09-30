@@ -82,6 +82,7 @@ object RssParser {
         var season = 0
         var chaptersUrl = ""
         var transcriptUrl = ""
+        var transcriptRank = 0
 
         val episodes = mutableListOf<Episode>()
 
@@ -89,7 +90,7 @@ object RssParser {
             title = ""; guid = ""; link = ""; enclosureUrl = ""; itemImage = ""
             itemDescription = ""; itemSummary = ""; itemContent = ""
             pubDate = 0L; duration = 0L; episodeNumber = 0; season = 0
-            chaptersUrl = ""; transcriptUrl = ""
+            chaptersUrl = ""; transcriptUrl = ""; transcriptRank = 0
         }
 
         var event = parser.eventType
@@ -144,12 +145,19 @@ object RssParser {
                     "podcast:transcript" -> if (inItem) {
                         val type = parser.getAttributeValue(null, "type").orEmpty().lowercase(Locale.ROOT)
                         val u = parser.getAttributeValue(null, "url").orEmpty()
-                        // Feeds often list several formats; SRT and VTT are the
-                        // two worth parsing, and the first of those wins.
-                        if (u.isNotBlank() && transcriptUrl.isBlank() &&
-                            (type.contains("srt") || type.contains("vtt"))
-                        ) {
+                        // Feeds often list several formats. Timed ones only — a
+                        // transcript is worth having because it follows along.
+                        // SRT and VTT rank above the Podcasting 2.0 JSON format
+                        // (Buzzsprout, Captivate and others publish only that),
+                        // which ranks above nothing; the first of the best wins.
+                        val rank = when {
+                            type.contains("srt") || type.contains("vtt") -> 2
+                            type.contains("json") -> 1
+                            else -> 0
+                        }
+                        if (u.isNotBlank() && rank > transcriptRank) {
                             transcriptUrl = u
+                            transcriptRank = rank
                         }
                     }
                     "enclosure" -> if (inItem) {
