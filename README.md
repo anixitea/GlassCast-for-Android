@@ -2,7 +2,7 @@ I switched from iPhone to Android last year and honestly couldn't find a podcast
 
 My main priority was to provide an aesthetically pleasing experience while also maintaining essential functionality for a podcast application. Other stuff it has:
 
-- Chapters, show notes
+- Show notes, episode information, rich podcast overview
 - Speed, skip silence, voice boost, sleep timer with shake to restart function
 - Downloads, Chromecast, gPodder, OPML import/export
 - Android Auto
