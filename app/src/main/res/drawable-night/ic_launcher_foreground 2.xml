@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Purple glyph for the dark tile (#9B4ED0, sampled from the concept). Sits
+  between the light icon's AccentPurple and the darker end of its gradient, so
+  the two icons read as the same brand rather than two purples.
+
+  This is also what the <monochrome> layer resolves to at night. Harmless: the
+  launcher tints that layer from the system palette and only uses the shape.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:translateX="27"
+        android:translateY="27"
+        android:scaleX="2.25"
+        android:scaleY="2.25">
+        <path
+            android:fillColor="#FF9B4ED0"
+            android:pathData="M6.18,17.82m-2.18,0a2.18,2.18 0,1 1,4.36 0a2.18,2.18 0,1 1,-4.36 0" />
+        <path
+            android:fillColor="#FF9B4ED0"
+            android:pathData="M4,4.44v2.83c7.03,0 12.73,5.7 12.73,12.73h2.83c0,-8.59 -6.97,-15.56 -15.56,-15.56zM4,10.1v2.83c3.9,0 7.07,3.17 7.07,7.07h2.83c0,-5.47 -4.43,-9.9 -9.9,-9.9z" />
+    </group>
+</vector>

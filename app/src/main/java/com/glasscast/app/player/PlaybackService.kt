@@ -24,6 +24,9 @@ import com.glasscast.app.GlassCastApp
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import com.glasscast.app.MainActivity
+import androidx.media3.session.MediaLibraryService
+import androidx.media3.common.MediaItem
+import com.glasscast.app.data.usable
 
 /**
  * Single ExoPlayer behind a MediaSession, so playback survives the Activity and
@@ -36,18 +39,18 @@ import com.glasscast.app.MainActivity
  * when the screen locks, which is exactly when someone using one has fallen
  * asleep. It arrives in milestone 4 with the shake-to-restart detector.
  */
-class PlaybackService : MediaSessionService() {
+class PlaybackService : MediaLibraryService() {
 
     private val effectsScope = kotlinx.coroutines.CoroutineScope(
         kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Main.immediate
     )
-    private var voiceBoost: android.media.audiofx.LoudnessEnhancer? = null
+    private var voiceBoost: VoiceBoost? = null
 
     /** Whichever player the session is driving right now: local or Cast. */
     private var player: Player? = null
     private var localPlayer: ExoPlayer? = null
     private var castPlayer: CastPlayer? = null
-    private var session: MediaSession? = null
+    private var session: MediaLibraryService.MediaLibrarySession? = null
 
     /** Guards against writing a position back before the item is actually prepared. */
     private var lastSavedPositionMs = 0L
@@ -58,23 +61,19 @@ class PlaybackService : MediaSessionService() {
     private companion object {
         const val FADE_MS = 15_000L
         /**
-         * Skip silence tuned for speech. ExoPlayer's defaults suit music:
-         * any 0.1s under the threshold starts a trim, only 20% of each pause
-         * survives, and the threshold is high enough that soft words and
-         * breaths count as silence — which made conversation sound choppy.
-         * Here only real dead air goes:
-         *  - a pause must last 0.3s before it's touched (gaps between words
-         *    and phrases are left alone);
-         *  - 40% of each pause is kept, capped at 1s;
-         *  - the threshold is halved, so only near-true silence qualifies and
-         *    quiet speakers keep their syllables.
+         * Skip silence tuned for speech, between ExoPlayer's music-oriented
+         * defaults (0.1s / 20% kept / threshold 1024 — choppy on quiet
+         * speakers) and 1.2's (0.3s / 40% / 512 — too gentle):
+         *  - pauses over 0.2s are trimmed;
+         *  - 30% of each is kept, never more than 1s;
+         *  - threshold 768, so soft words still aren't counted as silence.
          */
         fun speechSilenceSkipper() = SilenceSkippingAudioProcessor(
-            /* minimumSilenceDurationUs = */ 300_000L,
-            /* silenceRetentionRatio = */ 0.4f,
+            /* minimumSilenceDurationUs = */ 200_000L,
+            /* silenceRetentionRatio = */ 0.3f,
             /* maxSilenceToKeepDurationUs = */ 1_000_000L,
             /* minVolumeToKeepPercentageWhenMuting = */ 10,
-            /* silenceThresholdLevel = */ 512.toShort()
+            /* silenceThresholdLevel = */ 768.toShort()
         )
 
         /** +7dB with limiting: noticeable on quiet voices, never harsh. */
@@ -127,31 +126,36 @@ class PlaybackService : MediaSessionService() {
          * Skip silence is ExoPlayer's own: it drops the gaps between
          * sentences, and never the speech itself.
          *
-         * Voice boost is Android's LoudnessEnhancer on the player's audio
-         * session: it raises quiet passages and limits loud ones, so a soft
-         * guest and a loud host land near each other. The session id is fixed
-         * up front so the effect can attach before the first sound plays.
+         * Voice boost is a speech chain on the player's audio session — low
+         * cut, presence lift, three-band compression, limiter; see VoiceBoost.
+         * The session id is fixed up front so the effect can attach before
+         * the first sound plays.
          */
         val audioSession = (getSystemService(AUDIO_SERVICE) as android.media.AudioManager)
             .generateAudioSessionId()
         exo.setAudioSessionId(audioSession)
-        voiceBoost = runCatching { android.media.audiofx.LoudnessEnhancer(audioSession) }.getOrNull()
+        voiceBoost = VoiceBoost(audioSession)
         val settings = (application as GlassCastApp).settings
         effectsScope.launch {
             settings.skipSilence.collect { on -> exo.skipSilenceEnabled = on }
         }
         effectsScope.launch {
             settings.voiceBoost.collect { on ->
-                voiceBoost?.let { effect ->
-                    runCatching {
-                        effect.setTargetGain(if (on) VOICE_BOOST_MB else 0)
-                        effect.setEnabled(on)
-                    }
-                }
+                voiceBoost?.setEnabled(on)
             }
+        }
+        // Skip ads: breaks are looked for only while it's on — turning it on
+        // mid-episode reads the current one at once.
+        effectsScope.launch {
+            settings.skipAds.collect { on -> if (on) loadAdBreaks(player?.currentMediaItem?.mediaId) }
         }
 
         val listener = object : Player.Listener {
+            override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                lastAdCheckMs = -1L
+                if ((application as GlassCastApp).settings.skipAds.value) loadAdBreaks(mediaItem?.mediaId)
+            }
+
             override fun onPlaybackStateChanged(state: Int) {
                 if (state == Player.STATE_READY) reconcileDuration()
                 if (state == Player.STATE_ENDED) {
@@ -184,7 +188,9 @@ class PlaybackService : MediaSessionService() {
             PendingIntent.FLAG_IMMUTABLE
         )
 
-        session = MediaSession.Builder(this, exo)
+        // A library session: the same session, plus a browsable library for
+        // Android Auto and other media browsers (see AutoLibrary).
+        session = MediaLibraryService.MediaLibrarySession.Builder(this, exo, AutoLibrary(this, effectsScope))
             .setSessionActivity(activityIntent)
             .build()
 
@@ -194,6 +200,7 @@ class PlaybackService : MediaSessionService() {
         shakeDetector = ShakeDetector(this) { onShake() }
         startPositionTicker()
         startSleepTicker()
+        startAdTicker()
     }
 
     /**
@@ -258,7 +265,7 @@ class PlaybackService : MediaSessionService() {
         session?.player = target
     }
 
-    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = session
+    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibraryService.MediaLibrarySession? = session
 
     /*
      * No custom notification buttons.
@@ -362,7 +369,7 @@ class PlaybackService : MediaSessionService() {
                     val remaining = SleepTimer.remainingMs()
                     when {
                         remaining == null -> {
-                            // Nothing armed by clock: make sure a cancelled fade
+                            // Nothing armed by clock: make sure a canceled fade
                             // didn't leave the volume down.
                             if (!SleepTimer.endOfEpisode.value && p.canSetVolume() && p.volume < 1f) p.volume = 1f
                             if (!SleepTimer.isArmed && !shakeWindowOpen) shakeDetector?.stop()
@@ -390,7 +397,7 @@ class PlaybackService : MediaSessionService() {
 
         if (SleepTimer.shakeEnabled.value) {
             // Keep listening for a couple of minutes after the timer fires. The
-            // whole point is the moment you realise you're still awake, which is
+            // whole point is the moment you realize you're still awake, which is
             // just after the audio stops — not while it's still playing.
             shakeWindowOpen = true
             shakeDetector?.start()
@@ -421,5 +428,60 @@ class PlaybackService : MediaSessionService() {
     }
 
     /** The sleep fade needs player volume; a Cast receiver only has device volume. */
+    // ------------------------------------------------------------ skip ads
+
+    /** Where playback was at the last ad check; −1 after a pause or a new episode. */
+    private var lastAdCheckMs = -1L
+
+    private fun loadAdBreaks(guid: String?) {
+        if (guid.isNullOrEmpty()) return
+        effectsScope.launch {
+            val store = (application as GlassCastApp).feedStore
+            store.awaitLoaded()
+            store.episodeByGuid(guid)?.let { AdSkipper.load(it) }
+        }
+    }
+
+    private fun startAdTicker() {
+        val handler = android.os.Handler(mainLooper)
+        val tick = object : Runnable {
+            override fun run() {
+                checkAdBreak()
+                handler.postDelayed(this, 500)
+            }
+        }
+        handler.postDelayed(tick, 500)
+    }
+
+    /**
+     * Skips a break that playback runs into — from before its start into it.
+     * A break you land in by seeking, or were paused in, plays: you went
+     * there on purpose. A jump bigger than half a second of playback at 2×
+     * can explain is a seek, and just moves the reference point.
+     */
+    private fun checkAdBreak() {
+        val p = player ?: return
+        if (!p.isPlaying) {
+            lastAdCheckMs = -1L
+            return
+        }
+        val pos = p.currentPosition
+        val prev = lastAdCheckMs
+        lastAdCheckMs = pos
+        val guid = p.currentMediaItem?.mediaId ?: return
+        if (!(application as GlassCastApp).settings.skipAds.value) return
+        val (forGuid, found) = AdSkipper.breaks.value
+        if (forGuid != guid || found.isEmpty()) return
+        val breaks = found.usable(p.duration)
+        if (breaks.isEmpty()) return
+        if (prev >= 0 && (pos < prev - 250 || pos - prev > 2_500)) return
+        val hit = breaks.firstOrNull { b ->
+            pos >= b.startMs && pos < b.endMs - 500 && (if (prev >= 0) prev <= b.startMs + 1_500 else pos <= b.startMs + 1_500)
+        } ?: return
+        p.seekTo(hit.endMs)
+        lastAdCheckMs = hit.endMs
+        AdSkipper.announceSkip(guid)
+    }
+
     private fun Player.canSetVolume() = isCommandAvailable(Player.COMMAND_SET_VOLUME)
 }

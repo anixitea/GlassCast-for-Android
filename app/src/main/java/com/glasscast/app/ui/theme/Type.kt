@@ -32,7 +32,7 @@ private val Sans = FontFamily(
     Font(R.font.figtree_bold, FontWeight.Bold)
 )
 
-val GlassType = Typography(
+private val TunedType = Typography(
     displaySmall = TextStyle(
         fontFamily = Sans, fontWeight = FontWeight.Bold,
         fontSize = 34.sp, lineHeight = 40.sp, letterSpacing = (-0.8 / 34).em
@@ -61,4 +61,32 @@ val GlassType = Typography(
         fontFamily = Sans, fontWeight = FontWeight.Medium,
         fontSize = 12.sp, lineHeight = 16.sp, letterSpacing = (0.6 / 12).em
     )
+)
+
+/**
+ * The app's type: every Material style in Figtree.
+ *
+ * Only the styles above are tuned; the rest keep Material's sizes. They used
+ * to keep Material's font too — the system sans — so anything set in, say,
+ * titleLarge or bodyLarge (the show info sheet) came out in the wrong face.
+ */
+val GlassType: Typography = TunedType.allFigtree()
+
+/** This typography with Figtree on all fifteen styles. The TV's type goes through it too. */
+fun Typography.allFigtree(): Typography = Typography(
+    displayLarge = displayLarge.copy(fontFamily = Sans),
+    displayMedium = displayMedium.copy(fontFamily = Sans),
+    displaySmall = displaySmall.copy(fontFamily = Sans),
+    headlineLarge = headlineLarge.copy(fontFamily = Sans),
+    headlineMedium = headlineMedium.copy(fontFamily = Sans),
+    headlineSmall = headlineSmall.copy(fontFamily = Sans),
+    titleLarge = titleLarge.copy(fontFamily = Sans),
+    titleMedium = titleMedium.copy(fontFamily = Sans),
+    titleSmall = titleSmall.copy(fontFamily = Sans),
+    bodyLarge = bodyLarge.copy(fontFamily = Sans),
+    bodyMedium = bodyMedium.copy(fontFamily = Sans),
+    bodySmall = bodySmall.copy(fontFamily = Sans),
+    labelLarge = labelLarge.copy(fontFamily = Sans),
+    labelMedium = labelMedium.copy(fontFamily = Sans),
+    labelSmall = labelSmall.copy(fontFamily = Sans)
 )

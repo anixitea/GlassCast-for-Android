@@ -73,7 +73,7 @@ fun OpmlSheet(
             }.getOrDefault(emptyList())
         }
         if (parsed.isEmpty()) {
-            error = "No subscriptions found in that file."
+            error = tr("No subscriptions found in that file.")
         } else {
             entries = parsed
         }
@@ -87,7 +87,7 @@ fun OpmlSheet(
     val openFile = rememberLauncherForActivityResult(
         // Not OpenDocument("text/x-opml"): exporters label OPML as text/xml,
         // application/xml, octet-stream or nothing at all, and a strict filter
-        // greys out the very file the user came to pick.
+        // grays out the very file the user came to pick.
         ActivityResultContracts.OpenDocument()
     ) { uri -> if (uri != null) scope.launch { read(uri) } }
 
@@ -103,7 +103,7 @@ fun OpmlSheet(
                         }
                     }
                 }
-                exported = "Saved."
+                exported = tr("Saved.")
             }
         }
     }
@@ -125,23 +125,15 @@ fun OpmlSheet(
                 .padding(bottom = 28.dp)
         ) {
             Text(
-                text = "SUBSCRIPTIONS",
+                text = tr("SUBSCRIPTIONS"),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Spacer(Modifier.height(10.dp))
             Text(
-                text = "Import or export OPML",
+                text = tr("Import or export OPML"),
                 style = MaterialTheme.typography.headlineMedium,
                 color = MaterialTheme.colorScheme.onSurface
-            )
-            Spacer(Modifier.height(8.dp))
-            Text(
-                text = "In AntennaPod: Settings → Import/Export → OPML export, " +
-                    "then open that file here or share it to GlassCast. " +
-                    "Subscriptions transfer; play positions don't.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
             Spacer(Modifier.height(20.dp))
@@ -149,7 +141,7 @@ fun OpmlSheet(
             when {
                 progress.running -> {
                     Text(
-                        text = "Adding ${progress.done} of ${progress.total}…",
+                        text = tr("Adding {0} of {1}…", progress.done, progress.total),
                         style = MaterialTheme.typography.titleSmall,
                         color = MaterialTheme.colorScheme.onSurface
                     )
@@ -181,31 +173,31 @@ fun OpmlSheet(
                 entries != null -> {
                     val found = entries.orEmpty()
                     Text(
-                        text = "${found.size} subscriptions in that file.",
+                        text = tr("{0} subscriptions in that file.", found.size),
                         style = MaterialTheme.typography.titleSmall,
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     Spacer(Modifier.height(14.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Pill(
-                            label = "Add all",
+                            label = tr("Add all"),
                             active = true,
                             onClick = { scope.launch { store.importOpml(found) } }
                         )
                         Spacer(Modifier.size(10.dp))
-                        Pill(label = "Choose another", onClick = { openFile.launch(arrayOf("*/*")) })
+                        Pill(label = tr("Choose another"), onClick = { openFile.launch(arrayOf("*/*")) })
                     }
                 }
 
                 else -> {
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         Pill(
-                            label = "Import file",
+                            label = tr("Import file"),
                             active = true,
                             onClick = { openFile.launch(arrayOf("*/*")) }
                         )
                         Pill(
-                            label = "Export mine",
+                            label = tr("Export mine"),
                             onClick = { saveFile.launch("glasscast-subscriptions.opml") }
                         )
                     }
@@ -239,7 +231,7 @@ fun OpmlSheet(
                     )
                     Spacer(Modifier.size(10.dp))
                     Text(
-                        text = "Reading file…",
+                        text = tr("Reading file…"),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

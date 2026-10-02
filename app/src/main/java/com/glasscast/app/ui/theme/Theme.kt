@@ -129,7 +129,7 @@ val LocalBrandAccent = compositionLocalOf { AccentPurple }
 @Composable
 fun GlassCastTheme(
     themeMode: com.glasscast.app.data.ThemeMode,
-    /** Supplied when dynamic colour is on and something is playing. */
+    /** Supplied when dynamic color is on and something is playing. */
     showAccent: Color? = null,
     content: @Composable () -> Unit
 ) {
@@ -147,7 +147,7 @@ fun GlassCastTheme(
      * white library screen, where it is a highlighter — so it gets a second
      * clamp for the app's own ground before becoming the primary.
      */
-    // Dynamic colour is decided by the caller: an accent arrives only when it's
+    // Dynamic color is decided by the caller: an accent arrives only when it's
     // on and something is playing, in light or dark alike.
     val tinted = showAccent?.let { com.glasscast.app.ui.themeAccent(it, dark) }
 

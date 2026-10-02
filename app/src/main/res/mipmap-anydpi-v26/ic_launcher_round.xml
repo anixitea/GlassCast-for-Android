@@ -1,17 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  There is deliberately no night copy of this file, and no night PNG set.
-  Night-mode resources OUTRANK density in Android's qualifier order, so a
-  mipmap-night-hdpi PNG beats mipmap-anydpi-v26 at night — the launcher stopped
-  using the adaptive icon after dark and fell back to a flat, full-bleed image,
-  which is why the dark icon looked zoomed in. Only the two drawable layers are
-  night-qualified now; the adaptive icon stays in charge in both modes.
+  The 1.5 icon: Jonathan's purple gradient as the background layer and the rounded
+  glyph as the foreground, both PNGs in drawable-nodpi (432px = 108dp at
+  xxxhdpi). The glyph spans 54% of the *visible* icon — a launcher shows the
+  middle 72dp of the 108dp layer, so that's 36% of the layer. Sizing it against
+  the whole layer is what made earlier icons look zoomed in.
 
-  The monochrome layer is the one dark-mode-adjacent feature Android actually
-  guarantees: with themed icons switched on, the launcher throws away the
-  background and tints this glyph from the system palette, so it follows light
-  and dark automatically. It must be a solid silhouette — the launcher supplies
-  the colour.
+  No night variant, on purpose: the icon is the same in light and dark. (A
+  night copy of the icon or its layers also outranks this file at night — the
+  1.3 "zoomed dark icon" bug — so keep it that way.)
+
+  The monochrome layer is only for themed icons, when someone turns them on:
+  the launcher discards the colors and tints the glyph's silhouette.
 -->
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
     <background android:drawable="@drawable/ic_launcher_background" />

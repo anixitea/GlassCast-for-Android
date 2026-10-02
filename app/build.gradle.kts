@@ -12,13 +12,13 @@ android {
         applicationId = "com.glasscast.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 13
-        versionName = "1.2"
+        versionCode = 16
+        versionName = "1.5"
     }
 
     buildTypes {
         release {
-            // R8: strips unused code and optimises what's left — inlining,
+            // R8: strips unused code and optimizes what's left — inlining,
             // devirtualisation, removing Compose's debug paths. The biggest
             // single speed-up for a weak CPU like the Streamer's.
             isMinifyEnabled = true
@@ -26,7 +26,7 @@ android {
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
         // Debug's convenience without debug's brakes. A debuggable build keeps
-        // runtime debugging hooks on and skips the optimisations Compose leans
+        // runtime debugging hooks on and skips the optimizations Compose leans
         // on, so it can stutter where the real app wouldn't — judge smoothness
         // here, never in "debug". Signed with the debug key, so it installs from
         // Android Studio over the debug build with your data intact.

@@ -51,7 +51,7 @@ import com.glasscast.app.data.Feed
  * now", which is the question people actually open a podcast app with. Without
  * it, hearing a new episode means visiting shows one at a time to check.
  */
-@OptIn(ExperimentalFoundationApi::class)
+@OptIn(ExperimentalFoundationApi::class, androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun LatestScreen(
     feeds: List<Feed>,
@@ -95,7 +95,7 @@ fun LatestScreen(
             Spacer(Modifier.statusBarsPadding().height(20.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = "Latest",
+                    text = tr("Latest"),
                     style = MaterialTheme.typography.displaySmall,
                     color = MaterialTheme.colorScheme.onBackground,
                     modifier = Modifier.weight(1f)
@@ -121,7 +121,7 @@ fun LatestScreen(
                     } else {
                         Icon(
                             imageVector = Icons.Filled.Refresh,
-                            contentDescription = "Refresh all shows",
+                            contentDescription = tr("Refresh all shows"),
                             tint = MaterialTheme.colorScheme.onBackground,
                             modifier = Modifier.size(22.dp)
                         )
@@ -131,20 +131,20 @@ fun LatestScreen(
             Spacer(Modifier.height(4.dp))
             Text(
                 text = if (all.isEmpty()) "Nothing yet"
-                else "${all.count { !it.effectivelyPlayed }} unplayed across ${feeds.size} shows",
+                else tr("{0} unplayed across {1} shows", all.count { !it.effectivelyPlayed }, feeds.size),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Spacer(Modifier.height(12.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Pill(
-                    label = "Hide played",
+                    label = tr("Hide played"),
                     active = hidePlayed,
                     onClick = { onHidePlayedChange(!hidePlayed) }
                 )
                 if (downloads.values.any { it.state == com.glasscast.app.data.DownloadState.DONE }) {
                     Pill(
-                        label = "Downloaded",
+                        label = tr("Downloaded"),
                         active = downloadedOnly,
                         onClick = { downloadedOnly = !downloadedOnly }
                     )
@@ -153,7 +153,29 @@ fun LatestScreen(
             Spacer(Modifier.height(14.dp))
         }
 
-        LazyColumn(contentPadding = PaddingValues(bottom = bottomInset + 24.dp)) {
+        val pullState = androidx.compose.material3.pulltorefresh.rememberPullToRefreshState()
+        androidx.compose.material3.pulltorefresh.PullToRefreshBox(
+        isRefreshing = refreshing,
+        onRefresh = {
+            haptics.play(Haptic.Select)
+            onRefresh()
+        },
+        state = pullState,
+        modifier = Modifier.fillMaxSize(),
+        indicator = {
+            CookieRefreshIndicator(
+                state = pullState,
+                refreshing = refreshing,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .statusBarsPadding()
+            )
+        }
+        ) {
+        LazyColumn(
+            contentPadding = PaddingValues(bottom = bottomInset + 24.dp),
+            modifier = Modifier.readableWidth()
+        ) {
             items(latest, key = { it.guid }) { episode ->
                 SwipeToQueue(
                     accent = MaterialTheme.colorScheme.primary,
@@ -174,6 +196,7 @@ fun LatestScreen(
                 }
             }
         }
+        }
     }
 }
 
@@ -188,6 +211,9 @@ private fun LatestRow(
     onClick: () -> Unit,
     onLongClick: () -> Unit
 ) {
+    // A light wash of the show's own color, so shows tell apart at a glance.
+    val (showColors, _) = rememberArtworkColors(feed?.imageUrl.orEmpty().ifBlank { episode.imageUrl.orEmpty() })
+    val wash by androidx.compose.animation.animateColorAsState(showColors.elevated, androidx.compose.animation.core.tween(400), label = "rowWash")
     val played = episode.effectivelyPlayed
     val art = episode.imageUrl.ifBlank { feed?.imageUrl.orEmpty() }
     val started = episode.positionMs > 1_000 && !played && episode.durationMs > 0
@@ -198,7 +224,7 @@ private fun LatestRow(
         Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(20.dp))
-            .background(MaterialTheme.colorScheme.surfaceContainer)
+            .background(wash)
             .combinedClickable(onClick = onClick, onLongClick = onLongClick)
             .padding(horizontal = 14.dp, vertical = 12.dp),
         horizontalArrangement = Arrangement.spacedBy(13.dp)

@@ -44,7 +44,7 @@ import com.glasscast.app.data.EpisodeExtras
 import com.glasscast.app.data.Feed
 import com.glasscast.app.data.TranscriptCue
 
-private enum class InfoTab(val label: String) { NOTES("Notes"), CHAPTERS("Chapters"), TRANSCRIPT("Transcript") }
+private enum class InfoTab(val label: String) { NOTES(tr("Notes")), CHAPTERS(tr("Chapters")), TRANSCRIPT(tr("Transcript")) }
 
 /**
  * Notes, chapters and transcript without a container — the Info tab of the
@@ -224,7 +224,7 @@ private fun TranscriptList(
             )
             Spacer(Modifier.size(10.dp))
             Text(
-                text = "Loading transcript…",
+                text = tr("Loading transcript…"),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -234,7 +234,7 @@ private fun TranscriptList(
 
     if (cues.isEmpty()) {
         Text(
-            text = "This episode's transcript couldn't be read.",
+            text = tr("This episode's transcript couldn't be read."),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 24.dp)

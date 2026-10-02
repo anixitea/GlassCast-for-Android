@@ -1,0 +1,257 @@
+Library || 보관함 || Mediathek || Biblioteca || Bibliotheek
+Latest || 최신 || Neu || Novedades || Nieuw
+Downloads || 다운로드 || Downloads || Descargas || Downloads
+Discover || 둘러보기 || Entdecken || Descubrir || Ontdekken
+Search || 검색 || Suchen || Buscar || Zoeken
+Settings || 설정 || Einstellungen || Ajustes || Instellingen
+Podcasts || 팟캐스트 || Podcasts || Pódcasts || Podcasts
+Playing || 재생 중 || Läuft || Reproduciendo || Speelt af
+Now playing || 지금 재생 중 || Läuft gerade || Reproduciendo ahora || Speelt nu af
+Up Next || 다음 재생 || Als Nächstes || A continuación || Hierna
+Up Next · {0} || 다음 재생 · {0} || Als Nächstes · {0} || A continuación · {0} || Hierna · {0}
+UP NEXT || 다음 재생 || ALS NÄCHSTES || A CONTINUACIÓN || HIERNA
+Playing Next || 다음 재생 || Als Nächstes || A continuación || Hierna
+Playing next || 다음에 재생 || Wird als Nächstes gespielt || Se reproducirá a continuación || Speelt hierna af
+Nothing queued || 대기 중인 에피소드 없음 || Nichts in der Warteschlange || Nada en cola || Niets in de wachtrij
+Info || 정보 || Info || Información || Info
+Episode info || 에피소드 정보 || Folgeninfo || Información del episodio || Afleveringsinfo
+Notes || 노트 || Notizen || Notas || Notities
+Chapters || 챕터 || Kapitel || Capítulos || Hoofdstukken
+Transcript || 대본 || Transkript || Transcripción || Transcript
+Notes, chapters and transcript || 노트, 챕터, 대본 || Notizen, Kapitel und Transkript || Notas, capítulos y transcripción || Notities, hoofdstukken en transcript
+Loading transcript… || 대본 불러오는 중… || Transkript wird geladen … || Cargando transcripción… || Transcript laden…
+This episode's transcript couldn't be read. || 이 에피소드의 대본을 읽을 수 없습니다. || Das Transkript dieser Folge konnte nicht gelesen werden. || No se pudo leer la transcripción de este episodio. || Het transcript van deze aflevering kon niet worden gelezen.
+Speed & sound || 속도 및 사운드 || Tempo & Ton || Velocidad y sonido || Snelheid en geluid
+Timer || 타이머 || Timer || Temporizador || Timer
+Timer: {0} || 타이머: {0} || Timer: {0} || Temporizador: {0} || Timer: {0}
+Sleep timer || 취침 타이머 || Schlaftimer || Temporizador de apagado || Slaaptimer
+SPEED || 속도 || TEMPO || VELOCIDAD || SNELHEID
+SOUND || 사운드 || TON || SONIDO || GELUID
+TIMER || 타이머 || TIMER || TEMPORIZADOR || TIMER
+Skip silence || 무음 건너뛰기 || Stille überspringen || Omitir silencios || Stiltes overslaan
+Skip silence: on || 무음 건너뛰기: 켬 || Stille überspringen: an || Omitir silencios: sí || Stiltes overslaan: aan
+Skip silence: off || 무음 건너뛰기: 끔 || Stille überspringen: aus || Omitir silencios: no || Stiltes overslaan: uit
+Boost voices || 음성 강조 || Stimmen verstärken || Realzar voces || Stemmen versterken
+Boost voices: on || 음성 강조: 켬 || Stimmen verstärken: an || Realzar voces: sí || Stemmen versterken: aan
+Boost voices: off || 음성 강조: 끔 || Stimmen verstärken: aus || Realzar voces: no || Stemmen versterken: uit
+Shake to restart || 흔들어서 다시 시작 || Schütteln zum Neustarten || Agitar para reiniciar || Schudden om te herstarten
+Off || 끔 || Aus || Desactivado || Uit
+End || 끝 || Ende || Fin || Einde
+End of episode || 에피소드 끝 || Ende der Folge || Final del episodio || Einde van aflevering
+{0} minutes || {0}분 || {0} Minuten || {0} minutos || {0} minuten
+{0} min || {0}분 || {0} Min. || {0} min || {0} min
+1 hour || 1시간 || 1 Stunde || 1 hora || 1 uur
+Volume fades over the last 15 seconds rather than cutting mid-word. || 마지막 15초 동안 소리가 서서히 줄어듭니다. || Die Lautstärke wird in den letzten 15 Sekunden ausgeblendet. || El volumen baja poco a poco en los últimos 15 segundos. || Het volume neemt de laatste 15 seconden geleidelijk af.
+Play || 재생 || Abspielen || Reproducir || Afspelen
+Play now || 지금 재생 || Jetzt abspielen || Reproducir ahora || Nu afspelen
+Play next || 다음에 재생 || Als Nächstes abspielen || Reproducir a continuación || Hierna afspelen
+Play latest || 최신 에피소드 재생 || Neueste abspielen || Reproducir el último || Nieuwste afspelen
+Resume || 이어서 재생 || Fortsetzen || Reanudar || Hervatten
+Restart || 처음부터 || Neu starten || Reiniciar || Opnieuw
+Restart episode || 에피소드 처음부터 || Folge neu starten || Reiniciar episodio || Aflevering opnieuw starten
+Next || 다음 || Weiter || Siguiente || Volgende
+Back || 뒤로 || Zurück || Atrás || Terug
+Back 30 seconds || 30초 뒤로 || 30 Sekunden zurück || Retroceder 30 segundos || 30 seconden terug
+Forward 30 seconds || 30초 앞으로 || 30 Sekunden vor || Avanzar 30 segundos || 30 seconden vooruit
+Play on || 재생 기기 || Wiedergabe auf || Reproducir en || Afspelen op
+Play on another device || 다른 기기에서 재생 || Auf anderem Gerät abspielen || Reproducir en otro dispositivo || Afspelen op ander apparaat
+This phone || 이 휴대전화 || Dieses Telefon || Este teléfono || Deze telefoon
+Playing here || 여기서 재생 중 || Läuft hier || Reproduciendo aquí || Speelt hier af
+Headphones, car, speakers || 헤드폰, 자동차, 스피커 || Kopfhörer, Auto, Lautsprecher || Auriculares, coche, altavoces || Koptelefoon, auto, speakers
+Bluetooth and other outputs || 블루투스 및 기타 출력 || Bluetooth und andere Ausgänge || Bluetooth y otras salidas || Bluetooth en andere uitgangen
+Looking for TVs and speakers on your Wi-Fi… || Wi-Fi에서 TV와 스피커를 찾는 중… || Suche nach Fernsehern und Lautsprechern im WLAN … || Buscando televisores y altavoces en tu wifi… || Zoeken naar tv's en speakers op je wifi…
+Add to Up Next || 다음 재생에 추가 || Zu „Als Nächstes" hinzufügen || Añadir a A continuación || Toevoegen aan Hierna
+Added to Up Next || 다음 재생에 추가됨 || Zu „Als Nächstes" hinzugefügt || Añadido a A continuación || Toegevoegd aan Hierna
+Remove from Up Next || 다음 재생에서 제거 || Aus „Als Nächstes" entfernen || Quitar de A continuación || Verwijderen uit Hierna
+Mark as played || 재생함으로 표시 || Als gespielt markieren || Marcar como reproducido || Markeren als afgespeeld
+Mark as unplayed || 재생 안 함으로 표시 || Als ungespielt markieren || Marcar como no reproducido || Markeren als niet afgespeeld
+Marked as played || 재생함으로 표시됨 || Als gespielt markiert || Marcado como reproducido || Gemarkeerd als afgespeeld
+Marked as unplayed || 재생 안 함으로 표시됨 || Als ungespielt markiert || Marcado como no reproducido || Gemarkeerd als niet afgespeeld
+Played || 재생함 || Gespielt || Reproducido || Afgespeeld
+Hide played || 재생한 항목 숨기기 || Gespieltes ausblenden || Ocultar reproducidos || Afgespeeld verbergen
+{0} unplayed || 미재생 {0}개 || {0} ungespielt || {0} sin reproducir || {0} niet afgespeeld
+{0} unplayed across {1} shows || 프로그램 {1}개에 미재생 {0}개 || {0} ungespielt in {1} Sendungen || {0} sin reproducir en {1} programas || {0} niet afgespeeld in {1} programma's
+{0} EPISODES || 에피소드 {0}개 || {0} FOLGEN || {0} EPISODIOS || {0} AFLEVERINGEN
+{0} episodes || 에피소드 {0}개 || {0} Folgen || {0} episodios || {0} afleveringen
+1 episode || 에피소드 1개 || 1 Folge || 1 episodio || 1 aflevering
+{0} shows || 프로그램 {0}개 || {0} Sendungen || {0} programas || {0} programma's
+ · UPDATED {0} ||  · {0} 업데이트 ||  · AKTUALISIERT {0} ||  · ACTUALIZADO {0} ||  · BIJGEWERKT {0}
+{0} · {1} episodes || {0} · 에피소드 {1}개 || {0} · {1} Folgen || {0} · {1} episodios || {0} · {1} afleveringen
+EPISODES || 에피소드 || FOLGEN || EPISODIOS || AFLEVERINGEN
+PAUSED || 일시정지됨 || PAUSIERT || EN PAUSA || GEPAUZEERD
+Today || 오늘 || Heute || Hoy || Vandaag
+Yesterday || 어제 || Gestern || Ayer || Gisteren
+Newest first || 최신순 || Neueste zuerst || Más recientes primero || Nieuwste eerst
+Oldest first || 오래된순 || Älteste zuerst || Más antiguos primero || Oudste eerst
+Follow || 팔로우 || Folgen || Seguir || Volgen
+Following || 팔로우 중 || Gefolgt || Siguiendo || Volgend
+Unfollow || 팔로우 취소 || Nicht mehr folgen || Dejar de seguir || Ontvolgen
+Unfollow? || 팔로우를 취소할까요? || Nicht mehr folgen? || ¿Dejar de seguir? || Ontvolgen?
+{0} will be removed from your library. || {0}이(가) 보관함에서 삭제됩니다. || {0} wird aus deiner Mediathek entfernt. || {0} se quitará de tu biblioteca. || {0} wordt uit je bibliotheek verwijderd.
+Unsubscribe || 구독 취소 || Abo beenden || Cancelar suscripción || Abonnement opzeggen
+Unsubscribe? || 구독을 취소할까요? || Abo beenden? || ¿Cancelar suscripción? || Abonnement opzeggen?
+{0} and its downloaded episode list will be removed. || {0}과(와) 받아 둔 에피소드 목록이 삭제됩니다. || {0} und die geladene Folgenliste werden entfernt. || Se quitarán {0} y su lista de episodios. || {0} en de lijst met afleveringen worden verwijderd.
+Subscribed || 구독 중 || Abonniert || Suscrito || Geabonneerd
+In your library || 보관함에 있음 || In deiner Mediathek || En tu biblioteca || In je bibliotheek
+Add to library || 보관함에 추가 || Zur Mediathek hinzufügen || Añadir a la biblioteca || Toevoegen aan bibliotheek
+Added to library || 보관함에 추가됨 || Zur Mediathek hinzugefügt || Añadido a la biblioteca || Toegevoegd aan bibliotheek
+Removed from library || 보관함에서 삭제됨 || Aus der Mediathek entfernt || Quitado de la biblioteca || Verwijderd uit bibliotheek
+Couldn't open that show || 프로그램을 열 수 없습니다 || Sendung konnte nicht geöffnet werden || No se pudo abrir el programa || Programma kon niet worden geopend
+Already subscribed || 이미 구독 중입니다 || Bereits abonniert || Ya estás suscrito || Al geabonneerd
+Couldn't read that feed || 피드를 읽을 수 없습니다 || Feed konnte nicht gelesen werden || No se pudo leer el feed || Feed kon niet worden gelezen
+No episodes found || 에피소드를 찾을 수 없습니다 || Keine Folgen gefunden || No se encontraron episodios || Geen afleveringen gevonden
+Not interested || 관심 없음 || Kein Interesse || No me interesa || Niet geïnteresseerd
+Not interested? || 관심 없음으로 표시할까요? || Kein Interesse? || ¿No te interesa? || Niet geïnteresseerd?
+{0} won't be recommended again. || {0}은(는) 다시 추천되지 않습니다. || {0} wird nicht mehr empfohlen. || {0} no se volverá a recomendar. || {0} wordt niet meer aanbevolen.
+You won't see this in Discover again || 둘러보기에 다시 표시되지 않습니다 || Wird in „Entdecken" nicht mehr angezeigt || No volverás a verlo en Descubrir || Je ziet dit niet meer in Ontdekken
+Show again || 다시 표시 || Wieder anzeigen || Volver a mostrar || Weer tonen
+{0} show marked not interested || 관심 없음으로 표시한 프로그램 {0}개 || {0} Sendung als „Kein Interesse" markiert || {0} programa marcado como no me interesa || {0} programma gemarkeerd als niet geïnteresseerd
+{0} shows marked not interested || 관심 없음으로 표시한 프로그램 {0}개 || {0} Sendungen als „Kein Interesse" markiert || {0} programas marcados como no me interesa || {0} programma's gemarkeerd als niet geïnteresseerd
+New recommendations || 새 추천 || Neue Empfehlungen || Nuevas recomendaciones || Nieuwe aanbevelingen
+Top picks for you || 추천 프로그램 || Top-Empfehlungen für dich || Lo mejor para ti || Toppers voor jou
+The best of your strongest genres || 가장 즐겨 듣는 장르의 인기 프로그램 || Das Beste aus deinen Lieblingsgenres || Lo mejor de tus géneros favoritos || Het beste uit je favoriete genres
+Popular right now || 지금 인기 || Gerade beliebt || Popular ahora || Nu populair
+What everyone's listening to || 모두가 듣고 있는 프로그램 || Was alle gerade hören || Lo que todos escuchan || Waar iedereen naar luistert
+Top podcasts || 인기 팟캐스트 || Top-Podcasts || Pódcasts más populares || Toppodcasts
+Picked from the shows you follow || 팔로우 중인 프로그램을 바탕으로 추천 || Ausgewählt nach deinen Sendungen || Elegido según los programas que sigues || Gekozen op basis van je programma's
+Building picks from the shows you follow. || 팔로우 중인 프로그램으로 추천을 만드는 중입니다. || Empfehlungen werden aus deinen Sendungen erstellt. || Creando recomendaciones a partir de tus programas. || Aanbevelingen maken op basis van je programma's.
+Finding shows… || 프로그램 찾는 중… || Sendungen werden gesucht … || Buscando programas… || Programma's zoeken…
+Nothing to suggest right now || 지금은 추천할 프로그램이 없습니다 || Gerade keine Vorschläge || Nada que sugerir por ahora || Nu niets om voor te stellen
+Charts didn't load. Search or paste a feed URL. || 차트를 불러오지 못했습니다. 검색하거나 피드 URL을 붙여 넣으세요. || Charts konnten nicht geladen werden. Suche oder füge eine Feed-URL ein. || No se cargaron las listas. Busca o pega la URL de un feed. || Hitlijsten niet geladen. Zoek of plak een feed-URL.
+Couldn't reach the podcast directory. Check the connection and come back. || 팟캐스트 디렉터리에 연결할 수 없습니다. 연결을 확인한 뒤 다시 시도하세요. || Das Podcast-Verzeichnis ist nicht erreichbar. Prüfe die Verbindung. || No se pudo conectar con el directorio. Revisa la conexión. || De podcastgids is niet bereikbaar. Controleer de verbinding.
+Shows, hosts, topics || 프로그램, 진행자, 주제 || Sendungen, Hosts, Themen || Programas, presentadores, temas || Programma's, presentatoren, onderwerpen
+Nothing found. A feed URL always works. || 검색 결과가 없습니다. 피드 URL은 언제나 사용할 수 있습니다. || Nichts gefunden. Eine Feed-URL funktioniert immer. || No se encontró nada. Una URL de feed siempre funciona. || Niets gevonden. Een feed-URL werkt altijd.
+Looking for a show by name? Use the Search tab. || 이름으로 프로그램을 찾나요? 검색 탭을 사용하세요. || Suchst du eine Sendung? Nutze den Tab „Suchen". || ¿Buscas un programa por nombre? Usa la pestaña Buscar. || Zoek je een programma op naam? Gebruik het tabblad Zoeken.
+Search library || 보관함 검색 || Mediathek durchsuchen || Buscar en la biblioteca || Bibliotheek doorzoeken
+Search your library || 보관함 검색 || Mediathek durchsuchen || Buscar en tu biblioteca || Zoek in je bibliotheek
+Your shows and episodes || 내 프로그램과 에피소드 || Deine Sendungen und Folgen || Tus programas y episodios || Je programma's en afleveringen
+Type to filter the shows and episodes you already have. || 입력해서 보관함의 프로그램과 에피소드를 걸러 보세요. || Tippe, um deine Sendungen und Folgen zu filtern. || Escribe para filtrar tus programas y episodios. || Typ om je programma's en afleveringen te filteren.
+Nothing in your library matches. The Search tab looks further afield. || 보관함에 일치하는 항목이 없습니다. 검색 탭에서 더 찾아보세요. || Nichts in deiner Mediathek passt. „Suchen" sucht weiter. || Nada coincide en tu biblioteca. Buscar llega más lejos. || Niets in je bibliotheek komt overeen. Zoeken kijkt verder.
+Nothing here yet || 아직 아무것도 없습니다 || Noch nichts hier || Aún no hay nada || Nog niets hier
+Add a show || 프로그램 추가 || Sendung hinzufügen || Añadir un programa || Programma toevoegen
+Add by RSS || RSS로 추가 || Per RSS hinzufügen || Añadir por RSS || Toevoegen via RSS
+ADD BY URL || URL로 추가 || PER URL HINZUFÜGEN || AÑADIR POR URL || TOEVOEGEN VIA URL
+Paste an RSS feed || RSS 피드 붙여 넣기 || RSS-Feed einfügen || Pegar un feed RSS || Plak een RSS-feed
+Add this feed || 이 피드 추가 || Diesen Feed hinzufügen || Añadir este feed || Deze feed toevoegen
+Add || 추가 || Hinzufügen || Añadir || Toevoegen
+Add all || 모두 추가 || Alle hinzufügen || Añadir todos || Alles toevoegen
+Refresh || 새로고침 || Aktualisieren || Actualizar || Vernieuwen
+Refreshing… || 새로고침 중… || Wird aktualisiert … || Actualizando… || Vernieuwen…
+Refresh all || 모두 새로고침 || Alle aktualisieren || Actualizar todo || Alles vernieuwen
+Refresh all shows || 모든 프로그램 새로고침 || Alle Sendungen aktualisieren || Actualizar todos los programas || Alle programma's vernieuwen
+See what's new || 새 에피소드 보기 || Neues ansehen || Ver novedades || Bekijk wat nieuw is
+Opening… || 여는 중… || Wird geöffnet … || Abriendo… || Openen…
+Loading… || 불러오는 중… || Wird geladen … || Cargando… || Laden…
+Recently updated || 최근 업데이트순 || Zuletzt aktualisiert || Actualizados recientemente || Recent bijgewerkt
+Recently played || 최근 재생순 || Zuletzt gespielt || Reproducidos recientemente || Recent afgespeeld
+SHOW ORDER || 프로그램 정렬 || SENDUNGEN SORTIEREN || ORDEN DE PROGRAMAS || VOLGORDE PROGRAMMA'S
+SHOWS || 프로그램 || SENDUNGEN || PROGRAMAS || PROGRAMMA'S
+SUBSCRIPTIONS || 구독 || ABOS || SUSCRIPCIONES || ABONNEMENTEN
+NOTIFICATIONS || 알림 || MITTEILUNGEN || NOTIFICACIONES || MELDINGEN
+DISCOVER || 둘러보기 || ENTDECKEN || DESCUBRIR || ONTDEKKEN
+UPDATES || 업데이트 || UPDATES || ACTUALIZACIONES || UPDATES
+ABOUT || 정보 || INFO || ACERCA DE || OVER
+APPEARANCE || 화면 || DARSTELLUNG || APARIENCIA || WEERGAVE
+SYNC || 동기화 || SYNC || SINCRONIZACIÓN || SYNC
+GPODDER SYNC || GPODDER 동기화 || GPODDER-SYNC || SINCRONIZACIÓN GPODDER || GPODDER-SYNC
+System || 시스템 || System || Sistema || Systeem
+Light || 라이트 || Hell || Claro || Licht
+Dark || 다크 || Dunkel || Oscuro || Donker
+Dynamic color || 다이내믹 컬러 || Dynamische Farben || Color dinámico || Dynamische kleuren
+New episodes || 새 에피소드 || Neue Folgen || Nuevos episodios || Nieuwe afleveringen
+{0} new episodes || 새 에피소드 {0}개 || {0} neue Folgen || {0} episodios nuevos || {0} nieuwe afleveringen
+When a show you follow publishes a new episode || 팔로우 중인 프로그램에 새 에피소드가 올라오면 || Wenn eine Sendung eine neue Folge veröffentlicht || Cuando un programa que sigues publica un episodio || Als een programma dat je volgt een nieuwe aflevering publiceert
+Notifications are blocked — tap to allow || 알림이 차단됨 — 탭하여 허용 || Mitteilungen blockiert – zum Erlauben tippen || Notificaciones bloqueadas: toca para permitir || Meldingen geblokkeerd — tik om toe te staan
+Import / export OPML || OPML 가져오기 / 내보내기 || OPML importieren / exportieren || Importar / exportar OPML || OPML importeren / exporteren
+Import or export OPML || OPML 가져오기 또는 내보내기 || OPML importieren oder exportieren || Importar o exportar OPML || OPML importeren of exporteren
+Import file || 파일 가져오기 || Datei importieren || Importar archivo || Bestand importeren
+Export mine || 내 보관함 내보내기 || Meine exportieren || Exportar la mía || Mijn bibliotheek exporteren
+Choose another || 다른 파일 선택 || Andere wählen || Elegir otro || Andere kiezen
+Reading file… || 파일 읽는 중… || Datei wird gelesen … || Leyendo archivo… || Bestand lezen…
+No subscriptions found in that file. || 파일에서 구독을 찾을 수 없습니다. || Keine Abos in dieser Datei gefunden. || No se encontraron suscripciones en el archivo. || Geen abonnementen gevonden in dit bestand.
+{0} subscriptions in that file. || 파일에 구독 {0}개가 있습니다. || {0} Abos in dieser Datei. || {0} suscripciones en el archivo. || {0} abonnementen in dit bestand.
+Adding {0} of {1}… || {1}개 중 {0}개 추가 중… || {0} von {1} wird hinzugefügt … || Añadiendo {0} de {1}… || {0} van {1} toevoegen…
+Saved. || 저장했습니다. || Gespeichert. || Guardado. || Opgeslagen.
+gPodder sync || gPodder 동기화 || gPodder-Sync || Sincronización gPodder || gPodder-sync
+Server || 서버 || Server || Servidor || Server
+Server (gpodder.net) || 서버 (gpodder.net) || Server (gpodder.net) || Servidor (gpodder.net) || Server (gpodder.net)
+Username || 사용자 이름 || Benutzername || Usuario || Gebruikersnaam
+Password || 비밀번호 || Passwort || Contraseña || Wachtwoord
+App password || 앱 비밀번호 || App-Passwort || Contraseña de aplicación || App-wachtwoord
+Connect || 연결 || Verbinden || Conectar || Verbinden
+Connecting… || 연결 중… || Wird verbunden … || Conectando… || Verbinden…
+Sync now || 지금 동기화 || Jetzt synchronisieren || Sincronizar ahora || Nu synchroniseren
+Syncing… || 동기화 중… || Wird synchronisiert … || Sincronizando… || Synchroniseren…
+Synced {0} || {0} 동기화됨 || Synchronisiert {0} || Sincronizado {0} || Gesynchroniseerd {0}
+Not synced yet || 아직 동기화 안 됨 || Noch nicht synchronisiert || Aún sin sincronizar || Nog niet gesynchroniseerd
+Sign out || 로그아웃 || Abmelden || Cerrar sesión || Afmelden
+Signed out || 로그아웃됨 || Abgemeldet || Sesión cerrada || Afgemeld
+Sync failed || 동기화 실패 || Synchronisierung fehlgeschlagen || Error de sincronización || Synchronisatie mislukt
+Fill in every field || 모든 항목을 입력하세요 || Bitte alle Felder ausfüllen || Rellena todos los campos || Vul alle velden in
+Wrong username or password || 사용자 이름 또는 비밀번호가 틀렸습니다 || Falscher Benutzername oder falsches Passwort || Usuario o contraseña incorrectos || Onjuiste gebruikersnaam of wachtwoord
+No gPodder sync found at that address || 이 주소에서 gPodder 동기화를 찾을 수 없습니다 || Unter dieser Adresse gibt es keinen gPodder-Sync || No hay sincronización gPodder en esa dirección || Geen gPodder-sync gevonden op dat adres
+The server had a problem ({0}) — try again later || 서버에 문제가 있습니다({0}). 나중에 다시 시도하세요 || Serverproblem ({0}) – versuche es später erneut || El servidor tuvo un problema ({0}); inténtalo más tarde || Probleem met de server ({0}) — probeer het later opnieuw
+The server said {0} || 서버 응답: {0} || Antwort des Servers: {0} || El servidor respondió {0} || De server antwoordde {0}
+Couldn't find that server || 서버를 찾을 수 없습니다 || Server nicht gefunden || No se encontró el servidor || Server niet gevonden
+The server took too long to answer || 서버 응답이 너무 늦습니다 || Der Server hat zu lange gebraucht || El servidor tardó demasiado en responder || De server reageerde te traag
+Couldn't reach the server || 서버에 연결할 수 없습니다 || Server nicht erreichbar || No se pudo conectar con el servidor || Server niet bereikbaar
+just now || 방금 || gerade eben || justo ahora || zojuist
+{0} min ago || {0}분 전 || vor {0} Min. || hace {0} min || {0} min geleden
+{0} h ago || {0}시간 전 || vor {0} Std. || hace {0} h || {0} u geleden
+{0} d ago || {0}일 전 || vor {0} T. || hace {0} d || {0} d geleden
+Download || 다운로드 || Laden || Descargar || Downloaden
+Downloaded || 다운로드됨 || Geladen || Descargado || Gedownload
+Downloading || 다운로드 중 || Wird geladen || Descargando || Downloaden
+Download removed || 다운로드 삭제됨 || Download entfernt || Descarga eliminada || Download verwijderd
+Download canceled || 다운로드 취소됨 || Download abgebrochen || Descarga cancelada || Download geannuleerd
+Download failed || 다운로드 실패 || Download fehlgeschlagen || Error en la descarga || Download mislukt
+Download failed — remove it and try again || 다운로드 실패 — 삭제 후 다시 시도하세요 || Download fehlgeschlagen – entfernen und erneut versuchen || Error en la descarga: quítala e inténtalo de nuevo || Download mislukt — verwijder en probeer opnieuw
+Remove download || 다운로드 삭제 || Download entfernen || Eliminar descarga || Download verwijderen
+Cancel download || 다운로드 취소 || Download abbrechen || Cancelar descarga || Download annuleren
+Delete download || 다운로드 삭제 || Download löschen || Eliminar descarga || Download verwijderen
+Nothing downloaded yet || 아직 다운로드한 항목이 없습니다 || Noch nichts geladen || Aún no hay descargas || Nog niets gedownload
+Episodes you save to listen offline || 오프라인으로 듣기 위해 저장한 에피소드 || Folgen zum Offline-Hören || Episodios guardados para escuchar sin conexión || Afleveringen om offline te luisteren
+Long-press any episode and choose Download to keep it for when you're offline. || 에피소드를 길게 누르고 다운로드를 선택하면 오프라인에서도 들을 수 있습니다. || Halte eine Folge gedrückt und wähle „Laden", um sie offline zu hören. || Mantén pulsado un episodio y elige Descargar para escucharlo sin conexión. || Houd een aflevering ingedrukt en kies Downloaden om offline te luisteren.
+{0} episode · {1} on this phone || 에피소드 {0}개 · 이 휴대전화에 {1} || {0} Folge · {1} auf diesem Telefon || {0} episodio · {1} en este teléfono || {0} aflevering · {1} op deze telefoon
+{0} episodes · {1} on this phone || 에피소드 {0}개 · 이 휴대전화에 {1} || {0} Folgen · {1} auf diesem Telefon || {0} episodios · {1} en este teléfono || {0} afleveringen · {1} op deze telefoon
+Swipe any episode left to add it here, or long-press it to play it next. || 에피소드를 왼쪽으로 밀면 여기에 추가되고, 길게 누르면 다음에 재생됩니다. || Wische eine Folge nach links, um sie hier einzureihen, oder halte sie gedrückt. || Desliza un episodio a la izquierda para añadirlo aquí, o mantenlo pulsado. || Veeg een aflevering naar links om hem hier toe te voegen, of houd hem ingedrukt.
+Swipe any episode left to add it here. || 에피소드를 왼쪽으로 밀면 여기에 추가됩니다. || Wische eine Folge nach links, um sie hier einzureihen. || Desliza un episodio a la izquierda para añadirlo aquí. || Veeg een aflevering naar links om hem hier toe te voegen.
+Remove || 삭제 || Entfernen || Quitar || Verwijderen
+Clear || 모두 지우기 || Leeren || Borrar || Wissen
+Cancel || 취소 || Abbrechen || Cancelar || Annuleren
+Try again || 다시 시도 || Erneut versuchen || Reintentar || Opnieuw proberen
+Allow || 허용 || Erlauben || Permitir || Toestaan
+Not now || 나중에 || Nicht jetzt || Ahora no || Niet nu
+Check for updates || 업데이트 확인 || Nach Updates suchen || Buscar actualizaciones || Controleren op updates
+Checking… || 확인 중… || Wird geprüft … || Comprobando… || Controleren…
+Checking GitHub… || GitHub 확인 중… || GitHub wird geprüft … || Comprobando GitHub… || GitHub controleren…
+You're on the latest version. || 최신 버전입니다. || Du hast die neueste Version. || Tienes la última versión. || Je hebt de nieuwste versie.
+Update || 업데이트 || Aktualisieren || Actualizar || Bijwerken
+Install || 설치 || Installieren || Instalar || Installeren
+Install {0} || {0} 설치 || {0} installieren || Instalar {0} || {0} installeren
+Downloading {0}% || 다운로드 중 {0}% || Wird geladen {0} % || Descargando {0} % || Downloaden {0}%
+Downloading… {0}% || 다운로드 중… {0}% || Wird geladen … {0} % || Descargando… {0} % || Downloaden… {0}%
+Allow installs || 설치 허용 || Installation erlauben || Permitir instalaciones || Installaties toestaan
+Allow installs, then press Install. || 설치를 허용한 뒤 설치를 누르세요. || Installation erlauben, dann „Installieren" drücken. || Permite instalaciones y pulsa Instalar. || Sta installaties toe en druk op Installeren.
+Confirm in the installer. || 설치 프로그램에서 확인하세요. || Im Installationsprogramm bestätigen. || Confirma en el instalador. || Bevestig in het installatieprogramma.
+Downloaded and verified. Confirm in Android's installer. || 다운로드와 확인을 마쳤습니다. Android 설치 프로그램에서 확인하세요. || Geladen und geprüft. Im Android-Installationsprogramm bestätigen. || Descargado y verificado. Confirma en el instalador de Android. || Gedownload en gecontroleerd. Bevestig in het installatieprogramma van Android.
+It asks once — switch it on, then come back. || 한 번만 묻습니다 — 허용한 뒤 돌아오세요. || Nur einmal nötig – einschalten und zurückkehren. || Solo se pide una vez: actívalo y vuelve. || Eén keer nodig — zet het aan en kom terug.
+View on GitHub || GitHub에서 보기 || Auf GitHub ansehen || Ver en GitHub || Bekijken op GitHub
+GlassCast {0} — up to date. || GlassCast {0} — 최신 버전입니다. || GlassCast {0} – aktuell. || GlassCast {0}: actualizado. || GlassCast {0} — up-to-date.
+GlassCast {0} is out || GlassCast {0} 출시 || GlassCast {0} ist da || Ya está GlassCast {0} || GlassCast {0} is uit
+GlassCast {0} is out. You have {1}. || GlassCast {0} 출시. 현재 버전은 {1}입니다. || GlassCast {0} ist da. Du hast {1}. || Ya está GlassCast {0}. Tienes {1}. || GlassCast {0} is uit. Je hebt {1}.
+You have {0} || 현재 버전 {0} || Du hast {0} || Tienes {0} || Je hebt {0}
+Add shows from the Search tab, or import an OPML file from the phone app. || 검색 탭에서 프로그램을 추가하거나 휴대전화 앱에서 OPML 파일을 가져오세요. || Füge Sendungen über „Suchen" hinzu oder importiere OPML aus der Handy-App. || Añade programas desde Buscar o importa un OPML desde la app del teléfono. || Voeg programma's toe via Zoeken of importeer OPML uit de telefoon-app.
+Paste an RSS feed URL to add your first show. Directory search arrives in the next build. || RSS 피드 URL을 붙여 넣어 첫 프로그램을 추가하세요. || Füge eine RSS-Feed-URL ein, um deine erste Sendung hinzuzufügen. || Pega la URL de un feed RSS para añadir tu primer programa. || Plak een RSS-feed-URL om je eerste programma toe te voegen.
+NOW PLAYING || 지금 재생 중 || LÄUFT GERADE || REPRODUCIENDO || SPEELT NU AF
+Removed from recommendations || 추천에서 제외됨 || Aus den Empfehlungen entfernt || Quitado de las recomendaciones || Uit aanbevelingen verwijderd
+Skip ads || 광고 건너뛰기 || Werbung überspringen || Saltar anuncios || Advertenties overslaan
+Ad skipped || 광고 건너뜀 || Werbung übersprungen || Anuncio omitido || Advertentie overgeslagen
+Show all again || 모두 다시 표시 || Alle wieder anzeigen || Volver a mostrar todo || Alles weer tonen
+Running || 실행 중 || Läuft || Activo || Actief
+Select || 선택 || Auswählen || Seleccionar || Selecteren
+Select all || 모두 선택 || Alle auswählen || Seleccionar todo || Alles selecteren
+Delete || 삭제 || Löschen || Eliminar || Verwijderen
+{0} selected || {0}개 선택됨 || {0} ausgewählt || {0} seleccionados || {0} geselecteerd
+Delete this download? || 이 다운로드를 삭제할까요? || Diesen Download löschen? || ¿Eliminar esta descarga? || Deze download verwijderen?
+Delete {0} downloads? || 다운로드 {0}개를 삭제할까요? || {0} Downloads löschen? || ¿Eliminar {0} descargas? || {0} downloads verwijderen?

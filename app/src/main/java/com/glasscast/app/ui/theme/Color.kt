@@ -18,7 +18,7 @@ val AccentPurple        = Color(0xFFAF52DE) // default — reads on the dark gro
 val AccentPurpleLight   = Color(0xFF9B37C3) // light mode — darker, more saturated
 val AccentPurplePressed = Color(0xFF7D23A0)
 
-// Dark ground — a grey, not a black. This is what SYSTEM and DARK resolve to.
+// Dark ground — a gray, not a black. This is what SYSTEM and DARK resolve to.
 val DarkGround0 = Color(0xFF17171B)
 val DarkGround1 = Color(0xFF1E1E23)
 val DarkGround2 = Color(0xFF24242A)

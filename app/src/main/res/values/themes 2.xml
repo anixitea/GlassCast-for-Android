@@ -1,0 +1,22 @@
+<resources>
+    <!-- Bare host theme. All real colour lives in Compose (ui/theme/Theme.kt).
+         The window background matches the light ground so there is no white
+         flash before the in-app splash draws. -->
+    <style name="Theme.GlassCast" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/ground_light</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+    </style>
+
+    <!--
+      TV host theme. Black window background rather than the light ground: a
+      television shows the window behind the app during transitions, and a white
+      flash on a dark panel is far more noticeable than on a phone in a lit room.
+    -->
+    <style name="Theme.GlassCast.Tv" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@android:color/black</item>
+        <item name="android:colorBackground">@android:color/black</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowFullscreen">true</item>
+    </style>
+</resources>

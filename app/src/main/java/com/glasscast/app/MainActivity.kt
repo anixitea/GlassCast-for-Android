@@ -44,7 +44,7 @@ class MainActivity : ComponentActivity() {
             val nowPlayingFeed by app.player.currentFeed.collectAsStateWithLifecycle()
 
             // The store has to be available above the theme, because in show
-            // colours mode the theme's primary is extracted from the artwork.
+            // colors mode the theme's primary is extracted from the artwork.
             CompositionLocalProvider(LocalImageStore provides app.imageStore) {
                 val artUrl = nowPlaying?.imageUrl
                     ?.ifBlank { nowPlayingFeed?.imageUrl.orEmpty() }
@@ -157,7 +157,7 @@ class MainActivity : ComponentActivity() {
             }
 
             // Android 15+ adapts the refresh rate to content, and a skin can
-            // read "no strong preference" as licence to sit at 60Hz. Asking for
+            // read "no strong preference" as license to sit at 60Hz. Asking for
             // the high frame-rate category states the preference in the newer
             // API as well as the older one.
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) {

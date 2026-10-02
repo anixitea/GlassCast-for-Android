@@ -1,5 +1,7 @@
 package com.glasscast.app
 
+import kotlinx.coroutines.launch
+
 import android.app.Application
 import com.glasscast.app.data.FeedStore
 import com.glasscast.app.data.ImageStore
@@ -28,6 +30,8 @@ class GlassCastApp : Application() {
         private set
     lateinit var downloads: com.glasscast.app.data.Downloads
         private set
+    lateinit var gpodder: com.glasscast.app.data.GPodderSync
+        private set
 
     /** Set when the app is opened by a shared or opened OPML file. */
     val pendingOpml = MutableStateFlow<android.net.Uri?>(null)
@@ -44,6 +48,8 @@ class GlassCastApp : Application() {
         downloads = com.glasscast.app.data.Downloads(this)
         player = PlayerConnection(this, feedStore, queueStore, downloads)
         updates = com.glasscast.app.update.AppUpdater(this)
+        gpodder = com.glasscast.app.data.GPodderSync(this, feedStore)
+        wireSync()
         initCast()
 
         // The channel exists from the start so it appears in system settings
@@ -51,6 +57,25 @@ class GlassCastApp : Application() {
         // every launch, which is idempotent and survives app updates.
         com.glasscast.app.background.NewEpisodeNotifier.ensureChannel(this)
         com.glasscast.app.background.BackgroundRefresh.apply(this, settings.newEpisodeNotifications.value)
+    }
+
+    /**
+     * gPodder sync's hooks: follows and unfollows, episodes marked played, and
+     * pauses go into its outbox; it syncs once at launch (and again from the
+     * background refresh). With no account set up, every hook is a no-op.
+     */
+    private fun wireSync() {
+        val sync = gpodder
+        feedStore.onSubscriptionChanged = { url, added -> sync.recordSubscription(url, added) }
+        feedStore.onMarkedPlayed = { ep, played ->
+            val total = ep.durationMs.coerceAtLeast(1_000L)
+            sync.recordPlay(ep, 0L, if (played) total else 0L, total)
+        }
+        player.onPaused = { ep, started, position, duration -> sync.recordPlay(ep, started, position, duration) }
+        sync.playingGuid = { player.currentEpisode.value?.guid }
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO).launch {
+            sync.sync()
+        }
     }
 
     /**

@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlin.math.PI
 import kotlin.math.sin
+import androidx.compose.ui.graphics.drawscope.clipRect
 
 /**
  * The wavy scrubber.
@@ -65,7 +66,10 @@ fun WavySlider(
      * height follows the voice — up on the words, down to a gentle ripple in
      * the pauses — instead of a constant swell. Read only while drawing.
      */
-    voice: (() -> Float)? = null
+    voice: (() -> Float)? = null,
+    /** Stretches drawn in [markColor] — ad breaks — as fractions of the whole. */
+    marks: List<ClosedFloatingPointRange<Float>> = emptyList(),
+    markColor: Color = color
 ) {
     var dragging by remember { mutableStateOf(false) }
     var local by remember { mutableStateOf(0f) }
@@ -132,8 +136,10 @@ fun WavySlider(
         // Played: the wave. Sampled every 2px, which is smooth at any density
         // and cheap enough to redraw on every frame of the animation.
         val playedEnd = (head - gap).coerceAtLeast(0f)
+        var played: Path? = null
         if (playedEnd > stroke) {
             val path = Path()
+            played = path
             var x = stroke / 2f
             path.moveTo(x, cy + a * sin(k * x - phase))
             while (x < playedEnd) {
@@ -160,6 +166,26 @@ fun WavySlider(
             )
         }
         drawCircle(color.copy(alpha = 0.55f), radius = dotR, center = Offset(w - dotR, cy))
+
+        // Ad breaks: the same wave and track, redrawn in their own color
+        // inside each break's span.
+        marks.forEach { m ->
+            val left = (m.start * w).coerceIn(0f, w)
+            val right = (m.endInclusive * w).coerceIn(0f, w)
+            if (right - left < 1f) return@forEach
+            clipRect(left = left, top = 0f, right = right, bottom = size.height) {
+                played?.let { drawPath(it, markColor, style = Stroke(width = stroke, cap = StrokeCap.Round)) }
+                if (restStart < restEnd) {
+                    drawLine(
+                        color = markColor.copy(alpha = 0.6f),
+                        start = Offset(restStart, cy),
+                        end = Offset(restEnd, cy),
+                        strokeWidth = stroke,
+                        cap = StrokeCap.Round
+                    )
+                }
+            }
+        }
 
         // The playhead bar — the part a finger aims at.
         if (showThumb) {

@@ -91,8 +91,24 @@ class PlayerConnection(
             ep?.let { store.feedFor(it) }
         }.stateIn(scope, SharingStarted.Eagerly, null)
 
+    /** Where the current listening session began, for gPodder's "started". */
+    private var sessionStartMs = 0L
+
+    /** Told when playback pauses: the episode, where this session started, where it stopped, its length. */
+    var onPaused: ((Episode, Long, Long, Long) -> Unit)? = null
+
     private val listener = object : Player.Listener {
-        override fun onIsPlayingChanged(isPlaying: Boolean) { _isPlaying.value = isPlaying }
+        override fun onIsPlayingChanged(isPlaying: Boolean) {
+            _isPlaying.value = isPlaying
+            val c = controller ?: return
+            if (isPlaying) {
+                sessionStartMs = c.currentPosition.coerceAtLeast(0L)
+            } else {
+                val ep = currentEpisode.value ?: return
+                val d = c.duration.takeIf { it > 0 && it != C.TIME_UNSET } ?: ep.durationMs
+                onPaused?.invoke(ep, sessionStartMs, c.currentPosition.coerceAtLeast(0L), d)
+            }
+        }
 
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             _currentMediaId.value = mediaItem?.mediaId
@@ -321,44 +337,8 @@ class PlayerConnection(
      * artwork set it falls back to whatever picture is embedded in the file, so
      * the lock screen shows something stale or nothing at all.
      */
-    private fun mediaItemFor(episode: Episode, feed: Feed?): MediaItem {
-        val art = episode.imageUrl.ifBlank { feed?.imageUrl.orEmpty() }
-        val metadata = MediaMetadata.Builder()
-            .setTitle(episode.title)
-            .setArtist(feed?.title ?: feed?.author.orEmpty())
-            .setAlbumTitle(feed?.title.orEmpty())
-            .setIsBrowsable(false)
-            .setIsPlayable(true)
-            .apply { if (art.isNotBlank()) setArtworkUri(Uri.parse(art)) }
-            // The online address travels with every item, so a Cast hand-off
-            // can swap a downloaded file back to something the TV can reach.
-            .setExtras(android.os.Bundle().apply { putString(REMOTE_URL, episode.audioUrl) })
-            .build()
-
-        // Downloaded: play the file. Otherwise, stream.
-        val local = downloads?.fileFor(episode.guid)
-        return MediaItem.Builder()
-            .setMediaId(episode.guid)
-            .setUri(local?.let { Uri.fromFile(it) } ?: Uri.parse(episode.audioUrl))
-            // Required for Cast: the receiver is told what it's playing rather
-            // than sniffing it, and the Cast converter refuses items without a
-            // type. ExoPlayer only treats it as a hint, and still sniffs.
-            .setMimeType(mimeTypeFor(episode.audioUrl))
-            .setMediaMetadata(metadata)
-            .build()
-    }
-
-    private fun mimeTypeFor(url: String): String {
-        val path = url.substringBefore('?').lowercase()
-        return when {
-            path.endsWith(".m4a") || path.endsWith(".mp4") || path.endsWith(".m4b") -> "audio/mp4"
-            path.endsWith(".aac") -> "audio/aac"
-            path.endsWith(".ogg") || path.endsWith(".oga") -> "audio/ogg"
-            path.endsWith(".opus") -> "audio/ogg"
-            path.endsWith(".wav") -> "audio/wav"
-            else -> "audio/mpeg"
-        }
-    }
+    private fun mediaItemFor(episode: Episode, feed: Feed?): MediaItem =
+        EpisodeItems.playable(episode, feed, downloads)
 
     /**
      * Replace the session's item in place after metadata changes — capture the

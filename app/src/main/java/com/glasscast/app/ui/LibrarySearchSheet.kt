@@ -125,7 +125,7 @@ fun LibrarySearchSheet(
                 Box(Modifier.weight(1f)) {
                     if (query.isEmpty()) {
                         Text(
-                            text = "Your shows and episodes",
+                            text = tr("Your shows and episodes"),
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -155,7 +155,7 @@ fun LibrarySearchSheet(
                     ) {
                         Icon(
                             Icons.Filled.Close,
-                            contentDescription = "Clear",
+                            contentDescription = tr("Clear"),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(18.dp)
                         )
@@ -166,14 +166,14 @@ fun LibrarySearchSheet(
             Spacer(Modifier.height(12.dp))
 
             when {
-                trimmed.length < 2 -> Hint("Type to filter the shows and episodes you already have.")
+                trimmed.length < 2 -> Hint(tr("Type to filter the shows and episodes you already have."))
 
                 matchingShows.isEmpty() && matchingEpisodes.isEmpty() ->
-                    Hint("Nothing in your library matches. The Search tab looks further afield.")
+                    Hint(tr("Nothing in your library matches. The Search tab looks further afield."))
 
                 else -> LazyColumn(Modifier.heightIn(max = 460.dp)) {
                     if (matchingShows.isNotEmpty()) {
-                        item { SectionHeader("SHOWS") }
+                        item { SectionHeader(tr("SHOWS")) }
                         items(matchingShows, key = { "show-${it.url}" }) { feed ->
                             Row(
                                 Modifier
@@ -207,7 +207,7 @@ fun LibrarySearchSheet(
                     }
 
                     if (matchingEpisodes.isNotEmpty()) {
-                        item { SectionHeader("EPISODES") }
+                        item { SectionHeader(tr("EPISODES")) }
                         items(matchingEpisodes, key = { "ep-${it.guid}" }) { episode ->
                             val feed = feedsByUrl[episode.feedUrl]
                             Row(

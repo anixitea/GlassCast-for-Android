@@ -1,5 +1,5 @@
 <resources>
-    <!-- Bare host theme. All real colour lives in Compose (ui/theme/Theme.kt).
+    <!-- Bare host theme. All real color lives in Compose (ui/theme/Theme.kt).
          The window background matches the light ground so there is no white
          flash before the in-app splash draws. -->
     <style name="Theme.GlassCast" parent="android:Theme.Material.Light.NoActionBar">

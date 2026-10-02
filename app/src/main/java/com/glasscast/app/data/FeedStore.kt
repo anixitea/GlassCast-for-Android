@@ -1,5 +1,6 @@
 package com.glasscast.app.data
 
+import com.glasscast.app.ui.tr
 import android.content.Context
 import android.util.AtomicFile
 import java.io.File
@@ -29,7 +30,7 @@ import org.json.JSONObject
  * This used to be a single JSON blob in SharedPreferences, and it crashed the
  * app out of memory. Three things compounded:
  *
- *  - every save serialised the *whole library* — every episode's full HTML
+ *  - every save serialized the *whole library* — every episode's full HTML
  *    show notes — into one string of tens of megabytes;
  *  - SharedPreferences keeps its entire contents in memory for the life of the
  *    process, so a second full copy sat on the heap permanently;
@@ -215,17 +216,23 @@ class FeedStore(context: Context) {
     fun feedFor(episode: Episode): Feed? = _feeds.value.firstOrNull { it.url == episode.feedUrl }
 
     /** Returns null on success, or a human-readable reason on failure. */
+    /** Told of every follow (true) and unfollow (false) — gPodder sync's outbox. */
+    var onSubscriptionChanged: ((feedUrl: String, added: Boolean) -> Unit)? = null
+    /** Told when an episode is marked played or unplayed by hand. */
+    var onMarkedPlayed: ((Episode, Boolean) -> Unit)? = null
+
     suspend fun subscribe(rawUrl: String): String? = withContext(Dispatchers.IO) {
-        val url = normalise(rawUrl)
-        if (_feeds.value.any { it.url.equals(url, ignoreCase = true) }) return@withContext "Already subscribed"
+        val url = normalize(rawUrl)
+        if (_feeds.value.any { it.url.equals(url, ignoreCase = true) }) return@withContext tr("Already subscribed")
         _refreshing.value = true
         try {
-            val result = RssParser.fetch(url) ?: return@withContext "Couldn't read that feed"
-            if (result.episodes.isEmpty() && result.feed.title.isBlank()) return@withContext "No episodes found"
+            val result = RssParser.fetch(url) ?: return@withContext tr("Couldn't read that feed")
+            if (result.episodes.isEmpty() && result.feed.title.isBlank()) return@withContext tr("No episodes found")
             _feeds.value = _feeds.value + result.feed
             _episodes.value = _episodes.value + (url to result.episodes)
             markFeedsDirty()
             markEpisodesDirty(url)
+            onSubscriptionChanged?.invoke(url, true)
             null
         } finally {
             _refreshing.value = false
@@ -236,6 +243,7 @@ class FeedStore(context: Context) {
         _feeds.value = _feeds.value.filterNot { it.url == feed.url }
         _episodes.value = _episodes.value - feed.url
         markRemoved(feed.url)
+        onSubscriptionChanged?.invoke(feed.url, false)
     }
 
     suspend fun refresh(feed: Feed) = withContext(Dispatchers.IO) {
@@ -344,7 +352,7 @@ class FeedStore(context: Context) {
      * search before committing to it.
      */
     suspend fun preview(rawUrl: String): FeedFetch? = withContext(Dispatchers.IO) {
-        RssParser.fetch(normalise(rawUrl))
+        RssParser.fetch(normalize(rawUrl))
     }
 
     private val _importProgress = MutableStateFlow(ImportProgress())
@@ -362,7 +370,7 @@ class FeedStore(context: Context) {
         _importProgress.value = ImportProgress(total = entries.size, running = true)
         entries.forEach { entry ->
             val already = _feeds.value.any { it.url.equals(entry.url, ignoreCase = true) }
-            val reason = if (already) "Already subscribed" else subscribe(entry.url)
+            val reason = if (already) tr("Already subscribed") else subscribe(entry.url)
             _importProgress.value = _importProgress.value.let {
                 it.copy(
                     done = it.done + 1,
@@ -383,9 +391,10 @@ class FeedStore(context: Context) {
 
     fun setPlayed(episode: Episode, played: Boolean) {
         updateEpisode(episode.copy(played = played, positionMs = if (played) 0L else episode.positionMs))
+        onMarkedPlayed?.invoke(episode, played)
     }
 
-    private fun normalise(raw: String): String {
+    private fun normalize(raw: String): String {
         var u = raw.trim()
         if (u.startsWith("feed://", true)) u = "https://" + u.substring(7)
         if (u.startsWith("pcast://", true)) u = "https://" + u.substring(8)

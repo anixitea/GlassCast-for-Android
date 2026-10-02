@@ -2,6 +2,8 @@ package com.glasscast.app.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.material.icons.outlined.LibraryAddCheck
+import com.glasscast.app.data.EpisodeSort
 import androidx.compose.material.icons.outlined.DownloadForOffline
 import androidx.compose.material.icons.outlined.ThumbDown
 import androidx.compose.animation.core.Spring
@@ -78,6 +80,9 @@ import com.glasscast.app.player.PlayerConnection
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeSource
 import kotlinx.coroutines.launch
+import androidx.lifecycle.repeatOnLifecycle
+import androidx.compose.material.icons.filled.FastForward
+import androidx.compose.foundation.layout.widthIn
 
 private enum class Tab { LIBRARY, LATEST, DOWNLOADS, DISCOVER, SEARCH }
 
@@ -119,7 +124,7 @@ private fun <T> pageSpring() = androidx.compose.animation.core.spring<T>(
  *
  * Still plain state rather than navigation-compose: the whole graph is two tabs
  * plus one detail screen, and a nav library would add a dependency and a second
- * source of truth about what's on screen for no behaviour we need.
+ * source of truth about what's on screen for no behavior we need.
  */
 @OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
@@ -144,7 +149,14 @@ fun GlassCastRoot(
     val shakeToRestart by settings.shakeToRestart.collectAsStateWithLifecycle()
     val skipSilence by settings.skipSilence.collectAsStateWithLifecycle()
     val discoverHidden by settings.discoverHidden.collectAsStateWithLifecycle()
+    val episodeOrder by settings.episodeOrder.collectAsStateWithLifecycle()
+    fun orderFor(url: String) = episodeOrder[url] ?: sort
+    fun flipOrder(url: String) = settings.setEpisodeOrder(
+        url,
+        if (orderFor(url) == EpisodeSort.NEWEST_FIRST) EpisodeSort.OLDEST_FIRST else EpisodeSort.NEWEST_FIRST
+    )
     val voiceBoost by settings.voiceBoost.collectAsStateWithLifecycle()
+    val skipAds by settings.skipAds.collectAsStateWithLifecycle()
 
     // The service reads this off SleepTimer rather than taking a dependency on
     // Settings, so it has to be mirrored across whenever it changes.
@@ -175,6 +187,9 @@ fun GlassCastRoot(
     val context = androidx.compose.ui.platform.LocalContext.current
     val updater = (context.applicationContext as com.glasscast.app.GlassCastApp).updates
     val downloadStore = (context.applicationContext as com.glasscast.app.GlassCastApp).downloads
+    val gpodder = (context.applicationContext as com.glasscast.app.GlassCastApp).gpodder
+    val syncStatus by gpodder.status.collectAsStateWithLifecycle()
+    var syncOpen by remember { mutableStateOf(false) }
     val downloads by downloadStore.entries.collectAsStateWithLifecycle()
     val updateBanner by updater.banner.collectAsStateWithLifecycle()
     var updateSheetOpen by remember { mutableStateOf(false) }
@@ -218,12 +233,24 @@ fun GlassCastRoot(
     // One confirmation pill for the whole app; every queueing path goes
     // through queueEpisode so none of them can forget to answer.
     val toast = remember { ToastState() }
+    // Skip ads says so when it skips — only while the app is on screen; the
+    // skip itself happens in the service either way.
+    val adLifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(adLifecycle) {
+        adLifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
+            com.glasscast.app.player.AdSkipper.skipped.collect { guid ->
+                val ep = feedStore.episodeByGuid(guid)
+                val art = ep?.let { it.imageUrl.ifBlank { feedStore.feedFor(it)?.imageUrl.orEmpty() } }.orEmpty()
+                toast.show(text = tr("Ad skipped"), artUrl = art, icon = Icons.Filled.FastForward)
+            }
+        }
+    }
     // Right-swipe: flip played, and say which way it went.
     fun togglePlayed(episode: com.glasscast.app.data.Episode) {
         val nowPlayed = !episode.effectivelyPlayed
         feedStore.setPlayed(episode, nowPlayed)
         toast.show(
-            text = if (nowPlayed) "Marked as played" else "Marked as unplayed",
+            text = if (nowPlayed) tr("Marked as played") else tr("Marked as unplayed"),
             artUrl = episode.imageUrl.ifBlank { feedStore.feedFor(episode)?.imageUrl.orEmpty() },
             icon = if (nowPlayed) Icons.Filled.Done else Icons.Filled.RemoveDone
         )
@@ -233,7 +260,7 @@ fun GlassCastRoot(
         val feed = feedStore.feedFor(episode)
         if (next) player.playNext(episode, feed) else player.addToQueue(episode, feed)
         toast.show(
-            text = if (next) "Playing next" else "Added to Up Next",
+            text = if (next) tr("Playing next") else tr("Added to Up Next"),
             artUrl = episode.imageUrl.ifBlank { feed?.imageUrl.orEmpty() }
         )
     }
@@ -317,9 +344,9 @@ fun GlassCastRoot(
         }
     }
 
-    // Also provided above the theme in MainActivity, for show-colours mode.
+    // Also provided above the theme in MainActivity, for show-colors mode.
     // Providing it again here keeps this composable usable on its own.
-    CompositionLocalProvider(LocalImageStore provides imageStore) {
+    CompositionLocalProvider(LocalImageStore provides imageStore, LocalToast provides toast) {
         Crossfade(targetState = showSplash, animationSpec = tween(420), label = "splash") { splash ->
             if (splash) {
                 SplashScreen(onFinished = { showSplash = false })
@@ -407,7 +434,8 @@ fun GlassCastRoot(
                             is Dest.Show -> feeds.firstOrNull { it.url == d.url }?.let { shown -> FeedScreen(
                                 feed = shown,
                                 episodes = episodeMap[shown.url].orEmpty(),
-                                sort = sort,
+                                sort = orderFor(shown.url),
+                                onToggleSort = { flipOrder(shown.url) },
                                 store = feedStore,
                                 refreshing = refreshing,
                                 bottomInset = bottomInset,
@@ -466,7 +494,8 @@ fun GlassCastRoot(
                                 FeedScreen(
                                     feed = previewed.feed,
                                     episodes = previewed.episodes,
-                                    sort = sort,
+                                    sort = orderFor(previewed.feed.url),
+                                    onToggleSort = { flipOrder(previewed.feed.url) },
                                     store = feedStore,
                                     refreshing = false,
                                     bottomInset = bottomInset,
@@ -475,8 +504,9 @@ fun GlassCastRoot(
                                     onSubscribe = {
                                         addingUrl = previewed.feed.url
                                         scope.launch {
-                                            feedStore.subscribe(previewed.feed.url)
+                                            val reason = feedStore.subscribe(previewed.feed.url)
                                             addingUrl = null
+                                            if (reason == null) toast.show(tr("Added to library"), previewed.feed.imageUrl, Icons.Outlined.LibraryAddCheck)
                                         }
                                     },
                                     onBack = { preview = null },
@@ -484,7 +514,9 @@ fun GlassCastRoot(
                                         // Playing does commit — the queue and the
                                         // resume position need somewhere to live.
                                         scope.launch {
-                                            if (!alreadyIn) feedStore.subscribe(previewed.feed.url)
+                                            if (!alreadyIn && feedStore.subscribe(previewed.feed.url) == null) {
+                                                toast.show(tr("Added to library"), previewed.feed.imageUrl, Icons.Outlined.LibraryAddCheck)
+                                            }
                                             val stored = feedStore.episodeByGuid(episode.guid) ?: episode
                                             player.play(stored, feedStore.feedFor(stored))
                                             playerOpen = true
@@ -517,9 +549,9 @@ fun GlassCastRoot(
                                 previewingUrl = previewingUrl,
                                 dismissed = discoverHidden,
                                 onNotInterested = { result ->
-                                    settings.hideFromDiscover(result.feedUrl)
+                                    settings.hideFromDiscover(result.feedUrl, result.title, result.artworkUrl)
                                     toast.show(
-                                        text = "You won't see this in Discover again",
+                                        text = tr("You won't see this in Discover again"),
                                         artUrl = result.artworkUrl,
                                         icon = Icons.Outlined.ThumbDown
                                     )
@@ -559,8 +591,9 @@ fun GlassCastRoot(
                                 onAdd = { result ->
                                     addingUrl = result.feedUrl
                                     scope.launch {
-                                        feedStore.subscribe(result.feedUrl)
+                                        val reason = feedStore.subscribe(result.feedUrl)
                                         addingUrl = null
+                                        if (reason == null) toast.show(tr("Added to library"), result.artworkUrl, Icons.Outlined.LibraryAddCheck)
                                     }
                                 }
                             )
@@ -580,9 +613,14 @@ fun GlassCastRoot(
                             modifier = Modifier.align(Alignment.BottomCenter)
                         )
 
+                        // On a tablet the mini player and tab bar stop at 640dp,
+                        // centered, rather than spanning the screen. The bubble
+                        // is placed from the bar's bounds in root coordinates,
+                        // so it follows.
                         Column(
                             Modifier
                                 .align(Alignment.BottomCenter)
+                                .widthIn(max = 640.dp)
                                 .fillMaxWidth()
                         ) {
                             val collapsed = chromeCollapsed && currentEpisode != null
@@ -628,16 +666,20 @@ fun GlassCastRoot(
                                     .weight(1f)
                                     .onGloballyPositioned { coordinates ->
                                         val bounds = coordinates.boundsInRoot()
-                                        if (bounds.top != barBounds?.top || bounds.height != barBounds?.height) {
+                                        // Left too: rotating or resizing a tablet window moves
+                                        // the bar sideways. (Never width — the bar animates its
+                                        // width while collapsing, and must not write state per
+                                        // frame.)
+                                        if (bounds.top != barBounds?.top || bounds.height != barBounds?.height || bounds.left != barBounds?.left) {
                                             barBounds = bounds
                                         }
                                     },
                                 tabs = listOf(
-                                    GlassTab("Library", Icons.Outlined.GridView),
-                                    GlassTab("Latest", Icons.Outlined.Inbox),
-                                    GlassTab("Downloads", Icons.Outlined.DownloadForOffline),
-                                    GlassTab("Discover", Icons.Outlined.Explore),
-                                    GlassTab("Search", Icons.Filled.Search)
+                                    GlassTab(tr("Library"), Icons.Outlined.GridView),
+                                    GlassTab(tr("Latest"), Icons.Outlined.Inbox),
+                                    GlassTab(tr("Downloads"), Icons.Outlined.DownloadForOffline),
+                                    GlassTab(tr("Discover"), Icons.Outlined.Explore),
+                                    GlassTab(tr("Search"), Icons.Filled.Search)
                                 ),
                                 selectedIndex = tab.ordinal,
                                 tint = chromeTint,
@@ -765,8 +807,20 @@ fun GlassCastRoot(
                                 voiceBoost = voiceBoost,
                                 onSkipSilenceChange = settings::setSkipSilence,
                                 onVoiceBoostChange = settings::setVoiceBoost,
+                                skipAds = skipAds,
+                                onSkipAdsChange = settings::setSkipAds,
                                 onShakeToggle = settings::setShakeToRestart,
-                                onCollapse = { playerOpen = false }
+                                onCollapse = { playerOpen = false },
+                                download = downloads[episode.guid],
+                                onDownload = {
+                                    downloadStore.start(episode, feedStore.feedFor(episode))
+                                    toast.show(text = tr("Downloading"), artUrl = episode.imageUrl.ifBlank { feedStore.feedFor(episode)?.imageUrl.orEmpty() }, icon = Icons.Outlined.DownloadForOffline)
+                                },
+                                onRemoveDownload = {
+                                    val wasDone = downloads[episode.guid]?.state == com.glasscast.app.data.DownloadState.DONE
+                                    downloadStore.remove(episode.guid)
+                                    toast.show(text = if (wasDone) tr("Download removed") else tr("Download canceled"), artUrl = episode.imageUrl.ifBlank { feedStore.feedFor(episode)?.imageUrl.orEmpty() }, icon = Icons.Outlined.DownloadForOffline)
+                                }
                             )
                             }
                         }
@@ -796,8 +850,17 @@ fun GlassCastRoot(
                     settingsOpen = false
                     opmlOpen = true
                 },
+                onOpenSync = {
+                    settingsOpen = false
+                    syncOpen = true
+                },
+                syncConnected = syncStatus.connected,
                 onDismiss = { settingsOpen = false }
             )
+        }
+
+        if (syncOpen) {
+            SyncSheet(sync = gpodder, onDismiss = { syncOpen = false })
         }
 
         if (updateSheetOpen) {
@@ -846,7 +909,7 @@ fun GlassCastRoot(
                 onDownload = {
                     downloadStore.start(episode, feedStore.feedFor(episode))
                     toast.show(
-                        text = "Downloading",
+                        text = tr("Downloading"),
                         artUrl = episode.imageUrl.ifBlank { feedStore.feedFor(episode)?.imageUrl.orEmpty() },
                         icon = Icons.Outlined.DownloadForOffline
                     )

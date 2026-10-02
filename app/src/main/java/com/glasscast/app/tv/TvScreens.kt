@@ -1,5 +1,12 @@
 package com.glasscast.app.tv
 
+import com.glasscast.app.ui.tr
+import androidx.compose.foundation.gestures.BringIntoViewSpec
+import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
+import androidx.compose.runtime.CompositionLocalProvider
+import com.glasscast.app.ui.rememberArtworkColors
+import com.glasscast.app.ui.NewestFirstIcon
+import com.glasscast.app.ui.OldestFirstIcon
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -69,6 +76,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.glasscast.app.data.DirectoryResult
 import com.glasscast.app.data.Episode
@@ -86,6 +94,7 @@ import com.glasscast.app.ui.formatDate
 import com.glasscast.app.ui.stripHtml
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import androidx.compose.foundation.layout.offset
 
 /**
  * Foot of every list. The now-playing bar used to sit here and needed clearing;
@@ -138,8 +147,8 @@ fun TvLibraryScreen(
         // FocusRequester and something has to carry it, or focus arrives at a
         // screen with nowhere to land and the remote stops responding.
         TvEmpty(
-            title = "Nothing here yet",
-            body = "Add shows from the Search tab, or import an OPML file from the phone app.",
+            title = tr("Nothing here yet"),
+            body = tr("Add shows from the Search tab, or import an OPML file from the phone app."),
             colors = colors,
             focusRequester = focusRequester
         )
@@ -161,7 +170,7 @@ fun TvLibraryScreen(
         modifier = Modifier.fillMaxSize()
     ) {
         item(span = { GridItemSpan(maxLineSpan) }) {
-            TvHeading("Podcasts", "${ordered.size} shows", colors)
+            TvHeading(tr("Podcasts"), tr("{0} shows", ordered.size), colors)
         }
 
         itemsIndexed(ordered, key = { _, feed -> feed.url }, contentType = { _, _ -> "show" }) { index, feed ->
@@ -201,14 +210,51 @@ fun TvLibraryScreen(
 // ----------------------------------------------------------------- discover
 
 /**
+ * What the Discover hold menu needs from the screen that opened it: the show,
+ * and how to put focus back when the menu closes.
+ *
+ * [onClosed] with `hide = true` means the show is leaving the screen
+ * (followed or Not interested) — it's hidden at once, and focus goes to
+ * whatever slides into its place. [onRestore] brings it back if following
+ * failed.
+ */
+class TvShowMenuRequest(
+    val result: com.glasscast.app.data.DirectoryResult,
+    val onClosed: (hide: Boolean) -> Unit,
+    val onRestore: () -> Unit
+)
+
+/**
+ * Where focus should land when a menu closes: a card, by row and position.
+ * [claimed] is a plain field on purpose — clearing a state here would
+ * recompose the claiming card and cancel its own focus request mid-flight.
+ */
+private class FocusSlot(val row: String, val index: Int) {
+    var claimed = false
+}
+
+/** Written from focus callbacks and read in effects — not state, so it never recomposes. */
+private class FocusFlag {
+    var inList = false
+}
+
+/**
  * Discover, for the sofa: the phone's shelves, laid out for a remote.
  *
  * Same recommendations as the phone — the library's own genres, shows played
  * in the last fortnight weighted up, charts minus anything followed — built by
  * the same shared function, so the two can never disagree. Each shelf is a row;
- * the D-pad moves along it, up and down moves between shelves. OK follows the
- * show and opens it, exactly as TV search does: there's no preview page on TV,
- * and following is undone in one step from the show's page.
+ * the D-pad moves along it, up and down moves between shelves. OK opens the
+ * show's preview; **holding OK** opens a menu to follow it or mark it Not
+ * interested without leaving Discover.
+ *
+ * Focus is looked after, because on a TV a card vanishing from under focus
+ * leaves the remote pointing at nothing:
+ * - when the menu closes, focus returns to the card — or, if the card left,
+ *   to the one that slid into its place (the last in its row if it was the
+ *   last; the first card if its whole row went);
+ * - when the shelves are rebuilt (following changes the genres they come
+ *   from), focus that was in the list and lost its card goes to the first card.
  */
 @Composable
 fun TvDiscoverScreen(
@@ -219,11 +265,15 @@ fun TvDiscoverScreen(
     focusRequester: FocusRequester,
     onSubscribed: (String) -> Unit,
     /** Marked "Not interested" on the phone; the TV respects it too. */
-    hidden: Set<String> = emptySet()
+    hidden: Set<String> = emptySet(),
+    onShowMenu: (TvShowMenuRequest) -> Unit = {}
 ) {
     var shelves by remember { mutableStateOf<List<com.glasscast.app.ui.Shelf>?>(null) }
-    var busyUrl by remember { mutableStateOf<String?>(null) }
-    val scope = rememberCoroutineScope()
+    // Shows that left through the hold menu, hidden at once — before a
+    // follow has finished, or Settings has written Not interested.
+    var gone by remember { mutableStateOf(emptySet<String>()) }
+    var returnTo by remember { mutableStateOf<FocusSlot?>(null) }
+    val focusFlag = remember { FocusFlag() }
 
     // Libraries from before category parsing need their categories fetched
     // once, or every recommendation falls back to the generic charts.
@@ -232,40 +282,91 @@ fun TvDiscoverScreen(
     }
     val genreKey = feeds.joinToString { it.url + ":" + it.categories.size + ":" + it.lastPlayedAt / 86_400_000 }
     LaunchedEffect(genreKey) {
-        shelves = runCatching { com.glasscast.app.ui.buildShelves(feeds) }.getOrDefault(emptyList())
+        val built = runCatching { com.glasscast.app.ui.buildShelves(feeds) }.getOrDefault(emptyList())
+        val hadFocus = focusFlag.inList
+        shelves = built
+        if (hadFocus) {
+            // If the focused card survived the rebuild, focus is still in the
+            // list and nothing happens. If it didn't, focus went with it.
+            delay(160)
+            if (!focusFlag.inList) focusRequester.requestWhenReady()
+        }
     }
 
-    val loaded = shelves?.map { shelf -> shelf.copy(items = shelf.items.filterNot { it.feedUrl in hidden }) }
-        ?.filter { it.items.isNotEmpty() }
+    val followed = remember(feeds) { feeds.map { it.url.lowercase() }.toSet() }
+    val loaded = shelves?.map { shelf ->
+        shelf.copy(items = shelf.items.filterNot {
+            it.feedUrl in hidden || it.feedUrl in gone || it.feedUrl.lowercase() in followed
+        })
+    }?.filter { it.items.isNotEmpty() }
     // The loading card held focus; when the shelves replace it, hand focus to
     // the first card, or the remote would be pointing at nothing.
     LaunchedEffect(loaded != null) {
         if (loaded != null) focusRequester.requestWhenReady()
     }
+    // A card claims [returnTo] if it's there; if its whole row went, nothing
+    // can, and focus goes to the first card.
+    LaunchedEffect(returnTo) {
+        val slot = returnTo ?: return@LaunchedEffect
+        delay(200)
+        if (!slot.claimed) {
+            slot.claimed = true
+            focusRequester.requestWhenReady()
+        }
+    }
+
+    fun menuFor(result: com.glasscast.app.data.DirectoryResult, row: String, index: Int) {
+        onShowMenu(
+            TvShowMenuRequest(
+                result = result,
+                onClosed = { hide ->
+                    if (hide) gone = gone + result.feedUrl
+                    returnTo = FocusSlot(row, index)
+                },
+                onRestore = { gone = gone - result.feedUrl }
+            )
+        )
+    }
+
+    /** Focus for one card: claims [returnTo] when it names this slot. */
+    @Composable
+    fun rememberCardFocus(row: String, index: Int, rowSize: Int): FocusRequester {
+        val me = remember { FocusRequester() }
+        val slot = returnTo
+        LaunchedEffect(slot) {
+            if (slot != null && !slot.claimed && slot.row == row && index == slot.index.coerceAtMost(rowSize - 1)) {
+                slot.claimed = true
+                me.requestWhenReady()
+            }
+        }
+        return me
+    }
 
     when {
         loaded == null -> TvEmpty(
-            title = "Finding shows…",
-            body = "Building picks from the shows you follow.",
+            title = tr("Finding shows…"),
+            body = tr("Building picks from the shows you follow."),
             colors = colors,
             focusRequester = focusRequester
         )
         loaded.isEmpty() -> TvEmpty(
-            title = "Nothing to suggest right now",
-            body = "Couldn't reach the podcast directory. Check the connection and come back.",
+            title = tr("Nothing to suggest right now"),
+            body = tr("Couldn't reach the podcast directory. Check the connection and come back."),
             colors = colors,
             focusRequester = focusRequester
         )
         else -> LazyColumn(
             contentPadding = PaddingValues(top = TvSpacing.overscanV, bottom = bottomRoom(hasNowPlaying)),
             verticalArrangement = Arrangement.spacedBy(30.dp),
-            modifier = Modifier.fillMaxSize()
+            modifier = Modifier
+                .fillMaxSize()
+                .onFocusChanged { focusFlag.inList = it.hasFocus }
         ) {
             item {
                 Box(Modifier.padding(horizontal = TvSpacing.overscanH)) {
                     TvHeading(
-                        "Discover",
-                        if (feeds.isEmpty()) "What people are listening to" else "Picked from the shows you follow",
+                        tr("Discover"),
+                        if (feeds.isEmpty()) "What people are listening to" else tr("Picked from the shows you follow"),
                         colors
                     )
                 }
@@ -282,7 +383,7 @@ fun TvDiscoverScreen(
                 item(key = "picks", contentType = "picks") {
                     Column {
                         Text(
-                            text = "Top picks for you",
+                            text = tr("Top picks for you"),
                             style = MaterialTheme.typography.headlineSmall,
                             color = colors.content,
                             modifier = Modifier.padding(horizontal = TvSpacing.overscanH)
@@ -292,19 +393,17 @@ fun TvDiscoverScreen(
                             horizontalArrangement = Arrangement.spacedBy(TvSpacing.tileGap)
                         ) {
                             itemsIndexed(picks, key = { _, r -> "pick:" + r.feedUrl }) { index, result ->
+                                val me = rememberCardFocus(PICKS_ROW, index, picks.size)
                                 TvPickCard(
                                     result = result,
                                     colors = colors,
-                                    busy = busyUrl == result.feedUrl,
-                                    modifier = if (index == 0) Modifier.focusRequester(focusRequester) else Modifier
+                                    busy = false,
+                                    modifier = Modifier
+                                        .focusRequester(me)
+                                        .then(if (index == 0) Modifier.focusRequester(focusRequester) else Modifier),
+                                    onLongClick = { menuFor(result, PICKS_ROW, index) }
                                 ) {
-                                    if (busyUrl != null) return@TvPickCard
-                                    busyUrl = result.feedUrl
-                                    scope.launch {
-                                        val reason = store.subscribe(result.feedUrl)
-                                        busyUrl = null
-                                        if (reason == null) onSubscribed(result.feedUrl)
-                                    }
+                                    onSubscribed(result.feedUrl)
                                 }
                             }
                         }
@@ -332,9 +431,11 @@ fun TvDiscoverScreen(
                         horizontalArrangement = Arrangement.spacedBy(TvSpacing.tileGap)
                     ) {
                         itemsIndexed(shelf.items, key = { _, result -> shelf.title + result.feedUrl }) { index, result ->
+                            val me = rememberCardFocus(shelf.title, index, shelf.items.size)
                             Column(
                                 Modifier
                                     .width(210.dp)
+                                    .focusRequester(me)
                                     .then(
                                         if (picks.isEmpty() && shelfIndex == 0 && index == 0) {
                                             Modifier.focusRequester(focusRequester)
@@ -342,14 +443,11 @@ fun TvDiscoverScreen(
                                             Modifier
                                         }
                                     )
-                                    .tvFocusable(accent = colors.chromeButton) {
-                                        if (busyUrl != null) return@tvFocusable
-                                        busyUrl = result.feedUrl
-                                        scope.launch {
-                                            val reason = store.subscribe(result.feedUrl)
-                                            busyUrl = null
-                                            if (reason == null) onSubscribed(result.feedUrl)
-                                        }
+                                    .tvFocusable(
+                                        accent = colors.chromeButton,
+                                        onLongClick = { menuFor(result, shelf.title, index) }
+                                    ) {
+                                        onSubscribed(result.feedUrl)
                                     }
                             ) {
                                 Artwork(url = result.artworkUrl, sizeDp = 210.dp, corner = 14.dp)
@@ -363,7 +461,7 @@ fun TvDiscoverScreen(
                                         overflow = TextOverflow.Ellipsis
                                     )
                                     Text(
-                                        text = if (busyUrl == result.feedUrl) "Following…" else result.author,
+                                        text = result.author,
                                         style = MaterialTheme.typography.bodySmall,
                                         color = colors.contentVariant,
                                         maxLines = 1,
@@ -379,6 +477,9 @@ fun TvDiscoverScreen(
     }
 }
 
+/** The picks row's name for [FocusSlot] — can't collide with a shelf title. */
+private const val PICKS_ROW = "::picks::"
+
 /** A big cover card: the art full-bleed, the name over a darkening foot. */
 @Composable
 private fun TvPickCard(
@@ -386,6 +487,7 @@ private fun TvPickCard(
     colors: ArtworkColors,
     busy: Boolean,
     modifier: Modifier = Modifier,
+    onLongClick: (() -> Unit)? = null,
     onClick: () -> Unit
 ) {
     Box(
@@ -394,6 +496,7 @@ private fun TvPickCard(
             .tvFocusable(
                 shape = RoundedCornerShape(24.dp),
                 accent = colors.chromeButton,
+                onLongClick = onLongClick,
                 onClick = onClick
             )
     ) {
@@ -448,7 +551,8 @@ fun TvLatestScreen(
     focusRequester: FocusRequester,
     onRefresh: () -> Unit,
     onPlay: (Episode) -> Unit,
-    playingGuid: String? = null
+    playingGuid: String? = null,
+    onEpisodeMenu: (Episode) -> Unit = {}
 ) {
     val feedsByUrl = remember(feeds) { feeds.associateBy { it.url } }
     val latest = remember(episodeMap, feeds) {
@@ -472,13 +576,13 @@ fun TvLatestScreen(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.weight(1f)) {
                     TvHeading(
-                        "Latest",
-                        "${latest.count { !it.effectivelyPlayed }} unplayed across ${feeds.size} shows",
+                        tr("Latest"),
+                        tr("{0} unplayed across {1} shows", latest.count { !it.effectivelyPlayed }, feeds.size),
                         colors
                     )
                 }
                 TvPillButton(
-                    label = if (refreshing) "Refreshing…" else "Refresh",
+                    label = if (refreshing) tr("Refreshing…") else tr("Refresh"),
                     icon = Icons.Filled.Refresh,
                     colors = colors,
                     busy = refreshing,
@@ -495,6 +599,7 @@ fun TvLatestScreen(
                 colors = colors,
                 showArtwork = true,
                 onClick = { onPlay(episode) },
+                    onLongClick = { onEpisodeMenu(episode) },
                 isCurrent = episode.guid == playingGuid
             )
         }
@@ -503,172 +608,230 @@ fun TvLatestScreen(
 
 // ------------------------------------------------------------------- show
 
+/**
+ * The show page on TV — follows the phone's. It sits on the show's own blurred
+ * cover (not the now-playing one) under a dark veil, and takes that cover's
+ * colors for its buttons and accents.
+ *
+ * Scrolling: on a TV, Compose's default brings every focused item to 30% of
+ * the list's height. The header's buttons sit lower than that, so focusing
+ * any of them scrolled the page down — cutting off the title and cover —
+ * while the header's own scroll-to-top pulled it back: the page slid up and
+ * down on every move between Resume, Refresh and Back. Here the list only
+ * scrolls when the focused item is out of a comfortable band, and not at all
+ * while the header holds focus; entering the header shows it whole.
+ */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun TvShowScreen(
     feed: Feed,
     episodes: List<Episode>,
     sort: EpisodeSort,
-    colors: ArtworkColors,
     refreshing: Boolean,
     hasNowPlaying: Boolean,
     focusRequester: FocusRequester,
     onRefresh: () -> Unit,
-    onBack: () -> Unit,
     onPlay: (Episode) -> Unit,
-    onQueue: (Episode) -> Unit,
-    playingGuid: String? = null
+    onEpisodeMenu: (Episode) -> Unit,
+    playingGuid: String? = null,
+    subscribed: Boolean = true,
+    onFollow: () -> Unit = {},
+    onUnfollow: () -> Unit = {},
+    onToggleSort: () -> Unit = {},
+    /**
+     * Room for the nav rail. The show page is laid out edge to edge so its
+     * backdrop runs under the rail too — the strip beside the rail used to be
+     * the shell's now-playing color — and only its content is inset.
+     */
+    leadingInset: Dp = 0.dp
 ) {
+    val (showColors, _) = rememberArtworkColors(feed.imageUrl)
+    val pc = remember(showColors) {
+        showColors.copy(
+            content = Color.White,
+            contentVariant = Color.White.copy(alpha = 0.7f),
+            accent = showColors.chromeButton
+        )
+    }
     val ordered = remember(episodes, sort) {
         when (sort) {
             EpisodeSort.NEWEST_FIRST -> episodes.sortedByDescending { it.pubDate }
             EpisodeSort.OLDEST_FIRST -> episodes.sortedBy { it.pubDate }
         }
     }
-
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
-    // Stripped once per description, not on every recomposition of the header.
     val notes = remember(feed.description) { stripHtml(feed.description) }
     val updatedLine = remember(ordered) {
         buildString {
-            append("${ordered.size} EPISODES")
+            append(tr("{0} EPISODES", ordered.size))
             val latest = ordered.maxOfOrNull { it.pubDate } ?: 0L
-            if (latest > 0) append(" · UPDATED ${formatDate(latest).uppercase()}")
+            if (latest > 0) append(tr(" · UPDATED {0}", formatDate(latest).uppercase()))
         }
     }
+    var headerHasFocus by remember { mutableStateOf(false) }
+    val scrollSpec = remember { TvHoldStillSpec { headerHasFocus } }
 
     Box(Modifier.fillMaxSize()) {
-    // The cover's colour washed down from the top, as on the phone's show
-    // page — a gradient, not a blur, so it costs one draw.
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .height(420.dp)
-            .background(
-                Brush.verticalGradient(
-                    0f to colors.wash.copy(alpha = 0.85f),
-                    1f to Color.Transparent
-                )
-            )
-    )
+        TvCoverBackdrop(url = feed.imageUrl, colors = showColors)
+        Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.28f)))
 
-    LazyColumn(
-        state = listState,
-        contentPadding = PaddingValues(
-            start = TvSpacing.overscanH,
-            end = TvSpacing.overscanH,
-            top = TvSpacing.overscanV,
-            bottom = bottomRoom(hasNowPlaying)
-        ),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-        modifier = Modifier.fillMaxSize()
-    ) {
-        item {
-            /*
-             * The header is a side-by-side band, not the phone's centred
-             * poster. A 16:9 panel has width to spare and no height to waste —
-             * stacking cover over title over actions would push the episode
-             * list off the bottom of the screen entirely.
-             */
-            /*
-             * Scrolling back up stops short otherwise.
-             *
-             * A lazy list scrolls only far enough to bring the newly focused
-             * item into view. Coming back up, focus lands on the Play button
-             * partway down this header, so the list stops there and the cover
-             * and title stay clipped off the top — which is exactly what the
-             * screenshot shows. Asking for index 0 whenever focus enters the
-             * header restores the whole thing.
-             */
-            Row(
-                Modifier
-                    .padding(bottom = 22.dp)
-                    .onFocusChanged {
-                        if (it.hasFocus) scope.launch { listState.animateScrollToItem(0) }
-                    }
+        CompositionLocalProvider(LocalBringIntoViewSpec provides scrollSpec) {
+            LazyColumn(
+                state = listState,
+                contentPadding = PaddingValues(
+                    start = leadingInset + TvSpacing.overscanH,
+                    end = TvSpacing.overscanH,
+                    top = TvSpacing.overscanV,
+                    bottom = bottomRoom(hasNowPlaying)
+                ),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.fillMaxSize()
             ) {
-                Artwork(url = feed.imageUrl, sizeDp = 250.dp, corner = 20.dp)
-                Spacer(Modifier.width(32.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        text = feed.title,
-                        style = MaterialTheme.typography.displaySmall,
-                        color = colors.content,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
+                item(key = "header") {
+                    Row(
+                        Modifier
+                            .padding(bottom = 22.dp)
+                            .onFocusChanged {
+                                val now = it.hasFocus
+                                if (now && !headerHasFocus) scope.launch { listState.animateScrollToItem(0) }
+                                headerHasFocus = now
+                            }
+                    ) {
+                        Artwork(url = feed.imageUrl, sizeDp = 260.dp, corner = 24.dp)
+                        Spacer(Modifier.width(34.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                text = feed.title,
+                                style = MaterialTheme.typography.displaySmall,
+                                color = Color.White,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            if (feed.author.isNotBlank()) {
+                                Spacer(Modifier.height(4.dp))
+                                Text(feed.author, style = MaterialTheme.typography.titleSmall, color = pc.accent)
+                            }
+                            Spacer(Modifier.height(8.dp))
+                            Text(updatedLine, style = MaterialTheme.typography.labelMedium, color = pc.contentVariant)
+                            if (notes.isNotBlank()) {
+                                Spacer(Modifier.height(12.dp))
+                                // Three lines; select them to read the rest (and
+                                // again to fold it) — the TV's show info.
+                                var notesOpen by remember(feed.url) { mutableStateOf(false) }
+                                Text(
+                                    text = notes,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = pc.contentVariant,
+                                    maxLines = if (notesOpen) Int.MAX_VALUE else 3,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier
+                                        .offset(x = (-8).dp)
+                                        .tvFocusable(
+                                            shape = RoundedCornerShape(12.dp),
+                                            accent = pc.accent,
+                                            scale = 1.02f
+                                        ) { notesOpen = !notesOpen }
+                                        .padding(horizontal = 8.dp, vertical = 6.dp)
+                                )
+                            }
+                            Spacer(Modifier.height(20.dp))
+                            // Beside a 260dp cover there's about 478dp. Four labeled
+                            // pills took ~470 before Refresh, which got 8dp: its
+                            // label wrapped a letter per line into the tall
+                            // sliver at the right, and that sliver's height was
+                            // the gap above the episodes.
+                            //
+                            // Now the action you'd take is labeled (Play / Resume,
+                            // and Follow while you aren't), and the rest are round
+                            // icon buttons: Following is a check, sort and refresh
+                            // are their icons. Play takes whatever width is left,
+                            // so a long translation shortens its label instead of
+                            // squeezing a neighbor, and no label can wrap.
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                val next = ordered.firstOrNull { !it.effectivelyPlayed } ?: ordered.firstOrNull()
+                                TvPillButton(
+                                    label = if (next?.let { it.positionMs > 1_000 && !it.effectivelyPlayed } == true) tr("Resume") else tr("Play latest"),
+                                    icon = Icons.Filled.PlayArrow,
+                                    colors = pc,
+                                    filled = true,
+                                    modifier = Modifier
+                                        .weight(1f, fill = false)
+                                        .focusRequester(focusRequester),
+                                    onClick = { next?.let(onPlay) }
+                                )
+                                if (subscribed) {
+                                    TvIconButton(
+                                        icon = Icons.Filled.Check,
+                                        description = tr("Following"),
+                                        colors = pc,
+                                        tint = pc.accent,
+                                        onClick = onUnfollow
+                                    )
+                                } else {
+                                    TvPillButton(
+                                        label = tr("Follow"),
+                                        icon = Icons.Filled.Add,
+                                        colors = pc,
+                                        onClick = onFollow
+                                    )
+                                }
+                                TvIconButton(
+                                    icon = if (sort == EpisodeSort.NEWEST_FIRST) NewestFirstIcon else OldestFirstIcon,
+                                    description = if (sort == EpisodeSort.NEWEST_FIRST) tr("Newest first") else tr("Oldest first"),
+                                    colors = pc,
+                                    onClick = onToggleSort
+                                )
+                                if (subscribed) {
+                                    TvIconButton(
+                                        icon = Icons.Filled.Refresh,
+                                        description = tr("Refresh"),
+                                        colors = pc,
+                                        busy = refreshing,
+                                        onClick = onRefresh
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                items(ordered, key = { it.guid }, contentType = { "episode" }) { episode ->
+                    TvEpisodeRow(
+                        episode = episode,
+                        feed = feed,
+                        colors = pc,
+                        showArtwork = false,
+                        onClick = { onPlay(episode) },
+                        onLongClick = { onEpisodeMenu(episode) },
+                        isCurrent = episode.guid == playingGuid
                     )
-                    if (feed.author.isNotBlank()) {
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            text = feed.author,
-                            style = MaterialTheme.typography.titleSmall,
-                            color = colors.accent
-                        )
-                    }
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        text = updatedLine,
-                        style = MaterialTheme.typography.labelMedium,
-                        color = colors.contentVariant
-                    )
-
-                    if (notes.isNotBlank()) {
-                        Spacer(Modifier.height(12.dp))
-                        Text(
-                            text = notes,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = colors.contentVariant,
-                            maxLines = 3,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-
-                    Spacer(Modifier.height(18.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        val next = ordered.firstOrNull { !it.effectivelyPlayed }
-                            ?: ordered.firstOrNull()
-                        TvPillButton(
-                            label = if (next?.let { it.positionMs > 1_000 && !it.effectivelyPlayed } == true) "Resume" else "Play latest",
-                            icon = Icons.Filled.PlayArrow,
-                            colors = colors.copy(accent = colors.chromeButton),
-                            filled = true,
-                            modifier = Modifier.focusRequester(focusRequester),
-                            onClick = { next?.let(onPlay) }
-                        )
-                        TvPillButton(
-                            label = if (refreshing) "Refreshing…" else "Refresh",
-                            icon = Icons.Filled.Refresh,
-                            colors = colors,
-                            busy = refreshing,
-                            onClick = onRefresh
-                        )
-                        TvPillButton(
-                            label = "Back",
-                            icon = Icons.AutoMirrored.Filled.ArrowBack,
-                            colors = colors,
-                            onClick = onBack
-                        )
-                    }
                 }
             }
         }
-
-        items(ordered, key = { it.guid }, contentType = { "episode" }) { episode ->
-            TvEpisodeRow(
-                episode = episode,
-                feed = feed,
-                colors = colors,
-                showArtwork = false,
-                onClick = { onPlay(episode) },
-                onLongClick = { onQueue(episode) },
-                isCurrent = episode.guid == playingGuid
-            )
-        }
-    }
     }
 }
 
-// ----------------------------------------------------------------- search
+/**
+ * Scroll only when the focused item leaves a comfortable band (10%–85% of the
+ * list), and not at all while [holding] — replaces the TV's default of pinning
+ * every focused item at 30%.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+private class TvHoldStillSpec(private val holding: () -> Boolean) : BringIntoViewSpec {
+    override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float {
+        if (holding()) return 0f
+        val top = containerSize * 0.10f
+        val bottom = containerSize * 0.85f
+        return when {
+            offset >= top && offset + size <= bottom -> 0f
+            offset < top -> offset - top
+            else -> offset + size - bottom
+        }
+    }
+}
 
 @Composable
 fun TvSearchScreen(
@@ -692,7 +855,7 @@ fun TvSearchScreen(
      *
      * Typing a feed URL on a remote is miserable, so this doesn't get its own
      * screen — but it does need to exist, because the TV has no other way to
-     * add a show that the directory doesn't list. One field that recognises a
+     * add a show that the directory doesn't list. One field that recognizes a
      * URL costs nothing and covers it.
      */
     val looksLikeUrl = remember(query) {
@@ -732,7 +895,7 @@ fun TvSearchScreen(
         modifier = Modifier.fillMaxSize()
     ) {
         item {
-            TvHeading("Search", null, colors)
+            TvHeading(tr("Search"), null, colors)
 
             /*
              * The field itself is the focus target.
@@ -778,7 +941,7 @@ fun TvSearchScreen(
                 Box(Modifier.weight(1f)) {
                     if (query.isEmpty()) {
                         Text(
-                            text = "Shows, hosts, topics",
+                            text = tr("Shows, hosts, topics"),
                             style = MaterialTheme.typography.bodyMedium,
                             color = colors.contentVariant
                         )
@@ -806,7 +969,7 @@ fun TvSearchScreen(
             if (looksLikeUrl) {
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     TvPillButton(
-                        label = if (adding != null) "Adding…" else "Add this feed",
+                        label = if (adding != null) "Adding…" else tr("Add this feed"),
                         icon = Icons.Filled.Add,
                         colors = colors,
                         filled = true,
@@ -848,7 +1011,7 @@ fun TvSearchScreen(
         if (busy && shown.isEmpty()) {
             item {
                 Text(
-                    text = "Loading…",
+                    text = tr("Loading…"),
                     style = MaterialTheme.typography.bodyMedium,
                     color = colors.contentVariant
                 )
@@ -863,13 +1026,8 @@ fun TvSearchScreen(
                     .tvFocusableRow(accent = colors.accent, surface = colors.content) {
                         if (already) {
                             onSubscribed(result.feedUrl)
-                        } else if (adding == null) {
-                            adding = result.feedUrl
-                            scope.launch {
-                                val reason = store.subscribe(result.feedUrl)
-                                adding = null
-                                if (reason == null) onSubscribed(result.feedUrl)
-                            }
+                        } else {
+                            onSubscribed(result.feedUrl)
                         }
                     }
                     .padding(14.dp),
@@ -902,13 +1060,13 @@ fun TvSearchScreen(
                     )
                     already -> Icon(
                         Icons.Filled.Check,
-                        contentDescription = "In your library",
+                        contentDescription = tr("In your library"),
                         tint = colors.accent,
                         modifier = Modifier.size(26.dp)
                     )
                     else -> Icon(
                         Icons.Filled.Add,
-                        contentDescription = "Add",
+                        contentDescription = tr("Add"),
                         tint = colors.contentVariant,
                         modifier = Modifier.size(26.dp)
                     )
@@ -939,20 +1097,20 @@ fun TvSettingsScreen(
         verticalArrangement = Arrangement.spacedBy(22.dp),
         modifier = Modifier.fillMaxSize()
     ) {
-        item { TvHeading("Settings", null, colors) }
+        item { TvHeading(tr("Settings"), null, colors) }
 
         /*
          * No appearance section.
          *
-         * Every surface on TV takes its colour from the artwork, so Dark and
+         * Every surface on TV takes its color from the artwork, so Dark and
          * Lights out had nothing left to change — which is exactly what you saw
          * when switching to Lights out did nothing at all. An option that
          * visibly does nothing is worse than no option.
          */
         item {
-            TvSettingGroup("SHOW ORDER", colors) {
+            TvSettingGroup(tr("SHOW ORDER"), colors) {
                 TvPillButton(
-                    label = "Recently updated",
+                    label = tr("Recently updated"),
                     icon = null,
                     colors = colors,
                     filled = showSort == ShowSort.RECENTLY_UPDATED,
@@ -960,7 +1118,7 @@ fun TvSettingsScreen(
                     onClick = { settings.setShowSort(ShowSort.RECENTLY_UPDATED) }
                 )
                 TvPillButton(
-                    label = "Recently played",
+                    label = tr("Recently played"),
                     icon = null,
                     colors = colors,
                     filled = showSort == ShowSort.RECENTLY_PLAYED,
@@ -969,25 +1127,7 @@ fun TvSettingsScreen(
             }
         }
 
-        item {
-            TvSettingGroup("EPISODE ORDER", colors) {
-                TvPillButton(
-                    label = "Newest first",
-                    icon = null,
-                    colors = colors,
-                    filled = sort == EpisodeSort.NEWEST_FIRST,
-                    onClick = { settings.setSort(EpisodeSort.NEWEST_FIRST) }
-                )
-                TvPillButton(
-                    label = "Oldest first",
-                    icon = null,
-                    colors = colors,
-                    filled = sort == EpisodeSort.OLDEST_FIRST,
-                    onClick = { settings.setSort(EpisodeSort.OLDEST_FIRST) }
-                )
-            }
-        }
-
+        item { TvSyncSettings(colors) }
         item {
             // In-app updates: the TV is where sideloading hurts most, so the
             // whole path — check, download, verify, install — is one pill.
@@ -995,45 +1135,45 @@ fun TvSettingsScreen(
             val updater = (context.applicationContext as com.glasscast.app.GlassCastApp).updates
             val update by updater.state.collectAsStateWithLifecycle()
             Column {
-                TvSettingGroup("UPDATES", colors) {
+                TvSettingGroup(tr("UPDATES"), colors) {
                     when (val u = update) {
                         is com.glasscast.app.update.UpdateState.Available -> TvPillButton(
-                            label = "Install ${u.release.version}",
+                            label = tr("Install {0}", u.release.version),
                             icon = null,
                             colors = colors,
                             filled = true,
                             onClick = { updater.download(u.release) }
                         )
                         is com.glasscast.app.update.UpdateState.Downloading -> TvPillButton(
-                            label = "Downloading ${(u.progress * 100).toInt()}%",
+                            label = tr("Downloading {0}%", (u.progress * 100).toInt()),
                             icon = null,
                             colors = colors,
                             busy = true,
                             onClick = {}
                         )
                         is com.glasscast.app.update.UpdateState.ReadyToInstall -> TvPillButton(
-                            label = "Install",
+                            label = tr("Install"),
                             icon = null,
                             colors = colors,
                             filled = true,
                             onClick = { updater.install(u.release, u.file) }
                         )
                         is com.glasscast.app.update.UpdateState.NeedsPermission -> TvPillButton(
-                            label = "Allow installs",
+                            label = tr("Allow installs"),
                             icon = null,
                             colors = colors,
                             filled = true,
                             onClick = { updater.openInstallPermission() }
                         )
                         is com.glasscast.app.update.UpdateState.Checking -> TvPillButton(
-                            label = "Checking…",
+                            label = tr("Checking…"),
                             icon = null,
                             colors = colors,
                             busy = true,
                             onClick = {}
                         )
                         else -> TvPillButton(
-                            label = "Check for updates",
+                            label = tr("Check for updates"),
                             icon = null,
                             colors = colors,
                             onClick = { updater.check(manual = true) }
@@ -1043,11 +1183,10 @@ fun TvSettingsScreen(
                 Spacer(Modifier.height(8.dp))
                 Text(
                     text = when (val u = update) {
-                        is com.glasscast.app.update.UpdateState.UpToDate -> "GlassCast ${updater.currentVersion} — up to date."
-                        is com.glasscast.app.update.UpdateState.Available -> "GlassCast ${u.release.version} is out. You have ${updater.currentVersion}."
-                        is com.glasscast.app.update.UpdateState.NeedsPermission ->
-                            "Allow GlassCast to install apps (asked once), then press Install."
-                        is com.glasscast.app.update.UpdateState.ReadyToInstall -> "Downloaded and verified — confirm in the installer."
+                        is com.glasscast.app.update.UpdateState.UpToDate -> tr("GlassCast {0} — up to date.", updater.currentVersion)
+                        is com.glasscast.app.update.UpdateState.Available -> tr("GlassCast {0} is out. You have {1}.", u.release.version, updater.currentVersion)
+                        is com.glasscast.app.update.UpdateState.NeedsPermission -> tr("Allow installs, then press Install.")
+                        is com.glasscast.app.update.UpdateState.ReadyToInstall -> tr("Confirm in the installer.")
                         is com.glasscast.app.update.UpdateState.Failed -> u.message
                         else -> "GlassCast ${updater.currentVersion}"
                     },
@@ -1062,16 +1201,16 @@ fun TvSettingsScreen(
             // apply here exactly as they do on the phone.
             val skipSilence by settings.skipSilence.collectAsStateWithLifecycle()
             val voiceBoost by settings.voiceBoost.collectAsStateWithLifecycle()
-            TvSettingGroup("SOUND", colors) {
+            TvSettingGroup(tr("SOUND"), colors) {
                 TvPillButton(
-                    label = if (skipSilence) "Skip silence: on" else "Skip silence: off",
+                    label = if (skipSilence) tr("Skip silence: on") else tr("Skip silence: off"),
                     icon = null,
                     colors = colors,
                     filled = skipSilence,
                     onClick = { settings.setSkipSilence(!skipSilence) }
                 )
                 TvPillButton(
-                    label = if (voiceBoost) "Boost voices: on" else "Boost voices: off",
+                    label = if (voiceBoost) tr("Boost voices: on") else tr("Boost voices: off"),
                     icon = null,
                     colors = colors,
                     filled = voiceBoost,
@@ -1144,6 +1283,7 @@ fun TvEpisodeRow(
         Modifier
             .fillMaxWidth()
             .tvFocusableRow(
+                onLongClick = onLongClick,
                 accent = ring,
                 surface = colors.content,
                 shape = RoundedCornerShape(18.dp),
@@ -1184,7 +1324,7 @@ fun TvEpisodeRow(
                     if (isCurrent) {
                         Icon(
                             Icons.Filled.GraphicEq,
-                            contentDescription = "Now playing",
+                            contentDescription = tr("Now playing"),
                             tint = ring,
                             modifier = Modifier.size(18.dp)
                         )
@@ -1210,13 +1350,13 @@ fun TvEpisodeRow(
                     } else if (played) {
                         Icon(
                             Icons.Filled.Check,
-                            contentDescription = "Played",
+                            contentDescription = tr("Played"),
                             tint = colors.contentVariant,
                             modifier = Modifier.size(16.dp)
                         )
                         Spacer(Modifier.width(6.dp))
                         Text(
-                            text = "Played",
+                            text = tr("Played"),
                             style = MaterialTheme.typography.labelMedium,
                             color = colors.contentVariant
                         )
@@ -1236,28 +1376,6 @@ fun TvEpisodeRow(
             color = colors.contentVariant
         )
 
-        if (onLongClick != null) {
-            Spacer(Modifier.width(18.dp))
-            Box(
-                Modifier
-                    .size(46.dp)
-                    .tvFocusable(
-                        shape = CircleShape,
-                        accent = ring,
-                        scale = 1.12f,
-                        onClick = onLongClick
-                    )
-                    .background(colors.content.copy(alpha = 0.08f)),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    Icons.AutoMirrored.Filled.QueueMusic,
-                    contentDescription = "Add to Up Next",
-                    tint = colors.content.copy(alpha = 0.8f),
-                    modifier = Modifier.size(22.dp)
-                )
-            }
-        }
     }
 }
 
@@ -1297,7 +1415,51 @@ fun TvPillButton(
             Icon(icon, contentDescription = null, tint = labelColor, modifier = Modifier.size(20.dp))
             Spacer(Modifier.width(10.dp))
         }
-        Text(text = label, style = MaterialTheme.typography.titleSmall, color = labelColor)
+        Text(
+            text = label,
+            style = MaterialTheme.typography.titleSmall,
+            color = labelColor,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+/**
+ * A round button the height of a [TvPillButton], for an action its icon names
+ * well enough — the pills' focus vocabulary (grow and ring) on a circle.
+ */
+@Composable
+fun TvIconButton(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    description: String,
+    colors: ArtworkColors,
+    modifier: Modifier = Modifier,
+    tint: Color = colors.content,
+    busy: Boolean = false,
+    onClick: () -> Unit
+) {
+    Box(
+        modifier
+            .size(53.dp)
+            .tvFocusable(
+                shape = CircleShape,
+                accent = colors.accent,
+                scale = 1.08f,
+                onClick = onClick
+            )
+            .background(colors.content.copy(alpha = 0.12f)),
+        contentAlignment = Alignment.Center
+    ) {
+        if (busy) {
+            CircularProgressIndicator(
+                strokeWidth = 2.dp,
+                color = tint,
+                modifier = Modifier.size(20.dp)
+            )
+        } else {
+            Icon(icon, contentDescription = description, tint = tint, modifier = Modifier.size(22.dp))
+        }
     }
 }
 
@@ -1323,6 +1485,109 @@ private fun TvEmpty(
                 style = MaterialTheme.typography.bodyMedium,
                 color = colors.contentVariant
             )
+        }
+    }
+}
+
+/**
+ * gPodder on the TV — the same account as the phone's, so both share one
+ * library and one set of positions. Signed out: server type, three fields and
+ * Connect (select a field to type; the Google TV phone app's keyboard works
+ * too). Signed in: who, where, when it last synced, Sync now and Sign out.
+ */
+@Composable
+private fun TvSyncSettings(colors: ArtworkColors) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val sync = (context.applicationContext as com.glasscast.app.GlassCastApp).gpodder
+    val status by sync.status.collectAsStateWithLifecycle()
+    val scope = rememberCoroutineScope()
+    Column {
+        if (status.connected) {
+            TvSettingGroup(tr("GPODDER SYNC"), colors) {
+                TvPillButton(
+                    label = if (status.syncing) tr("Syncing…") else tr("Sync now"),
+                    icon = null,
+                    colors = colors,
+                    filled = true,
+                    busy = status.syncing,
+                    onClick = { scope.launch { sync.sync() } }
+                )
+                TvPillButton(label = tr("Sign out"), icon = null, colors = colors, onClick = { sync.disconnect() })
+            }
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = listOfNotNull(
+                    status.username,
+                    status.server.removePrefix("https://").removePrefix("http://"),
+                    status.error ?: status.lastSync.takeIf { it > 0 }?.let { tr("Synced {0}", com.glasscast.app.ui.agoText(it)) }
+                ).joinToString(" · "),
+                style = MaterialTheme.typography.bodySmall,
+                color = if (status.error != null) Color(0xFFFF8A80) else colors.contentVariant
+            )
+        } else {
+            var kind by remember { mutableStateOf(com.glasscast.app.data.GPodderSync.Kind.GPODDER) }
+            var server by remember { mutableStateOf("") }
+            var user by remember { mutableStateOf("") }
+            var password by remember { mutableStateOf("") }
+            var busy by remember { mutableStateOf(false) }
+            var error by remember { mutableStateOf<String?>(null) }
+            TvSettingGroup(tr("GPODDER SYNC"), colors) {
+                TvPillButton(
+                    label = "gPodder",
+                    icon = null,
+                    colors = colors,
+                    filled = kind == com.glasscast.app.data.GPodderSync.Kind.GPODDER,
+                    onClick = { kind = com.glasscast.app.data.GPodderSync.Kind.GPODDER }
+                )
+                TvPillButton(
+                    label = "Nextcloud",
+                    icon = null,
+                    colors = colors,
+                    filled = kind == com.glasscast.app.data.GPodderSync.Kind.NEXTCLOUD,
+                    onClick = { kind = com.glasscast.app.data.GPodderSync.Kind.NEXTCLOUD }
+                )
+            }
+            Spacer(Modifier.height(14.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(14.dp), modifier = Modifier.width(900.dp)) {
+                TvTextField(
+                    value = server,
+                    onValueChange = { server = it },
+                    label = if (kind == com.glasscast.app.data.GPodderSync.Kind.GPODDER) tr("Server (gpodder.net)") else tr("Server"),
+                    accent = colors.chromeButton,
+                    keyboard = androidx.compose.ui.text.input.KeyboardType.Uri,
+                    modifier = Modifier.weight(1f)
+                )
+                TvTextField(value = user, onValueChange = { user = it }, label = tr("Username"), accent = colors.chromeButton, modifier = Modifier.weight(1f))
+                TvTextField(
+                    value = password,
+                    onValueChange = { password = it },
+                    label = if (kind == com.glasscast.app.data.GPodderSync.Kind.NEXTCLOUD) tr("App password") else tr("Password"),
+                    accent = colors.chromeButton,
+                    secret = true,
+                    keyboard = androidx.compose.ui.text.input.KeyboardType.Password,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+            Spacer(Modifier.height(14.dp))
+            TvPillButton(
+                label = if (busy) tr("Connecting…") else tr("Connect"),
+                icon = null,
+                colors = colors,
+                filled = true,
+                busy = busy,
+                onClick = {
+                    busy = true
+                    error = null
+                    scope.launch {
+                        error = sync.connect(kind, server, user, password)
+                        busy = false
+                    }
+                }
+            )
+            error?.let {
+                Spacer(Modifier.height(8.dp))
+                Text(it, style = MaterialTheme.typography.bodySmall, color = Color(0xFFFF8A80))
+            }
         }
     }
 }

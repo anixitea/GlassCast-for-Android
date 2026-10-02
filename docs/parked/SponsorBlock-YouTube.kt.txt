@@ -1,0 +1,360 @@
+/*
+ * PARKED (1.4): SponsorBlock via YouTube channel detection. Removed from the
+ * build until there is more research on matching podcast audio to YouTube
+ * videos (inserted ads change the length; many shows never link YouTube).
+ * See DEVELOPMENT.md, 1.4 third round. Restore: move back to data/YouTube.kt,
+ * restore AdFinder.find(episode, youtube), AdSkipper.load(episode, youtube),
+ * PlaybackService.youtubeFor, Settings.youtubeLinks.
+ */
+package com.glasscast.app.data
+
+import android.util.Xml
+import java.io.StringReader
+import java.net.HttpURLConnection
+import java.net.URL
+import java.net.URLEncoder
+import java.security.MessageDigest
+import java.time.OffsetDateTime
+import kotlin.math.abs
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import org.xmlpull.v1.XmlPullParser
+
+/**
+ * A show's YouTube channel or playlist, for SponsorBlock — found in the show's
+ * notes (YouTube.detect). Stored per show as [encode]; "none:<time>" records a
+ * show that mentions none. [label] is the channel's or playlist's name.
+ */
+data class YouTubeSource(val kind: String, val id: String, val label: String) {
+
+    fun encode(): String = "$kind:$id|$label"
+
+    /** YouTube's public upload feed — no key, no account. The latest 15 uploads. */
+    val feedUrl: String
+        get() = if (kind == PLAYLIST) {
+            "https://www.youtube.com/feeds/videos.xml?playlist_id=$id"
+        } else {
+            "https://www.youtube.com/feeds/videos.xml?channel_id=$id"
+        }
+
+    companion object {
+        const val CHANNEL = "channel"
+        const val PLAYLIST = "playlist"
+
+        fun decode(stored: String): YouTubeSource? {
+            val kind = stored.substringBefore(':', "")
+            val rest = stored.substringAfter(':', "")
+            val id = rest.substringBefore('|')
+            val label = rest.substringAfter('|', id)
+            return if ((kind == CHANNEL || kind == PLAYLIST) && id.isNotBlank()) YouTubeSource(kind, id, label) else null
+        }
+    }
+}
+
+/**
+ * Finding an episode on YouTube, and its sponsor segments on SponsorBlock.
+ *
+ * A show's channel is found in its own notes ([detect]) — no input — and
+ * checked against YouTube's public feed before it's kept. [resolve] turns any
+ * channel, @handle, playlist or video link into a source.
+ *
+ * An episode is matched among the latest uploads by title — shared words,
+ * episode numbers — and date, Shorts left out. A near miss is harmless: the
+ * segments carry the video's length, and [AdBreak.fits] uses them only on a
+ * file of the same length, which a clip or a different cut isn't.
+ */
+object YouTube {
+
+    suspend fun resolve(input: String): YouTubeSource? =
+        withContext(Dispatchers.IO) { runCatching { resolveNow(input.trim()) }.getOrNull() }
+
+    private fun resolveNow(text: String): YouTubeSource? {
+        if (text.isEmpty()) return null
+        Regex("[?&]list=([A-Za-z0-9_-]{10,})").find(text)?.let {
+            return checked(YouTubeSource.PLAYLIST, it.groupValues[1])
+        }
+        Regex("(UC[A-Za-z0-9_-]{22})").find(text)?.let {
+            return checked(YouTubeSource.CHANNEL, it.groupValues[1])
+        }
+        val page = when {
+            text.startsWith("http", ignoreCase = true) -> text
+            text.contains("youtu", ignoreCase = true) -> "https://" + text.removePrefix("//")
+            else -> "https://www.youtube.com/@" + text.removePrefix("@")
+        }
+        val html = get(page, browser = true) ?: return null
+        val id = CHANNEL_IN_PAGE.firstNotNullOfOrNull { it.find(html)?.groupValues?.get(1) } ?: return null
+        return checked(YouTubeSource.CHANNEL, id)
+    }
+
+    private val CHANNEL_IN_PAGE = listOf(
+        Regex("<link rel=\"canonical\" href=\"https://www\\.youtube\\.com/channel/(UC[A-Za-z0-9_-]{22})\""),
+        Regex("\"externalId\":\"(UC[A-Za-z0-9_-]{22})\""),
+        Regex("\"channelId\":\"(UC[A-Za-z0-9_-]{22})\"")
+    )
+
+    private fun checked(kind: String, id: String): YouTubeSource? {
+        val source = YouTubeSource(kind, id, id)
+        val xml = get(source.feedUrl) ?: return null
+        val title = Regex("<title>([^<]*)</title>").find(xml)?.groupValues?.get(1)
+            ?.let(::unescape)?.trim()?.takeIf { it.isNotEmpty() }
+        return source.copy(label = title ?: id)
+    }
+
+    private val YT_LINK = Regex(
+        """(?:https?://)?(?:www\.|m\.|music\.)?(?:youtube\.com/(?:@[A-Za-z0-9._-]+|channel/UC[A-Za-z0-9_-]{22}|c/[A-Za-z0-9._-]+|user/[A-Za-z0-9._-]+|playlist\?list=[A-Za-z0-9_-]+|watch\?v=[A-Za-z0-9_-]{11})|youtu\.be/[A-Za-z0-9_-]{11})""",
+        RegexOption.IGNORE_CASE
+    )
+
+    /**
+     * The show's own YouTube, found in what the show publishes: its
+     * description and its recent episodes' notes. Blocking; call off the main
+     * thread.
+     *
+     * A channel or playlist counts if the show's description names it, or if
+     * two or more episodes' notes do — a guest's channel is usually mentioned
+     * once. Failing that, the episodes' own video links: the channel that
+     * posted them (the majority, if they disagree). A wrong pick costs nothing
+     * — SponsorBlock's times are only used on a file of the same length.
+     */
+    fun detect(show: Feed, episodes: List<Episode>): Detected {
+        val counts = LinkedHashMap<String, Int>()
+        val videos = mutableListOf<String>()
+        fun scan(text: String, weight: Int) {
+            YT_LINK.findAll(text)
+                .map { it.value.trimEnd('.', ',', ')') }
+                .distinctBy { it.lowercase() }
+                .forEach { link ->
+                    if (link.contains("youtu.be/", true) || link.contains("watch?v=", true)) {
+                        if (link !in videos) videos += link
+                    } else {
+                        val path = link.substringAfter("youtube.com/", link)
+                        val key = "https://www.youtube.com/" + if (path.startsWith("@")) path.lowercase() else path
+                        counts[key] = (counts[key] ?: 0) + weight
+                    }
+                }
+        }
+        scan(show.description, 2)
+        episodes.forEach { scan(it.description, 1) }
+        val named = counts.entries.filter { it.value >= 2 }.sortedByDescending { it.value }.take(2)
+        adLog("detect '${show.title}': channel links ${counts}, video links ${videos.size}")
+        if (named.isEmpty() && videos.isEmpty()) return Detected.NotMentioned
+        named.forEach { (link, _) ->
+            runCatching { resolveNow(link) }.getOrNull()?.let {
+                adLog("detect '${show.title}': found ${it.label} (${it.id}) from $link")
+                return Detected.Found(it)
+            }
+        }
+        val channels = videos.take(3).mapNotNull { runCatching { resolveNow(it) }.getOrNull() }
+        if (channels.isEmpty()) {
+            adLog("detect '${show.title}': links found but none resolved — will retry")
+            return Detected.Unreachable
+        }
+        val (_, votes) = channels.groupBy { it.id }.maxByOrNull { it.value.size } ?: return Detected.Unreachable
+        val pick = votes.first().takeIf { channels.size == 1 || votes.size >= 2 } ?: return Detected.NotMentioned
+        adLog("detect '${show.title}': found ${pick.label} (${pick.id}) from its video links")
+        return Detected.Found(pick)
+    }
+
+    /** What [detect] found: a channel, a show that names none, or YouTube unreachable (retry soon). */
+    sealed interface Detected {
+        data class Found(val source: YouTubeSource) : Detected
+        data object NotMentioned : Detected
+        data object Unreachable : Detected
+    }
+
+    /** SponsorBlock's breaks for this episode, if it's among the source's recent uploads. */
+    fun sponsorBreaks(episode: Episode, source: YouTubeSource): List<AdBreak> {
+        val uploads = uploads(source)
+        val video = match(episode, uploads)
+        if (video == null) {
+            adLog("match '${episode.title}': no match among ${uploads.size} recent uploads of ${source.label}")
+            return emptyList()
+        }
+        adLog("match '${episode.title}': video ${video.videoId} '${video.title}'")
+        return SponsorBlock.breaks(video.videoId)
+    }
+
+    // --------------------------------------------------------------- uploads
+
+    private class Upload(val videoId: String, val title: String, val publishedMs: Long)
+
+    private val uploadsCache = HashMap<String, Pair<Long, List<Upload>>>()
+
+    private fun uploads(source: YouTubeSource): List<Upload> {
+        val now = System.currentTimeMillis()
+        synchronized(uploadsCache) {
+            uploadsCache[source.id]?.let { (at, list) -> if (now - at < 30 * 60_000L) return list }
+        }
+        val xml = get(source.feedUrl) ?: return emptyList()
+        val list = runCatching { parse(xml) }.getOrDefault(emptyList())
+        synchronized(uploadsCache) { uploadsCache[source.id] = now to list }
+        return list
+    }
+
+    private fun parse(xml: String): List<Upload> {
+        val parser = Xml.newPullParser()
+        parser.setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES, false)
+        parser.setInput(StringReader(xml))
+        val out = mutableListOf<Upload>()
+        var inEntry = false
+        var id = ""
+        var title = ""
+        var published = 0L
+        var short = false
+        var event = parser.eventType
+        while (event != XmlPullParser.END_DOCUMENT) {
+            if (event == XmlPullParser.START_TAG) {
+                when (parser.name) {
+                    "entry" -> {
+                        inEntry = true
+                        id = ""
+                        title = ""
+                        published = 0L
+                        short = false
+                    }
+                    "yt:videoId" -> if (inEntry) id = parser.nextText().trim()
+                    "title" -> if (inEntry) title = parser.nextText()
+                    "published" -> if (inEntry) {
+                        published = runCatching {
+                            OffsetDateTime.parse(parser.nextText().trim()).toInstant().toEpochMilli()
+                        }.getOrDefault(0L)
+                    }
+                    "link" -> if (inEntry && parser.getAttributeValue(null, "href")?.contains("/shorts/") == true) short = true
+                }
+            } else if (event == XmlPullParser.END_TAG && parser.name == "entry") {
+                if (id.isNotEmpty() && !short) out += Upload(id, title, published)
+                inEntry = false
+            }
+            event = parser.next()
+        }
+        return out
+    }
+
+    private val STOP = setOf(
+        "the", "a", "an", "and", "or", "of", "with", "to", "in", "on", "for", "at", "is",
+        "ep", "episode", "podcast", "full", "feat", "ft", "vs"
+    )
+
+    private fun words(s: String): Set<String> =
+        unescape(s).lowercase().split(Regex("[^\\p{L}\\p{N}]+")).filter { it.isNotEmpty() && it !in STOP }.toSet()
+
+    private fun match(episode: Episode, uploads: List<Upload>): Upload? {
+        val ew = words(episode.title)
+        if (ew.isEmpty()) return null
+        val numbers = ew.filter { it.length >= 2 && it.all(Char::isDigit) }
+        return uploads.map { u ->
+            val uw = words(u.title)
+            var score = (ew intersect uw).size.toFloat() / (ew union uw).size.coerceAtLeast(1)
+            if (numbers.any { it in uw }) score += 0.3f
+            if (episode.pubDate > 0 && u.publishedMs > 0) {
+                val days = abs(episode.pubDate - u.publishedMs) / 86_400_000f
+                score += when {
+                    days <= 2f -> 0.2f
+                    days > 10f -> -0.3f
+                    else -> 0f
+                }
+            }
+            u to score
+        }.filter { it.second >= 0.45f }.maxByOrNull { it.second }?.first
+    }
+
+    // ------------------------------------------------------------------ http
+
+    internal fun get(url: String, browser: Boolean = false): String? = try {
+        val conn = (URL(url).openConnection() as HttpURLConnection).apply {
+            instanceFollowRedirects = true
+            connectTimeout = 10_000
+            readTimeout = 15_000
+            setRequestProperty(
+                "User-Agent",
+                if (browser) "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
+                else "GlassCast/1.4 (Android)"
+            )
+            setRequestProperty("Accept-Language", "en")
+        }
+        try {
+            val code = conn.responseCode
+            if (code in 200..299) {
+                conn.inputStream.bufferedReader().use { it.readText() }
+            } else {
+                adLog("http $code ${URL(url).host}${URL(url).path}")
+                null
+            }
+        } finally {
+            conn.disconnect()
+        }
+    } catch (e: Exception) {
+        adLog("http failed ${runCatching { URL(url).host }.getOrDefault(url)}: ${e.javaClass.simpleName}")
+        null
+    }
+
+    private fun unescape(s: String): String = s
+        .replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"")
+        .replace("&#39;", "'").replace("&#x27;", "'").replace("&amp;", "&")
+}
+
+/**
+ * SponsorBlock — crowd-sourced sponsor segments for YouTube videos
+ * (sponsor.ajay.app). Asked privately: only the first 4 characters of the
+ * video id's SHA-256 go out, and the answer covers every video sharing them,
+ * so the server never learns which one this is. Paid sponsor reads and
+ * self-promotion; "skip" segments only.
+ */
+object SponsorBlock {
+
+    private const val API = "https://sponsor.ajay.app/api/skipSegments/"
+    private val CATEGORIES: String = URLEncoder.encode("[\"sponsor\",\"selfpromo\"]", "UTF-8")
+
+    fun breaks(videoId: String): List<AdBreak> {
+        val prefix = sha256(videoId).take(4)
+        // 404 means nothing is marked for any video with this prefix.
+        val body = YouTube.get("$API$prefix?categories=$CATEGORIES") ?: return emptyList()
+        val all = runCatching { JSONArray(body) }.getOrNull() ?: return emptyList()
+        if ((0 until all.length()).none { all.optJSONObject(it)?.optString("videoID") == videoId }) {
+            adLog("sponsorblock $videoId: nothing marked for this video")
+        }
+        for (i in 0 until all.length()) {
+            val entry = all.optJSONObject(i) ?: continue
+            if (entry.optString("videoID") != videoId) continue
+            val segments = entry.optJSONArray("segments") ?: return emptyList()
+            // Each segment records the video's length when it was marked (0 if
+            // unknown). A segment with none borrows the longest known one; with
+            // none at all, nothing can be checked, so nothing is used.
+            var known = 0.0
+            for (j in 0 until segments.length()) {
+                known = maxOf(known, segments.optJSONObject(j)?.optDouble("videoDuration", 0.0) ?: 0.0)
+            }
+            if (known <= 0.0) {
+                adLog("sponsorblock $videoId: ${segments.length()} segments, but no video length recorded — unusable")
+                return emptyList()
+            }
+            val out = mutableListOf<AdBreak>()
+            for (j in 0 until segments.length()) {
+                val s = segments.optJSONObject(j) ?: continue
+                if (s.optString("actionType", "skip") != "skip") continue
+                val span = s.optJSONArray("segment") ?: continue
+                val start = (span.optDouble(0, 0.0) * 1000).toLong()
+                val end = (span.optDouble(1, 0.0) * 1000).toLong()
+                val length = s.optDouble("videoDuration", 0.0).takeIf { it > 0.0 } ?: known
+                if (end - start >= 1_000L) out += AdBreak(start, end, onlyIfLengthMs = (length * 1000).toLong())
+            }
+            adLog("sponsorblock $videoId: ${out.size} segments, video length ${known.toLong()} s")
+            return out
+        }
+        return emptyList()
+    }
+
+    private fun sha256(text: String): String =
+        MessageDigest.getInstance("SHA-256").digest(text.toByteArray()).joinToString("") { "%02x".format(it) }
+}
+
+/**
+ * Ad-skipping diagnostics, one line per step, under the tag GlassCastAds:
+ * whether the show's YouTube was found, which video matched, what SponsorBlock
+ * returned, and whether the lengths agreed. Release builds keep them; filter
+ * Logcat by the tag.
+ */
+internal fun adLog(message: String) {
+    android.util.Log.i("GlassCastAds", message)
+}

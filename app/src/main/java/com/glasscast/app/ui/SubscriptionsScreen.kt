@@ -147,7 +147,9 @@ fun SubscriptionsScreen(
     ) {
 
         LazyVerticalGrid(
-            columns = GridCells.Fixed(2),
+            // As many columns as fit at 160dp or more: two on a phone, as
+            // before; four or five on a tablet instead of two giant covers.
+            columns = GridCells.Adaptive(minSize = 160.dp),
             state = gridState,
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(
@@ -160,7 +162,7 @@ fun SubscriptionsScreen(
                 Column {
                     Spacer(Modifier.statusBarsPadding().height(56.dp))
                     Text(
-                        text = "Podcasts",
+                        text = tr("Podcasts"),
                         style = MaterialTheme.typography.displaySmall,
                         color = MaterialTheme.colorScheme.onBackground
                     )
@@ -228,7 +230,7 @@ fun SubscriptionsScreen(
                     .padding(horizontal = 20.dp, vertical = 11.dp)
             ) {
                 Text(
-                    text = "Podcasts",
+                    text = tr("Podcasts"),
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.onSurface
                 )
@@ -246,13 +248,13 @@ fun SubscriptionsScreen(
                     enter = expandHorizontally() + fadeIn(),
                     exit = shrinkHorizontally() + fadeOut()
                 ) {
-                    BarButton(Icons.Filled.Search, "Search library", onClick = onSearch)
+                    BarButton(Icons.Filled.Search, tr("Search library"), onClick = onSearch)
                 }
-                BarButton(Icons.Filled.Refresh, "Refresh all", spinning = refreshing) {
+                BarButton(Icons.Filled.Refresh, tr("Refresh all"), spinning = refreshing) {
                     scope.launch { store.refreshAll() }
                 }
-                BarButton(Icons.Filled.Add, "Add by RSS") { showAdd = true }
-                BarButton(Icons.Filled.Tune, "Settings", onClick = onOpenSettings)
+                BarButton(Icons.Filled.Add, tr("Add by RSS")) { showAdd = true }
+                BarButton(Icons.Filled.Tune, tr("Settings"), onClick = onOpenSettings)
             }
         }
     }
@@ -270,10 +272,10 @@ fun SubscriptionsScreen(
             containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
             titleContentColor = MaterialTheme.colorScheme.onSurface,
             textContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-            title = { Text("Unsubscribe?", style = MaterialTheme.typography.titleMedium) },
+            title = { Text(tr("Unsubscribe?"), style = MaterialTheme.typography.titleMedium) },
             text = {
                 Text(
-                    "${feed.title} and its downloaded episode list will be removed.",
+                    tr("{0} and its downloaded episode list will be removed.", feed.title),
                     style = MaterialTheme.typography.bodyMedium
                 )
             },
@@ -282,12 +284,12 @@ fun SubscriptionsScreen(
                     scope.launch { store.unsubscribe(feed) }
                     pendingDelete = null
                 }) {
-                    Text("Unsubscribe", color = MaterialTheme.colorScheme.error)
+                    Text(tr("Unsubscribe"), color = MaterialTheme.colorScheme.error)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { pendingDelete = null }) {
-                    Text("Cancel", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(tr("Cancel"), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         )
@@ -372,20 +374,20 @@ private fun EmptyLibrary(onAdd: () -> Unit) {
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
-            text = "Nothing here yet",
+            text = tr("Nothing here yet"),
             style = MaterialTheme.typography.headlineMedium,
             color = MaterialTheme.colorScheme.onBackground
         )
         Spacer(Modifier.height(8.dp))
         Text(
-            text = "Paste an RSS feed URL to add your first show. Directory search arrives in the next build.",
+            text = tr("Paste an RSS feed URL to add your first show. Directory search arrives in the next build."),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
             modifier = Modifier.padding(horizontal = 24.dp)
         )
         Spacer(Modifier.height(20.dp))
-        Pill(label = "Add a show", active = true, onClick = onAdd)
+        Pill(label = tr("Add a show"), active = true, onClick = onAdd)
     }
 }
 
@@ -410,7 +412,7 @@ private fun RestingSearchPill(onClick: () -> Unit) {
         )
         Spacer(Modifier.width(14.dp))
         Text(
-            text = "Search your library",
+            text = tr("Search your library"),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )

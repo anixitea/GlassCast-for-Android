@@ -23,6 +23,9 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlin.math.abs
+import androidx.compose.foundation.layout.wrapContentWidth
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.ui.unit.Dp
 
 /**
  * The one repeated container. Rounded 18dp, onBackground at 10%, accent-tinted
@@ -34,13 +37,14 @@ fun Pill(
     active: Boolean = false,
     accent: Color = MaterialTheme.colorScheme.primary,
     contentPadding: PaddingValues = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+    modifier: Modifier = Modifier,
     onClick: (() -> Unit)? = null
 ) {
     val bg = if (active) accent.copy(alpha = 0.20f)
     else MaterialTheme.colorScheme.onBackground.copy(alpha = 0.10f)
 
     Box(
-        Modifier
+        modifier
             .clip(RoundedCornerShape(18.dp))
             .background(bg)
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
@@ -51,7 +55,9 @@ fun Pill(
             text = label,
             style = MaterialTheme.typography.titleSmall,
             color = if (active) accent else MaterialTheme.colorScheme.onSurface,
-            fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium
+            fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium,
+            maxLines = 1,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
         )
     }
 }
@@ -105,8 +111,8 @@ fun formatDate(epochMs: Long): String {
     val now = System.currentTimeMillis()
     val days = abs(now - epochMs) / 86_400_000L
     return when {
-        days < 1 -> "Today"
-        days < 2 -> "Yesterday"
+        days < 1 -> tr("Today")
+        days < 2 -> tr("Yesterday")
         days < 330 -> dayFormat.format(Date(epochMs))
         else -> yearFormat.format(Date(epochMs))
     }
@@ -148,3 +154,14 @@ suspend fun FocusRequester.requestWhenReady(attempts: Int = 6) {
 fun FocusRequester.requestSafely() {
     runCatching { requestFocus() }
 }
+
+/**
+ * A list's reading width: at most [max] wide, centered. A phone is narrower
+ * than that and sees no change; on a tablet a list stops stretching edge to
+ * edge.
+ */
+fun Modifier.readableWidth(max: Dp = 720.dp): Modifier = this
+    .fillMaxWidth()
+    .wrapContentWidth(Alignment.CenterHorizontally)
+    .widthIn(max = max)
+    .fillMaxWidth()

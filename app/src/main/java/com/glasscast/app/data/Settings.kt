@@ -6,10 +6,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 /**
- * Three modes, not five. Lights out and Show colours were separate entries in
- * the same list, which made "use the artwork's colours" and "which brightness"
- * mutually exclusive — you could have dynamic colour or dark mode, not both.
- * Brightness is this enum; artwork colour is [Settings.dynamicColor], and the
+ * Three modes, not five. Lights out and Show colors were separate entries in
+ * the same list, which made "use the artwork's colors" and "which brightness"
+ * mutually exclusive — you could have dynamic color or dark mode, not both.
+ * Brightness is this enum; artwork color is [Settings.dynamicColor], and the
  * two combine freely.
  */
 enum class ThemeMode { SYSTEM, LIGHT, DARK }
@@ -24,8 +24,8 @@ class Settings(context: Context) {
 
     /*
      * Stored values from the five-mode version are migrated rather than
-     * dropped: Lights out becomes Dark, and Show colours becomes System with
-     * dynamic colour switched on — the closest equivalent of what each person
+     * dropped: Lights out becomes Dark, and Show colors becomes System with
+     * dynamic color switched on — the closest equivalent of what each person
      * had chosen. Without this, anyone on either would silently fall back to
      * System and lose their setting.
      */
@@ -105,24 +105,88 @@ class Settings(context: Context) {
     /** Lift quiet voices without clipping loud ones. */
     private val _voiceBoost = MutableStateFlow(prefs.getBoolean(KEY_VOICE_BOOST, false))
     val voiceBoost: StateFlow<Boolean> = _voiceBoost.asStateFlow()
+    // Skip ads is parked (1.4): its toggle is gone, so it's pinned off — a
+    // value saved while testing must not keep it running where no one can
+    // see or turn it off. The engine (AdFinder, AdSkipper, the service's
+    // ticker, the progress-line marks) stays in the code, dormant.
+    private val _skipAds = MutableStateFlow(false)
+    /** Skip ad breaks found in chapters and transcripts (see AdFinder). Off unless turned on. */
+    val skipAds: StateFlow<Boolean> = _skipAds.asStateFlow()
+    fun setSkipAds(on: Boolean) {
+        _skipAds.value = on
+        prefs.edit().putBoolean(KEY_SKIP_ADS, on).apply()
+    }
+
+
     fun setVoiceBoost(on: Boolean) {
         _voiceBoost.value = on
         prefs.edit().putBoolean(KEY_VOICE_BOOST, on).apply()
     }
+
+    /** Episode order chosen on a show's page, by feed URL. Shows not listed use [sort]. */
+    private val _episodeOrder = MutableStateFlow(loadEpisodeOrder())
+    val episodeOrder: StateFlow<Map<String, EpisodeSort>> = _episodeOrder.asStateFlow()
+    fun setEpisodeOrder(feedUrl: String, order: EpisodeSort) {
+        val next = _episodeOrder.value + (feedUrl to order)
+        _episodeOrder.value = next
+        val json = org.json.JSONObject()
+        next.forEach { (url, o) -> json.put(url, o.name) }
+        prefs.edit().putString(KEY_EPISODE_ORDER, json.toString()).apply()
+    }
+    private fun loadEpisodeOrder(): Map<String, EpisodeSort> = runCatching {
+        val json = org.json.JSONObject(prefs.getString(KEY_EPISODE_ORDER, "{}") ?: "{}")
+        json.keys().asSequence().mapNotNull { url ->
+            runCatching { url to EpisodeSort.valueOf(json.getString(url)) }.getOrNull()
+        }.toMap()
+    }.getOrDefault(emptyMap())
 
     /** Shows marked "Not interested" in Discover — never suggested again. */
     private val _discoverHidden = MutableStateFlow(
         prefs.getStringSet(KEY_DISCOVER_HIDDEN, emptySet())?.toSet() ?: emptySet()
     )
     val discoverHidden: StateFlow<Set<String>> = _discoverHidden.asStateFlow()
-    fun hideFromDiscover(feedUrl: String) {
+    private val _discoverHiddenInfo = MutableStateFlow(loadHiddenInfo())
+    /**
+     * Name and cover of each show marked Not interested, so Settings can list
+     * them. Shows hidden before 1.4 have none (only their address was kept).
+     */
+    val discoverHiddenInfo: StateFlow<Map<String, HiddenShow>> = _discoverHiddenInfo.asStateFlow()
+
+    fun hideFromDiscover(feedUrl: String, title: String = "", artworkUrl: String = "") {
         val next = _discoverHidden.value + feedUrl
         _discoverHidden.value = next
         prefs.edit().putStringSet(KEY_DISCOVER_HIDDEN, next).apply()
+        if (title.isNotBlank()) saveHiddenInfo(_discoverHiddenInfo.value + (feedUrl to HiddenShow(title, artworkUrl)))
     }
+
+    /** Back into Discover, one show. */
+    fun unhideFromDiscover(feedUrl: String) {
+        val next = _discoverHidden.value - feedUrl
+        _discoverHidden.value = next
+        prefs.edit().putStringSet(KEY_DISCOVER_HIDDEN, next).apply()
+        saveHiddenInfo(_discoverHiddenInfo.value - feedUrl)
+    }
+
+    private fun saveHiddenInfo(map: Map<String, HiddenShow>) {
+        _discoverHiddenInfo.value = map
+        val json = org.json.JSONObject()
+        map.forEach { (url, show) ->
+            json.put(url, org.json.JSONObject().put("title", show.title).put("art", show.artworkUrl))
+        }
+        prefs.edit().putString(KEY_DISCOVER_HIDDEN_INFO, json.toString()).apply()
+    }
+
+    private fun loadHiddenInfo(): Map<String, HiddenShow> = runCatching {
+        val json = org.json.JSONObject(prefs.getString(KEY_DISCOVER_HIDDEN_INFO, "{}") ?: "{}")
+        json.keys().asSequence().associateWith { url ->
+            val o = json.getJSONObject(url)
+            HiddenShow(o.optString("title"), o.optString("art"))
+        }
+    }.getOrDefault(emptyMap())
     fun clearDiscoverHidden() {
         _discoverHidden.value = emptySet()
-        prefs.edit().remove(KEY_DISCOVER_HIDDEN).apply()
+        _discoverHiddenInfo.value = emptyMap()
+        prefs.edit().remove(KEY_DISCOVER_HIDDEN).remove(KEY_DISCOVER_HIDDEN_INFO).apply()
     }
 
     /** The notification permission is asked for once, not on every launch. */
@@ -172,7 +236,10 @@ class Settings(context: Context) {
         const val KEY_NEW_EPISODES = "new_episode_notifications"
         const val KEY_SKIP_SILENCE = "skip_silence"
         const val KEY_VOICE_BOOST = "voice_boost"
+        const val KEY_SKIP_ADS = "skip_ads"
+        const val KEY_DISCOVER_HIDDEN_INFO = "discover_hidden_info"
         const val KEY_DISCOVER_HIDDEN = "discover_hidden"
+        const val KEY_EPISODE_ORDER = "episode_order"
         const val KEY_NOTIF_PROMPT = "notification_prompt_shown"
         const val KEY_SORT = "sort"
         const val KEY_SHOW_SORT = "show_sort"
@@ -181,3 +248,6 @@ class Settings(context: Context) {
         const val KEY_HIDE_PLAYED_SHOWS = "hide_played_shows"
     }
 }
+
+/** A show marked Not interested, as Settings lists it. */
+data class HiddenShow(val title: String, val artworkUrl: String)

@@ -82,7 +82,7 @@ fun QueueContent(
                 )
                 Column(Modifier.weight(1f)) {
                     Text(
-                        text = if (isPlaying) "PLAYING" else "PAUSED",
+                        text = if (isPlaying) "PLAYING" else tr("PAUSED"),
                         style = MaterialTheme.typography.labelMedium,
                         color = accent
                     )
@@ -112,29 +112,29 @@ fun QueueContent(
         ) {
             Column(Modifier.weight(1f)) {
                 Text(
-                    text = "UP NEXT",
+                    text = tr("UP NEXT"),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
                     text = when (upNext.size) {
-                        0 -> "Nothing queued"
-                        1 -> "1 episode"
-                        else -> "${upNext.size} episodes"
+                        0 -> tr("Nothing queued")
+                        1 -> tr("1 episode")
+                        else -> tr("{0} episodes", upNext.size)
                     },
                     style = MaterialTheme.typography.headlineMedium,
                     color = MaterialTheme.colorScheme.onSurface
                 )
             }
-            if (upNext.isNotEmpty()) Pill(label = "Clear", accent = accent, onClick = onClear)
+            if (upNext.isNotEmpty()) Pill(label = tr("Clear"), accent = accent, onClick = onClear)
         }
 
         Spacer(Modifier.height(14.dp))
 
         if (upNext.isEmpty()) {
             Text(
-                text = "Swipe any episode left to add it here, or long-press it to play it next.",
+                text = tr("Swipe any episode left to add it here, or long-press it to play it next."),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp)
@@ -191,7 +191,7 @@ private fun SwipeRow(
                     )
                     Spacer(Modifier.size(8.dp))
                     Text(
-                        text = "Remove",
+                        text = tr("Remove"),
                         style = MaterialTheme.typography.titleSmall,
                         color = MaterialTheme.colorScheme.error
                     )

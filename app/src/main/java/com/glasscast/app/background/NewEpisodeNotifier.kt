@@ -1,5 +1,6 @@
 package com.glasscast.app.background
 
+import com.glasscast.app.ui.tr
 import android.Manifest
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -37,10 +38,10 @@ object NewEpisodeNotifier {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val channel = NotificationChannel(
             CHANNEL,
-            "New episodes",
+            tr("New episodes"),
             NotificationManager.IMPORTANCE_DEFAULT
         ).apply {
-            description = "When a show you follow publishes a new episode"
+            description = tr("When a show you follow publishes a new episode")
         }
         context.getSystemService(NotificationManager::class.java)?.createNotificationChannel(channel)
     }
@@ -77,12 +78,12 @@ object NewEpisodeNotifier {
 
         if (items.size > 1) {
             val inbox = NotificationCompat.InboxStyle()
-                .setSummaryText("${items.size} new episodes")
+                .setSummaryText(tr("{0} new episodes", items.size))
             items.take(6).forEach { (feed, episode) -> inbox.addLine("${feed.title} — ${episode.title}") }
 
             val summary = NotificationCompat.Builder(context, CHANNEL)
                 .setSmallIcon(R.drawable.ic_mark)
-                .setContentTitle("${items.size} new episodes")
+                .setContentTitle(tr("{0} new episodes", items.size))
                 .setContentText(items.map { it.first.title }.distinct().joinToString(", "))
                 .setStyle(inbox)
                 .setGroup(GROUP)

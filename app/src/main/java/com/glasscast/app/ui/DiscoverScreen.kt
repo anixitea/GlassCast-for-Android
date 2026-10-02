@@ -7,11 +7,10 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.outlined.ThumbDown
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.AlertDialog
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.launch
@@ -102,7 +101,7 @@ internal data class Shelf(val title: String, val subtitle: String, val items: Li
  * can bring hidden shows back). Results are kept between visits, so returning
  * to the tab doesn't refetch or flash the skeleton.
  */
-@OptIn(ExperimentalFoundationApi::class)
+@OptIn(ExperimentalFoundationApi::class, androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun DiscoverScreen(
     feeds: List<Feed>,
@@ -121,8 +120,8 @@ fun DiscoverScreen(
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val haptics = rememberHaptics()
-    // Which card's menu is open, as "slot|feedUrl" — a show can sit in two rows.
-    var menuFor by remember { mutableStateOf<String?>(null) }
+    // The show being asked about — the same confirmation as unsubscribing.
+    var pendingHide by remember { mutableStateOf<DirectoryResult?>(null) }
 
     // Libraries from before category parsing: fetch those feeds once so their
     // categories exist. Conditional refreshes would never re-parse them.
@@ -150,15 +149,31 @@ fun DiscoverScreen(
     val visible = shelves?.map { shelf -> shelf.copy(items = shelf.items.filterNot { it.feedUrl in dismissed }) }
         ?.filter { it.items.isNotEmpty() }
 
-    fun longPress(slot: String, result: DirectoryResult) {
+    fun longPress(result: DirectoryResult) {
         haptics.play(Haptic.Select)
-        menuFor = slot + "|" + result.feedUrl
-    }
-    val notInterested: (DirectoryResult) -> Unit = { result ->
-        menuFor = null
-        onNotInterested(result)
+        pendingHide = result
     }
 
+    // Pulling down deals a new hand, like the refresh button.
+    val pullState = androidx.compose.material3.pulltorefresh.rememberPullToRefreshState()
+    androidx.compose.material3.pulltorefresh.PullToRefreshBox(
+        isRefreshing = shelves == null && round > 0,
+        onRefresh = {
+            haptics.play(Haptic.Select)
+            round += 1
+        },
+        state = pullState,
+        modifier = Modifier.fillMaxSize(),
+        indicator = {
+            CookieRefreshIndicator(
+                state = pullState,
+                refreshing = shelves == null && round > 0,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .statusBarsPadding()
+            )
+        }
+    ) {
     LazyColumn(
         state = listState,
         contentPadding = PaddingValues(bottom = bottomInset + 24.dp),
@@ -170,21 +185,14 @@ fun DiscoverScreen(
                     .statusBarsPadding()
                     .padding(horizontal = 24.dp)
                     .padding(top = 44.dp, bottom = 16.dp),
-                verticalAlignment = Alignment.Bottom
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        text = "Discover",
-                        style = MaterialTheme.typography.displaySmall,
-                        color = MaterialTheme.colorScheme.onBackground
-                    )
-                    Text(
-                        text = if (feeds.isEmpty()) "What people are listening to"
-                        else "Picked from the shows you follow",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
+                Text(
+                    text = tr("Discover"),
+                    style = MaterialTheme.typography.displaySmall,
+                    color = MaterialTheme.colorScheme.onBackground,
+                    modifier = Modifier.weight(1f)
+                )
                 Box(
                     Modifier
                         .size(44.dp)
@@ -206,7 +214,7 @@ fun DiscoverScreen(
                     } else {
                         Icon(
                             Icons.Filled.Refresh,
-                            contentDescription = "New recommendations",
+                            contentDescription = tr("New recommendations"),
                             tint = MaterialTheme.colorScheme.onSurface,
                             modifier = Modifier.size(22.dp)
                         )
@@ -222,7 +230,7 @@ fun DiscoverScreen(
             // The picks aren't repeated in the shelves beneath them.
             val pickUrls = picks.map { it.feedUrl }.toSet()
             if (picks.isNotEmpty()) {
-                item(key = "picks-title") { ShelfTitle("Top picks for you", "The best of your strongest genres") }
+                item(key = "picks-title") { ShelfTitle(tr("Top picks for you"), tr("The best of your strongest genres")) }
                 item(key = "picks") {
                     LazyRow(
                         contentPadding = PaddingValues(horizontal = 20.dp),
@@ -232,11 +240,8 @@ fun DiscoverScreen(
                             PickCard(
                                 result = result,
                                 busy = previewingUrl == result.feedUrl,
-                                menuOpen = menuFor == "pick|" + result.feedUrl,
                                 onClick = { onPreview(result) },
-                                onLongClick = { longPress("pick", result) },
-                                onDismissMenu = { menuFor = null },
-                                onNotInterested = { notInterested(result) }
+                                onLongClick = { longPress(result) }
                             )
                         }
                     }
@@ -257,11 +262,8 @@ fun DiscoverScreen(
                                 ShowCard(
                                     result = result,
                                     busy = previewingUrl == result.feedUrl,
-                                    menuOpen = menuFor == shelf.title + "|" + result.feedUrl,
                                     onClick = { onPreview(result) },
-                                    onLongClick = { longPress(shelf.title, result) },
-                                    onDismissMenu = { menuFor = null },
-                                    onNotInterested = { notInterested(result) }
+                                    onLongClick = { longPress(result) }
                                 )
                             }
                         }
@@ -269,6 +271,36 @@ fun DiscoverScreen(
                     }
                 }
         }
+    }
+    }
+
+    pendingHide?.let { result ->
+        AlertDialog(
+            onDismissRequest = { pendingHide = null },
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            titleContentColor = MaterialTheme.colorScheme.onSurface,
+            textContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            title = { Text(tr("Not interested?"), style = MaterialTheme.typography.titleMedium) },
+            text = {
+                Text(
+                    tr("{0} won't be recommended again.", result.title),
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    onNotInterested(result)
+                    pendingHide = null
+                }) {
+                    Text(tr("Not interested"), color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingHide = null }) {
+                    Text(tr("Cancel"), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        )
     }
 }
 
@@ -323,7 +355,7 @@ internal suspend fun buildShelves(feeds: List<Feed>, round: Int = 0): List<Shelf
             val because = feeds.firstOrNull { f -> f.categories.any { genreFor(it) == id } }?.title
             Shelf(
                 title = "More in $label",
-                subtitle = because?.let { "Because you follow $it" } ?: "Popular right now",
+                subtitle = because?.let { "Because you follow $it" } ?: tr("Popular right now"),
                 items = runCatching { ITunesDirectory.top(id, if (round == 0) 30 else 50) }
                     .getOrDefault(emptyList()).fresh().dealt(id)
             )
@@ -331,8 +363,8 @@ internal suspend fun buildShelves(feeds: List<Feed>, round: Int = 0): List<Shelf
     }
     val top = async {
         Shelf(
-            title = "Top podcasts",
-            subtitle = "What everyone's listening to",
+            title = tr("Top podcasts"),
+            subtitle = tr("What everyone's listening to"),
             items = runCatching { ITunesDirectory.top(0, if (round == 0) 30 else 50) }
                 .getOrDefault(emptyList()).fresh().dealt(0)
         )
@@ -369,11 +401,8 @@ private fun ShelfTitle(title: String, subtitle: String) {
 private fun PickCard(
     result: DirectoryResult,
     busy: Boolean,
-    menuOpen: Boolean,
     onClick: () -> Unit,
-    onLongClick: () -> Unit,
-    onDismissMenu: () -> Unit,
-    onNotInterested: () -> Unit
+    onLongClick: () -> Unit
 ) {
     Box {
         Box(
@@ -412,7 +441,7 @@ private fun PickCard(
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
-                    text = if (busy) "Opening…" else result.author,
+                    text = if (busy) tr("Opening…") else result.author,
                     style = MaterialTheme.typography.bodySmall,
                     color = Color.White.copy(alpha = 0.78f),
                     maxLines = 1,
@@ -420,7 +449,6 @@ private fun PickCard(
                 )
             }
         }
-        NotInterestedMenu(menuOpen, onDismissMenu, onNotInterested)
     }
 }
 
@@ -429,11 +457,8 @@ private fun PickCard(
 private fun ShowCard(
     result: DirectoryResult,
     busy: Boolean,
-    menuOpen: Boolean,
     onClick: () -> Unit,
-    onLongClick: () -> Unit,
-    onDismissMenu: () -> Unit,
-    onNotInterested: () -> Unit
+    onLongClick: () -> Unit
 ) {
     // No rounded clip on the card. It was clipped to a 16dp rounded rectangle
     // for the ripple, and the bottom-left curve sliced the first letter off
@@ -475,32 +500,20 @@ private fun ShowCard(
                 overflow = TextOverflow.Ellipsis
             )
             Text(
-                text = if (busy) "Opening…" else result.author,
+                text = if (busy) tr("Opening…") else result.author,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
         }
-        NotInterestedMenu(menuOpen, onDismissMenu, onNotInterested)
-    }
-}
-
-@Composable
-private fun NotInterestedMenu(open: Boolean, onDismiss: () -> Unit, onNotInterested: () -> Unit) {
-    DropdownMenu(expanded = open, onDismissRequest = onDismiss) {
-        DropdownMenuItem(
-            text = { Text("Not interested") },
-            leadingIcon = { Icon(Icons.Outlined.ThumbDown, contentDescription = null) },
-            onClick = onNotInterested
-        )
     }
 }
 
 @Composable
 private fun DiscoverSkeleton() {
     Column {
-        ShelfTitle("Top picks for you", "Finding shows…")
+        ShelfTitle(tr("Top picks for you"), tr("Finding shows…"))
         LazyRow(
             contentPadding = PaddingValues(horizontal = 20.dp),
             horizontalArrangement = Arrangement.spacedBy(14.dp),

@@ -1,5 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The GlassCast mark, monochrome so it can be tinted. Used by the splash. -->
+<!--
+  The GlassCast mark (1.5): the app icon's rounded glyph — a dot and two arcs
+  with round ends — monochrome so it can be tinted. Used by the splash, the
+  artwork placeholder and the notification icon. Traced from the 1.5 icon art:
+  arcs share a center, ends match the art within a few hundredths of a dp.
+-->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
@@ -7,8 +12,17 @@
     android:viewportHeight="24">
     <path
         android:fillColor="#FFFFFFFF"
-        android:pathData="M6.18,17.82m-2.18,0a2.18,2.18 0,1 1,4.36 0a2.18,2.18 0,1 1,-4.36 0" />
+        android:pathData="M5.91,17.50m-2.91,0a2.91,2.91 0,1 1,5.82 0a2.91,2.91 0,1 1,-5.82 0" />
     <path
-        android:fillColor="#FFFFFFFF"
-        android:pathData="M4,4.44v2.83c7.03,0 12.73,5.7 12.73,12.73h2.83c0,-8.59 -6.97,-15.56 -15.56,-15.56zM4,10.1v2.83c3.9,0 7.07,3.17 7.07,7.07h2.83c0,-5.47 -4.43,-9.9 -9.9,-9.9z" />
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="3.44"
+        android:strokeLineCap="round"
+        android:pathData="M5.74,11.13A7.43,7.43 0,0 1,13.17 18.56" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="3.63"
+        android:strokeLineCap="round"
+        android:pathData="M5.74,5.22A13.34,13.34 0,0 1,19.08 18.56" />
 </vector>

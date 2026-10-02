@@ -31,7 +31,7 @@ internal fun softened(source: Bitmap, width: Int = 32, radius: Int = 2, passes: 
 }
 
 /**
- * The cover cropped the way the player's artwork is (centre crop to
+ * The cover cropped the way the player's artwork is (center crop to
  * [aspect] = height ÷ width), with its own vertical reflection underneath —
  * the pair the player's backdrop is made of — softened as one image, so the
  * blur runs across the seam instead of stopping at it.
@@ -60,6 +60,38 @@ internal fun softenedMirror(source: Bitmap, aspect: Float, width: Int = 48, radi
     canvas.save()
     canvas.concat(Matrix().apply { setScale(1f, -1f, 0f, half.toFloat()) })
     canvas.drawBitmap(source, src, Rect(0, 0, width, half), paint)
+    canvas.restore()
+    return blurred(pair, radius, passes)
+}
+
+/**
+ * [softenedMirror] turned on its side, for the landscape player: the cover
+ * with its reflection to the right — flipped about the right edge — softened
+ * as one image, so the blur runs across the seam toward the controls.
+ * [aspect] is the cover band's height over its width.
+ */
+internal fun softenedMirrorSideways(source: Bitmap, aspect: Float, height: Int = 48, radius: Int = 2, passes: Int = 3): Bitmap {
+    val cropW: Int
+    val cropH: Int
+    if (source.height.toFloat() / source.width >= aspect) {
+        cropW = source.width
+        cropH = (source.width * aspect).toInt().coerceAtMost(source.height)
+    } else {
+        cropH = source.height
+        cropW = (source.height / aspect).toInt().coerceAtMost(source.width)
+    }
+    val left = (source.width - cropW) / 2
+    val top = (source.height - cropH) / 2
+
+    val half = (height / aspect).toInt().coerceAtLeast(8)
+    val pair = Bitmap.createBitmap(half * 2, height, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(pair)
+    val paint = Paint(Paint.FILTER_BITMAP_FLAG)
+    val src = Rect(left, top, left + cropW, top + cropH)
+    canvas.drawBitmap(source, src, Rect(0, 0, half, height), paint)
+    canvas.save()
+    canvas.concat(Matrix().apply { setScale(-1f, 1f, half.toFloat(), 0f) })
+    canvas.drawBitmap(source, src, Rect(0, 0, half, height), paint)
     canvas.restore()
     return blurred(pair, radius, passes)
 }

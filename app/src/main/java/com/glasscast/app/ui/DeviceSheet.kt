@@ -130,7 +130,7 @@ fun DeviceSheet(
                 .padding(bottom = 18.dp)
         ) {
             Text(
-                text = "Play on",
+                text = tr("Play on"),
                 style = MaterialTheme.typography.headlineMedium,
                 color = Ink,
                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 8.dp)
@@ -138,8 +138,8 @@ fun DeviceSheet(
 
             DeviceRow(
                 icon = Icons.AutoMirrored.Filled.VolumeUp,
-                name = "This phone",
-                detail = if (casting) "Tap to bring it back" else "Playing here",
+                name = tr("This phone"),
+                detail = if (casting) "Tap to bring it back" else tr("Playing here"),
                 selected = !casting,
                 accent = accent
             ) {
@@ -158,7 +158,7 @@ fun DeviceSheet(
                     )
                     Spacer(Modifier.width(12.dp))
                     Text(
-                        text = "Looking for TVs and speakers on your Wi-Fi…",
+                        text = tr("Looking for TVs and speakers on your Wi-Fi…"),
                         style = MaterialTheme.typography.bodyMedium,
                         color = InkDim
                     )
@@ -177,8 +177,8 @@ fun DeviceSheet(
                     },
                     name = route.name,
                     detail = when {
-                        isConnecting -> "Connecting…"
-                        isSelected -> "Playing here"
+                        isConnecting -> tr("Connecting…")
+                        isSelected -> tr("Playing here")
                         else -> route.description?.takeIf { it.isNotBlank() } ?: "Google Cast"
                     },
                     selected = isSelected,
@@ -195,8 +195,8 @@ fun DeviceSheet(
             Spacer(Modifier.height(10.dp))
             DeviceRow(
                 icon = Icons.Filled.Bluetooth,
-                name = "Bluetooth and other outputs",
-                detail = "Headphones, car, speakers",
+                name = tr("Bluetooth and other outputs"),
+                detail = tr("Headphones, car, speakers"),
                 selected = false,
                 accent = accent
             ) {

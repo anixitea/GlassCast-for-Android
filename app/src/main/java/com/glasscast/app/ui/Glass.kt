@@ -91,7 +91,7 @@ fun Modifier.glassPanel(
  *
  * The ramp stops short of full blur at its peak on purpose: a blur has nothing
  * to sample past the top of its own layer, so pushed all the way it turns into
- * a band of flat material colour — exactly the artefact it was added to remove.
+ * a band of flat material color — exactly the artifact it was added to remove.
  */
 @OptIn(ExperimentalHazeMaterialsApi::class)
 @Composable

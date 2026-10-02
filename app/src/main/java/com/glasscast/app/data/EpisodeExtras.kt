@@ -144,8 +144,8 @@ object EpisodeExtras {
 
     /** "00:01:23,456" or "01:23.456". */
     private fun parseCueTime(raw: String): Long {
-        val normalised = raw.replace(',', '.')
-        val parts = normalised.split(":").mapNotNull { it.trim().toDoubleOrNull() }
+        val normalized = raw.replace(',', '.')
+        val parts = normalized.split(":").mapNotNull { it.trim().toDoubleOrNull() }
         return when (parts.size) {
             3 -> ((parts[0] * 3600 + parts[1] * 60 + parts[2]) * 1000).toLong()
             2 -> ((parts[0] * 60 + parts[1]) * 1000).toLong()

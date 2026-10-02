@@ -104,12 +104,12 @@ fun UpdateBanner(
             Spacer(Modifier.width(12.dp))
             Column {
                 Text(
-                    text = "GlassCast ${release?.version.orEmpty()} is out",
+                    text = tr("GlassCast {0} is out", release?.version.orEmpty()),
                     style = MaterialTheme.typography.titleSmall,
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
-                    text = "See what's new",
+                    text = tr("See what's new"),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.primary
                 )
@@ -124,7 +124,7 @@ fun UpdateBanner(
             ) {
                 Icon(
                     Icons.Filled.Close,
-                    contentDescription = "Not now",
+                    contentDescription = tr("Not now"),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(18.dp)
                 )
@@ -187,7 +187,7 @@ fun UpdateSheet(updater: AppUpdater, onDismiss: () -> Unit) {
             )
             Text(
                 text = buildString {
-                    append("You have ${updater.currentVersion}")
+                    append(tr("You have {0}", updater.currentVersion))
                     if (release != null && release.sizeBytes > 0) append(" · ${formatSize(release.sizeBytes)} download")
                 },
                 style = MaterialTheme.typography.bodyMedium,
@@ -216,9 +216,9 @@ fun UpdateSheet(updater: AppUpdater, onDismiss: () -> Unit) {
             Spacer(Modifier.height(20.dp))
 
             when (val s = state) {
-                is UpdateState.Checking -> StatusLine("Checking GitHub…")
-                is UpdateState.UpToDate -> StatusLine("You're on the latest version.")
-                is UpdateState.Available -> ActionButton("Update") { updater.download(s.release) }
+                is UpdateState.Checking -> StatusLine(tr("Checking GitHub…"))
+                is UpdateState.UpToDate -> StatusLine(tr("You're on the latest version."))
+                is UpdateState.Available -> ActionButton(tr("Update")) { updater.download(s.release) }
                 is UpdateState.Downloading -> {
                     LinearProgressIndicator(
                         progress = { s.progress },
@@ -228,36 +228,36 @@ fun UpdateSheet(updater: AppUpdater, onDismiss: () -> Unit) {
                             .clip(CircleShape)
                     )
                     Spacer(Modifier.height(10.dp))
-                    StatusLine("Downloading… ${(s.progress * 100).toInt()}%")
+                    StatusLine(tr("Downloading… {0}%", (s.progress * 100).toInt()))
                 }
                 is UpdateState.ReadyToInstall -> {
-                    StatusLine("Downloaded and verified. Confirm in Android's installer.")
+                    StatusLine(tr("Downloaded and verified. Confirm in Android's installer."))
                     Spacer(Modifier.height(12.dp))
-                    ActionButton("Install") { updater.install(s.release, s.file) }
+                    ActionButton(tr("Install")) { updater.install(s.release, s.file) }
                 }
                 is UpdateState.NeedsPermission -> {
                     StatusLine(
                         "Android needs your OK for GlassCast to install its own updates. " +
-                            "It asks once — switch it on, then come back."
+                            tr("It asks once — switch it on, then come back.")
                     )
                     Spacer(Modifier.height(12.dp))
-                    ActionButton("Allow") { updater.openInstallPermission() }
+                    ActionButton(tr("Allow")) { updater.openInstallPermission() }
                 }
                 is UpdateState.Failed -> {
                     StatusLine(s.message, error = true)
                     Spacer(Modifier.height(12.dp))
-                    ActionButton("Try again") {
+                    ActionButton(tr("Try again")) {
                         val r = s.release
                         if (r != null) updater.download(r) else updater.check(manual = true)
                     }
                 }
-                UpdateState.Idle -> ActionButton("Check for updates") { updater.check(manual = true) }
+                UpdateState.Idle -> ActionButton(tr("Check for updates")) { updater.check(manual = true) }
             }
 
             if (release != null && release.pageUrl.isNotBlank()) {
                 Spacer(Modifier.height(10.dp))
                 Text(
-                    text = "View on GitHub",
+                    text = tr("View on GitHub"),
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier

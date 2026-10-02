@@ -27,6 +27,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
+import androidx.compose.material.icons.outlined.DeleteOutline
+import androidx.compose.material3.MaterialTheme
 
 /**
  * The two swipes on an episode row: **left adds it to Up Next**, **right marks
@@ -91,16 +93,61 @@ fun SwipeToQueue(
                     alignment = Alignment.CenterEnd,
                     accent = accent,
                     icon = Icons.AutoMirrored.Filled.PlaylistAdd,
-                    description = "Add to Up Next"
+                    description = tr("Add to Up Next")
                 )
                 SwipeToDismissBoxValue.StartToEnd -> RevealTile(
                     state = state,
                     alignment = Alignment.CenterStart,
                     accent = accent,
                     icon = if (played) Icons.Filled.RemoveDone else Icons.Filled.Done,
-                    description = if (played) "Mark as unplayed" else "Mark as played"
+                    description = if (played) tr("Mark as unplayed") else tr("Mark as played")
                 )
                 else -> Unit
+            }
+        },
+        content = { content() }
+    )
+}
+
+/**
+ * Swipe left to delete — the Downloads list's version of swipe-to-queue: the
+ * same quarter-row flick, the same tile growing in from the edge, in the
+ * error color with a bin. The row snaps back and is then removed.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SwipeToDelete(
+    onDelete: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    content: @Composable () -> Unit
+) {
+    val haptics = rememberHaptics()
+    val latestDelete by rememberUpdatedState(onDelete)
+    val state = rememberSwipeToDismissBoxState(
+        confirmValueChange = { value ->
+            if (value == SwipeToDismissBoxValue.EndToStart) {
+                haptics.play(Haptic.ToggleOn)
+                latestDelete()
+            }
+            false
+        },
+        positionalThreshold = { distance -> distance * 0.25f }
+    )
+    SwipeToDismissBox(
+        state = state,
+        modifier = modifier,
+        enableDismissFromStartToEnd = false,
+        enableDismissFromEndToStart = enabled,
+        backgroundContent = {
+            if (state.dismissDirection == SwipeToDismissBoxValue.EndToStart) {
+                RevealTile(
+                    state = state,
+                    alignment = Alignment.CenterEnd,
+                    accent = MaterialTheme.colorScheme.error,
+                    icon = Icons.Outlined.DeleteOutline,
+                    description = tr("Delete download")
+                )
             }
         },
         content = { content() }

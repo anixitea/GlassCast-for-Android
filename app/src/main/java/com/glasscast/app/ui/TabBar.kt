@@ -91,7 +91,7 @@ fun GlassTabBar(
     modifier: Modifier = Modifier,
     /** Icons only, when the mini player's bubble is sharing the row. */
     compact: Boolean = false,
-    /** The bar's colour — the playing cover's hue, darkened. See chromeBar. */
+    /** The bar's color — the playing cover's hue, darkened. See chromeBar. */
     tint: Color = BarFill
 ) {
     val haptics = rememberHaptics()
@@ -109,15 +109,15 @@ fun GlassTabBar(
      * narrows the bar on every frame of a collapse, which kept that loop going
      * on every scroll.
      *
-     * [pill] is the selected tab as a travelling index — 1.4 is forty percent
+     * [pill] is the selected tab as a traveling index — 1.4 is forty percent
      * of the way from tab 1 to tab 2 — so the pill glides between tabs and the
-     * widths hand over between them from the same value. [labelled] is how much
+     * widths hand over between them from the same value. [labeled] is how much
      * the selected tab's label is showing (0 while compact).
      */
     val pill = remember { Animatable(selectedIndex.toFloat()) }
     LaunchedEffect(selectedIndex) { pill.animateTo(selectedIndex.toFloat(), barSpring()) }
-    val labelled = remember { Animatable(if (compact) 0f else 1f) }
-    LaunchedEffect(compact) { labelled.animateTo(if (compact) 0f else 1f, barSpring()) }
+    val labeled = remember { Animatable(if (compact) 0f else 1f) }
+    LaunchedEffect(compact) { labeled.animateTo(if (compact) 0f else 1f, barSpring()) }
 
     // Each tab's x and width, written during placement and read while drawing
     // the pill. Plain floats, not state: nothing should recompose from them.
@@ -176,7 +176,7 @@ fun GlassTabBar(
             val total = constraints.maxWidth
             val height = constraints.maxHeight
             val p = pill.value
-            val lab = labelled.value.coerceIn(0f, 1f)
+            val lab = labeled.value.coerceIn(0f, 1f)
             // Every tab gets 1; the tab the pill sits on gets up to 1.2 more,
             // shared between two tabs while the pill travels.
             val weights = FloatArray(measurables.size) { index ->

@@ -1,5 +1,350 @@
 # GlassCast — developer notes
 
+## 1.5 (in progress) — tablets, TV focus, Downloads
+
+Version 1.5 (versionCode 16).
+
+**TV: stuck on the rail.** Opening a show from Discover or Search goes
+through `previewUrl`, which the content-focus effect didn't key on; the
+clicked card vanished, focus fell to the only focusable thing left (the
+rail), and the rail opened. The effect now keys on tab, selected show,
+preview and its load, and the player closing; the loading spinner holds
+`contentFocus` so focus can't drop; and the rail handles Right itself
+(`contentFocus.requestFocus()`), not trusting geometric search with the page
+laid out under it. A mouse worked throughout because clicks don't search.
+
+**TV: hold opens the episode menu while held**, like Discover cards:
+`tvFocusableRow(onLongClick)` uses `holdSelect`; `TvEpisodeMenu` has
+`ignoreHeldSelect()`. The trailing queue-icon button on episode rows — the
+old way into the menu, which the remote couldn't reliably reach — is gone.
+
+**TV: show description** in the header is focusable; select expands it from
+three lines to all of it, and back.
+
+**Tablets.** Library grid is `GridCells.Adaptive(160.dp)` (2 columns on a
+phone, more on a tablet). The bottom chrome (mini player, tab bar, bubble) is
+capped at 640dp and centered; `barBounds` now also refreshes when the bar's
+left edge moves (rotation, split screen), still not on width, which changes
+every frame of the collapse. `Modifier.readableWidth()` (720dp, centered) on
+Latest and Downloads. Not done: the show page (its blurred backdrop scrolls
+inside the list, so capping the list would cut it), a two-pane landscape
+player. Choppiness at 144 Hz noted, not investigated.
+
+**Landscape tablets (≥480dp tall, wider than tall).**
+- *Full player*: the portrait player turned on its side. The cover fills the
+  height on the left (`min(height, 55% of width)`) and dissolves rightward
+  (`PlayerArtwork(sideways)`); the controls keep portrait's order in a column
+  beside it (`colLeft`/`colW` replace `side`/`w − 2·side`; portrait computes
+  the same numbers as before), vertically centered above the strip (`lift`);
+  the panel rises inside the column and only the column dims. Cause of the
+  "information loads late" on the pad: portrait's cover is `maxWidth × 1.2`
+  tall — taller than a landscape screen — so it covered every control, and
+  during the shared-element flight (drawn above everything) they stayed
+  hidden until it landed. Frames 24–30 and 83–89 of Jonathan's recording.
+- *Show page*: two panes. `ShowHeader(compact)` and `ShowActions()` (local
+  composables) on the left over a fixed full-screen `ArtworkBackdrop`;
+  `showEpisodes()` (a local `LazyListScope` extension) in its own list on the
+  right. Portrait uses the same pieces, unchanged in order and look.
+- Rotation already doesn't recreate the activity (manifest configChanges).
+- *Second pass, after device screenshots:* portrait cover height is capped
+  so the title starts 86% down it (`titleTopPortrait / 0.86`, floored at 60%
+  of the short side) — tall tablet portraits put the title on the sharp
+  cover. Landscape backdrop mirrors sideways (`softenedMirrorSideways`: the
+  cover with its reflection to the right, blurred as one) instead of
+  stretching the vertical mirror; its darkening runs left to right. No panel
+  dimming in landscape (it read as a dark box). Landscape drag-dismiss slides
+  the player off as one sheet (`closing` drops the shared element) instead of
+  flying the cover diagonally to the bubble after the drag moved it down.
+
+**App icon refresh.** New gradient and rounded glyph from Jonathan's art.
+Adaptive layers are PNGs in drawable-nodpi (432px); the glyph spans 54% of
+the *visible* icon (launchers show the middle 72dp of 108dp, so 36% of the
+layer) — 42.5% read small, 60% was tried, the final art (purple vertical
+gradient) ships at 54%; earlier icons sized against the whole layer
+and read as zoomed in. No dark-mode variant: the night layers are deleted, and
+any night-qualified icon resource would outrank the adaptive icon at night
+(the 1.3 bug). Monochrome layer kept for opt-in themed icons. Legacy mipmaps
+regenerated from the visible crop (square and round). TV banner rebuilt (new
+gradient and glyph, Figtree wordmark inside its margins). `ic_mark` (splash,
+placeholder, notification icon) redrawn as the rounded glyph.
+
+**Downloads.** Finished rows show a downloaded mark instead of a trash can;
+swipe left deletes (`SwipeToDelete`, the Up Next swipe's gesture and reveal
+in the error color). Select (top right) turns marks into circles, with
+Select all, Delete (confirmed) and Cancel; Back leaves select mode. Rows
+still downloading keep their cancel button. No auto-delete (Jonathan's call).
+
+## 1.4 (in progress) — Google TV fixes, the living backdrop, the palette, Android Auto, Boost voices
+
+Version 1.4 (versionCode 15). More 1.4 goals to come before release (ad skipping).
+
+### Fourth round
+
+**Skip ads parked too.** Toggle removed from Speed & sound (phone and TV) and
+`Settings.skipAds` pinned to false (a value saved while testing must not keep
+it running unseen). The engine stays in the code, dormant. README updated.
+
+**Downloads that streamed but wouldn't download** (seen on The Broski
+Report, Audioboom): DownloadManager stops after 5 redirects, the player
+follows 20, and podcast audio often chains tracking redirects. `Downloads.start`
+now resolves the address itself first (up to 15 hops, `Range: bytes=0-0`, each
+hop requested once) and enqueues the final one, with a GlassCast User-Agent.
+Failures log DownloadManager's reason under tag `GlassCastDownloads` (HTTP
+status, or 1000-range codes; 1005 = too many redirects). Untested against the
+Broski feed itself — the log will say if it's something else.
+
+**SponsorBlock parked.** Removed from the build (code kept in
+`docs/parked/SponsorBlock-YouTube.kt.txt`, with restore notes): it rarely
+found a matching video, and shows with inserted ads never pass the length
+check. Skip ads now uses chapters and transcripts only. README updated.
+
+**Player title icons**: with a sleep timer the icon row is 140dp instead of
+96dp; its offset was fixed for 96, so it grew off the right edge and cut Cast
+off. Now `iconsWidth` sets both the offset and the title's width.
+
+**Show page chips**: "N unplayed" removed (Hide played covers it). Plain row
+again — Hide played, Downloaded, sort — with the filters `weight(1f, fill =
+false)` and `Pill` single-line with ellipsis, so sort can't be squeezed.
+`Pill` gained a `modifier` parameter.
+
+**Show info**: title Bold, publisher SemiBold.
+
+**Discover's Not interested dialog**: Cancel in onSurfaceVariant, as Library's
+Unsubscribe dialog.
+
+**Mini player in dark mode**: the card swaps its pair — the cover's pale
+tone as the card, the dark tone on the play button and progress line, dark
+text — because the dark card sank into a dark page. Light mode unchanged. The
+bubble's ring keeps the original pair in both themes (Jonathan's call).
+
+**Full player's top vignette**: the flying cover is drawn in the shared
+transition's overlay, above everything, so the top scrim and the handle were
+under it for the whole flight and appeared only when it landed.
+`Modifier.aboveFlyingArtwork(scope)` (SharedElements.kt) renders them in the
+overlay at zIndex 1, with alpha following the player's enter/exit transition
+(the overlay doesn't inherit the player's fade).
+
+**Sleep timer status**: the moon beside the title is gone (it took the title's
+room and repeated the panel bar's). The panel bar's timer button stays lit —
+its selected background — while a timer runs, with the accent moon. Its
+"Running" label is now translated.
+
+**Hidden shows in Settings**: the summary row expands to a list (cover, name,
+Show again each; Show all again). `Settings.hideFromDiscover(url, title, art)`
+now stores name and cover (`discoverHiddenInfo`, JSON); shows hidden before
+this show their feed's host name. `unhideFromDiscover(url)`.
+
+### Third round
+
+**Boost voices reverted** to the 1.3 LoudnessEnhancer (+7 dB). The
+DynamicsProcessing chain sounded worse at the same volume: compression from
+−30 dB with modest makeup flattened dynamics without adding loudness, and
+10 ms frequency-domain frames smeared consonants. `VoiceBoost` keeps its API.
+
+**Skip ads** (Speed & sound, phone and TV; off by default). `data/AdFinder`
+finds breaks from Podcasting 2.0 chapters (ad-like titles) and transcripts
+(sponsor opener → "back to the show" closer, or the last promo-code / "dot
+com" line; 10 s–3 min). `player/AdSkipper` (object, like SleepTimer) holds the
+current episode's breaks and a skipped-event flow; the service loads breaks
+only while the setting is on, and a 500 ms ticker skips a break playback runs
+*into* (landing in one by seeking or resuming plays it). "Ad skipped" toast on
+phone and TV (STARTED only). Breaks are drawn on the progress line in
+`ArtworkColors.adMark` — the cover color farthest in hue from the accent
+(≥ 40°), else the accent darker. `WavySlider(marks, markColor)` redraws the
+wave and track inside each break. Limit: dynamically inserted ads may not
+match published times; most feeds publish neither, and then nothing is found.
+
+**SponsorBlock** (`data/YouTube.kt`). No input: `YouTube.detect` scans the
+show's description (weight 2) and its 12 latest episodes' notes (weight 1)
+for channel / @handle / playlist links, takes one with weight ≥ 2 (a guest's
+channel is usually mentioned once), else the channel that posted the episodes'
+own video links (majority of up to 3). Run by the service the first time Skip
+ads plays a show; stored in `Settings.youtubeLinks` (`none:<time>` = none
+found, rechecked after 7 days). A manual paste row existed for one build and
+was removed — Jonathan preferred scanning only. Links are resolved via the
+page's canonical link / externalId / channelId and validated against the
+public upload feed (`feeds/videos.xml`, latest 15, no key). Episodes matched by title
+words (Jaccard) + episode number + date; Shorts excluded. Segments via the
+k-anonymous endpoint (`/api/skipSegments/<sha256[0..4]>`, sponsor + selfpromo,
+"skip" only). Every SponsorBlock break carries `onlyIfLengthMs` (the video's
+length at submission) and is used only when the playing file is within 3 s —
+`List<AdBreak>.usable(lengthMs)` filters and merges, in the service ticker and
+in the progress-line marks. RSS audio with inserted ads won't match by design.
+README credits SponsorBlock.
+
+**Figtree on every style.** `GlassType` tuned only 7 styles; the other 8
+(titleLarge, bodyLarge, labelLarge, headlineSmall…) fell back to the system
+sans — the show info sheet was set in it, and so were TV menus using
+headlineSmall / labelLarge. `Typography.allFigtree()` now sets Figtree on all
+15. (`TvType` in TvTheme.kt is unused; the TV runs on `GlassType`.)
+
+**Show page chip row**: the filters scroll (fading out at the edge) and sort
+is pinned at the end. With Downloaded added, the plain row squeezed sort to a
+sliver — the same bug as the TV show header.
+
+**SponsorBlock diagnostics**: Logcat tag `GlassCastAds`, one line per step
+(detection, match, SponsorBlock response, length check, HTTP failures).
+Detection now distinguishes "the show names no YouTube" (`none:`, rechecked
+after a day) from "YouTube unreachable" (`retry:`, after an hour); the first
+build stored `none` for a week even on a network error. Links key bumped to
+`youtube_links_2` to drop those.
+
+**Show info**: an (i) at the top right of the phone show page (the back
+button's twin), when the feed has a description or categories. Opens
+`ShowInfoSheet`: cover, title, publisher (accent), episode count, category
+pills, full description (`stripHtml`), in the show's colors. Asked for on
+Reddit.
+
+**Show page Play button**: the cover's background hue (`showPlayColors` /
+`coverEdgeColor`), else the accent, else black/white — checked against the
+page, not the cover's corner (the old check turned blue-on-blue covers black
+or white, and darker 1.4 accents tripped it more).
+
+### Second round
+
+**Palette, again.** The first 1.4 build let neutrals win the ground whenever
+they were the biggest family: red + black-and-white covers (Evolution of a
+Snake) and multicolor ones (Good Hang) went griege. Now the ground is the
+largest *color* family whenever color is ≥ 1/5 of the cover (neutral ≤ 4×
+all colors); only overwhelmingly neutral covers (Broski, ~90%) get a neutral
+page. Tested on six covers cropped from screenshots (Broski, Deutschland3000,
+Trixie & Katya, Good Hang, The Toast, Evolution of a Snake).
+Light-mode cards: were 16% under a light blur (The Toast's slate #8A8C94,
+Trixie's brick red); now `(averageL − 0.06)` clamped 0.78–0.84, saturation
+0.14–0.40 — pastel. The Toast was gray before 1.4 too: its blue-gray studio
+backdrop is the largest area. Yellow → gold now at every lightness (dark
+theme had lemon primaries and olive containers; `themeAccent` → `withHsl`).
+
+**Boost voices** (`player/VoiceBoost.kt`): DynamicsProcessing speech chain —
+5-band pre-EQ (−12 dB < 80 Hz, −2.5 dB to 250 Hz, flat to 1.8 kHz, +4 dB to
+5 kHz, +1 dB above), 3-band MBC (250 Hz / 4 kHz, ratios 3–3.5, thresholds
+−30/−32 dB, makeup 0/+7/+4 dB), limiter at −2 dB. Android 8 falls back to the
+old LoudnessEnhancer (+7 dB). `AudioEffect.setEnabled` returns int — call it
+explicitly rather than using Kotlin's `enabled =`.
+
+**Android Auto** (`player/AutoLibrary.kt`, `player/ArtworkProvider.kt`).
+`PlaybackService` is a `MediaLibraryService`. Tree: Up Next (live player
+items), Latest (40), Downloads, Library (grid) → show → 100 episodes. Played /
+in-progress marks via `android.media.extra.PLAYBACK_STATUS`; browse and search
+hints as plain keys. Search + "play X on GlassCast" (`requestMetadata
+.searchQuery` → show's newest unplayed, else episode title). `onSetMediaItems`
+passes the app's complete items through untouched; bare ids/queries play like
+the app's `play()` (saved position, Up Next kept). `onPlaybackResumption` from
+`QueueStore`. Everything awaits `FeedStore.awaitLoaded()`. Artwork: exported
+read-only provider, `content://<pkg>.artwork/<base64url>`, serves only URLs in
+the library, from `ImageStore.cachedFile`. `EpisodeItems.playable` is now the
+single episode → MediaItem builder (app and service).
+
+**README** rewritten in a plain first-person voice (see HANDOFF, "README").
+
+### First round
+
+**Show pages under the rail.** The show page is laid out full width and its
+content inset by `leadingInset` (the collapsed rail). Its backdrop used to
+start after a 92dp spacer, so the strip beside the rail stayed the shell's
+now-playing color.
+
+**Show header.** Four labeled pills needed ~470 of the ~478dp beside the
+cover; Refresh got 8dp and its label wrapped a letter per line — the "scrolling
+line", whose height was the gap above the episodes. Now: Play/Resume labeled
+(`weight(1f, fill = false)`, so a long translation ellipsizes), Follow labeled
+until followed, then a check; sort and refresh are `TvIconButton`s. Flipping
+sort shows a toast. Pill labels are single-line.
+
+**Player transport.** Fixed widths (512dp) in a 362dp column squeezed Forward 30
+and hid Next. Now the phone's weights (0.78/1/1.7/1/0.78, 4dp gaps) across the
+column. Shapes are fixed (phone corners 30/10); only play/pause morphs — 38dp
+oval paused, 22dp playing, phone spring, clamped. Focus is a fill only (no
+grow, no ring); only the focused button is lit. Select squashes to 0.93.
+The panel bar is four equal icon slots (count / speed / timer value shown).
+
+**The white outline** was `border(if (…) 3.dp else 0.dp)`: 0dp is
+`Dp.Hairline`, a 1px line. Same bug fixed in `TvTextField`. Never pass a
+computed 0dp to `border` — make the modifier conditional.
+
+**Discover hold menu** (`TvShowMenu`, `TvShowMenuRequest`). Compose 1.7's
+`combinedClickable` has **no key long-press**, and its clickable clicks on any
+key-up, even one whose key-down it never saw. So: `tvFocusable(onLongClick)`
+→ `holdSelect` owns select keys in preview (timer on the first down, repeats
+swallowed, release after a hold swallowed); the menu root uses
+`ignoreHeldSelect()` so the held key's repeats and release don't choose
+Follow. Follow/Not interested hide the show at once (`gone`), and focus goes
+to the card now at the same row/index (`FocusSlot`, claimed via a plain field
+so the claim doesn't recompose and cancel itself), or the first card if the
+row went. A shelf rebuild that drops the focused card also refocuses.
+
+**Living backdrop** (`TvCoverBackdrop`, all TV pages and the player). Two
+copies of the 32px softened cover, drawn as squares 1.2× the screen diagonal,
+rotating in opposite directions (110s / 150s) around drifting centers; the
+upper at 55%. Canvas draw only; clock ticks every 40ms, capped steps, stops
+below STARTED and under the open player (`LocalTvBackdropMoving`). New covers
+crossfade. Browse pages use it with `even = true` (uniform scrim); nothing
+playing keeps the still `artworkGround`.
+
+**TV text fields** open the keyboard only on select: the focus stop is the
+box; the `BasicTextField` has `canFocus = editing`. Done or moving off hands
+focus back (box first — disabling a focused field would clear focus).
+
+**Palette (shared, phone and TV).** Reproduced from screenshots with a port of
+Palette's quantizer: on The Broski Report the cream background (#F8F8E0,
+chroma 0.09, HSL S ~0.5) won the accent and became #B7B729. Now: colorfulness
+is RGB chroma; swatches under 0.14 are neutrals, pooled, never the accent;
+the dominant is the biggest pooled *family* (a flat lime title no longer beats
+a textured gray wall); accent families need 4% (fallback 1.5%, else neutral).
+`withHsl` caps the result's chroma at 1.5× the source's and turns yellows
+(45–75°) toward gold below 0.5 lightness; neutral sources keep ≤0.08
+saturation (`tinted`). Expected: Broski gold accent on warm neutral;
+Deutschland3000 purple on neutral.
+
+## 1.3
+
+- **Bubble ring**: the mini card's own pair — `button` played, `surface` unplayed.
+- **Flight into the bubble**: `bubbleFlightPath` — a superellipse (n 24→2) whose
+  scallops grow in over the last 40% at the bubble's spin; identical to
+  cookiePath at landing (verified: 0.0px).
+- **Palette**: accent chosen per 30° hue family (pooled population, grays set
+  aside, ≥4% of the cover to qualify) — a few vivid letters no longer win.
+  New `card` color for show-page episode cards, set ~0.16 lightness away from
+  the cover's true average (whites and blacks included, which Palette drops).
+- **Latest / Downloads rows** wash in their show's color (`elevated`, animated).
+- **Episode order** per show (`Settings.episodeOrder`), toggled on the show page
+  (drawn icons, `SortIcons.kt`); removed from Settings on phone and TV.
+- **Skip silence**: 0.2s / 30% / threshold 768 — midway between 1.1 and 1.2.
+- **Downloads**: button beside Cast in the player.
+- **Pull-to-refresh** on Latest (refresh all) and Discover (new round).
+- **Toasts**: "Added to library" wherever a show is followed; `LocalToast` is
+  now provided at the root.
+- **Not interested** uses the Unsubscribe dialog.
+- **gPodder sync** (`GPodderSync.kt`, `SyncSheet.kt`): gpodder.net-style and
+  Nextcloud servers; subscriptions (first sync merges) and play actions
+  (recorded on pause / mark played, batched 30); devices joined into one
+  gpodder.net sync group at sign-in; password sealed with a Keystore AES key.
+- **Text**: explanatory lines removed from Settings, the speed panel, Discover
+  and the OPML sheet; American spelling throughout (`SHOW_COLOURS` is a stored
+  value and stays).
+
+- **Languages**: Korean, German, Spanish, Dutch, following the system language
+  (no setting). `tr(en, args…)` in `ui/L10n.kt` looks the English up in the
+  language's table; {0}/{1} placeholders let each language order its words.
+  A function rather than string resources because much text is set outside
+  composition (toasts, sync errors, notifications); anything missing falls back
+  to English. New text: write `tr("…")` and add a row to all four tables.
+  Nothing may compare against display text (checked: none does).
+
+### TV
+- **Player** rebuilt in the phone's language: connected transport group
+  (focused buttons morph to pills), wave scrubber (left/right seek), panel bar
+  opening a side panel with Up Next / Info / Speed & sound / Timer.
+- **Sleep timer** fixed: it subtracted the wall clock from an elapsed-realtime
+  deadline, so it always read 0:00.
+- **Show page** on its own blurred cover and palette; Follow/Following
+  (Unfollow confirms), per-show order, and a scroll spec that replaces the TV's
+  30% pivot (the header's buttons scrolled the page, fighting its own
+  scroll-to-top).
+- **Discover/Search** open a preview instead of subscribing on click.
+- **Hold select** on an episode: menu (play now / next / Up Next / played) with
+  toasts. **gPodder** sign-in in TV Settings.
+
 ## 1.2
 
 ### The cover landing outside the card
@@ -8,7 +353,7 @@ Two tester recordings, one cause. The morph moved the cover with a layer
 player-closing flight lands on an element's layout position. The cover flew to
 the screen's left edge (card) or the box's corner (bubble), sat there, then
 snapped. The cover is now genuinely measured and placed each frame. The
-bubble's centre is a fixed 106dp below the box's top (76dp box + half the 60dp
+bubble's center is a fixed 106dp below the box's top (76dp box + half the 60dp
 bar), used whenever the measured bounds aren't in yet.
 
 ### The cover's shape in flight
@@ -28,7 +373,7 @@ during it — back in 1.1, forward in a new recording. The player flight stays.
 ### Also
 - Card/bubble state persists across tabs (it reset on every page change).
 - Bubble ring: played arc in the cover's vibrant accent, track in a second,
-  deeper cover colour, both mid-tone (`ringPlayed`, `ringTrack`) — the old
+  deeper cover color, both mid-tone (`ringPlayed`, `ringTrack`) — the old
   18%-white track vanished in light mode.
 - Skip silence tuned for speech (`speechSilenceSkipper`): 0.3s minimum pause,
   40% kept (max 1s), threshold 512 — ExoPlayer's music-oriented defaults
@@ -112,7 +457,7 @@ same way. Any change of size ran layout → positions written → recompose →
 springs retargeted → layout, frame after frame. It was brief on a tab switch,
 but the morph narrows the bar on every frame of a collapse, so it ran on every
 scroll. The bar is now a custom `Layout` driven by two `Animatable`s — `pill`,
-the selected tab as a travelling index, and `labelled` — read only in measure
+the selected tab as a traveling index, and `labeled` — read only in measure
 (tab widths) and draw (the pill). Nothing in the bar recomposes to animate.
 
 Cookie paths take a `steps` count; the bubble uses 72 rather than 216.
@@ -120,11 +465,20 @@ Cookie paths take a `steps` count; the bubble uses 72 rather than 216.
 ### The title scrolls once
 
 A long episode title in the full player glides across once, 1.5s after the
-player opens, and comes to rest at the start — Apple Music's behaviour, not a
+player opens, and comes to rest at the start — Apple Music's behavior, not a
 perpetual ticker. `basicMarquee(iterations = 1)`; it replays only when the
 player is opened again (it's composed fresh each time) or the episode changes
 (`key(episode.guid)`). The title fills its width and fades over the last 10%,
 so a long one never ends mid-letter and a short one never reaches the fade.
+
+### Tooling: owncheck
+
+`tools/owncheck.py` flags a file that uses a class or function without
+importing it: the app's own declarations (Episode, tr…) and any library class
+the project imports somewhere else (Path, Brush…). It exists because of a
+build failure in 1.3: a script checked "is `import …data.Episode` already
+there?" by substring, and `import …data.EpisodeSort` said yes. Run it with the
+others before every package.
 
 ### Tooling: extcheck
 
@@ -147,7 +501,7 @@ the page shows through once it's collapsed — and only the bar narrows.
 position and scale), so a frame of the morph repaints and re-places, and never
 recomposes or re-measures the card. `MorphMetrics.frame` holds the geometry:
 phase one (0–0.55) shrinks the card to a square at its right end; phase two
-drops it to the bubble's centre, taken from the tab bar's measured bounds. The
+drops it to the bubble's center, taken from the tab bar's measured bounds. The
 cover's clip opens from rounded square to circle, then the cookie's depth grows
 from 0 (a circle) to full; the ring fades in over the last 30%. The card's
 text and controls are composed only while `collapse < 0.35`, so invisible
@@ -253,7 +607,7 @@ full design pass behind the phone, and it stuttered on the Streamer's chip.
 - **Covers decode near their shown size** (grid tiles 180dp, not 260).
 - **Remembered derivations**: show notes stripped once, date lines built once,
   `contentType` on lazy items.
-- **R8 on for release** with `-dontobfuscate`: the optimisation without
+- **R8 on for release** with `-dontobfuscate`: the optimization without
   unreadable crash traces.
 
 ### Matching the phone
@@ -265,7 +619,7 @@ full design pass behind the phone, and it stuttered on the Streamer's chip.
 - **Focus rings and filled buttons** use the pale cover accent (`chromeButton`).
 - **Episode rows** are cards: resting surface, progress bar when started,
   check when played, a waveform on the one playing.
-- **Show page** has the cover's colour washed down from the top (a gradient,
+- **Show page** has the cover's color washed down from the top (a gradient,
   not a blur).
 - **Discover** opens with "Top picks for you" cover cards, then the shelves —
   built by the phone's shared `buildShelves`.
@@ -297,10 +651,10 @@ but not API drift. Treat the first sync as the real test.
   the `itunes:` namespace, deduped by `guid` with an enclosure-URL fallback
 - Conditional refresh via `ETag` / `If-Modified-Since`, per show and for all
 - Episode list with resume position, remaining time, played state
-- Player screen: artwork-driven drifting colour fields, scrubber, ±30s, speed
+- Player screen: artwork-driven drifting color fields, scrubber, ±30s, speed
   sheet, sleep timer, skip-to-next
 - Show page built as a poster: the cover blurred full-bleed behind it, the sharp
-  cover, title, and a centred action row over the dissolve
+  cover, title, and a centered action row over the dissolve
 - Player with full-bleed artwork dissolving into an animated mesh backdrop
 - Latest tab — everything new across every subscription, newest first
 - Library search filters what you already have; the Search tab browses iTunes
@@ -343,7 +697,7 @@ and they are not the same:
 already ships it. When someone turns on themed icons in Wallpaper & style, the
 launcher discards the purple background and tints the RSS glyph from the system
 palette, so it tracks light and dark for free. The trade is that the brand
-colour goes with it, and most people never enable the setting.
+color goes with it, and most people never enable the setting.
 
 **A `-night` qualified icon** is now in `drawable-night/`: the light icon
 inverted, near-black tile with a purple glyph, built from your concept.
@@ -352,7 +706,7 @@ Only the two *drawable* layers are night-qualified — there is deliberately no
 night PNG set. Night-mode qualifiers outrank density in Android's resolution
 order, so a `mipmap-night-hdpi` PNG beats `mipmap-anydpi-v26` after dark: the
 launcher stopped using the adaptive icon at night and fell back to a flat,
-full-bleed image, which looked zoomed in next to the light one. Colours are sampled from it — `#22242D` to
+full-bleed image, which looked zoomed in next to the light one. Colors are sampled from it — `#22242D` to
 `#111319` on the tile, `#9B4ED0` on the mark, which sits between the light
 icon's `AccentPurple` and the dark end of its gradient so the two read as one
 brand rather than two purples.
@@ -371,7 +725,7 @@ drops any placed shortcuts, so it isn't worth it here.
 
 ## Typeface
 
-Figtree, bundled in `res/font`, OFL — licence text at `FIGTREE-OFL.txt`.
+Figtree, bundled in `res/font`, OFL — license text at `FIGTREE-OFL.txt`.
 
 Google Sans is what the app is reaching for and it can't ship: it's proprietary
 to Google, isn't on Google Fonts, and isn't licensed for third-party apps. On a
@@ -387,7 +741,7 @@ cold start.
 ## On "AI animated artwork"
 
 Worth separating what Apple Music actually does from what it looks like it does.
-It isn't generating video. It pulls four colours out of the cover, draws them as
+It isn't generating video. It pulls four colors out of the cover, draws them as
 soft blobs, and drifts them on slow orbits — that's the whole trick, and it's
 what `MeshBackdrop` now does behind the player.
 
@@ -445,7 +799,7 @@ remote doesn't have:
 | Phone | TV |
 |---|---|
 | Swipe down to dismiss player | Back |
-| Swipe left to remove from queue | Focused row, D-pad centre |
+| Swipe left to remove from queue | Focused row, D-pad center |
 | Pull down to search | Search tab on the rail |
 | Long-press for actions | A focusable button on the row |
 | Bottom sheets | Full panes — sheets are a thumb idiom |
@@ -473,7 +827,7 @@ finger is. On a TV nothing answers it unless the interface does, continuously,
 for every element. `tvFocusable` uses three signals together because any one
 alone fails at three metres: the item **grows** (reads first in peripheral
 vision), gains a **bright ring** (survives on busy artwork where scale doesn't),
-and **lifts** (separates it from neighbours of similar colour). Focus is
+and **lifts** (separates it from neighbours of similar color). Focus is
 requested explicitly on entry to every screen — without that the first D-pad
 press goes nowhere and the app looks frozen.
 
@@ -502,8 +856,8 @@ Other decisions worth knowing:
 
 - **No elevation shadows.** `graphicsLayer.shadowElevation` casts its shadow
   from the *layer's* outline, which is a rectangle unless a shape is set on the
-  layer — so every focused pill wore a grey square. `Modifier.shadow(clip =
-  false)` produced the same artefact from the other direction. Scale and the
+  layer — so every focused pill wore a gray square. `Modifier.shadow(clip =
+  false)` produced the same artifact from the other direction. Scale and the
   ring carry focus without either, and dropping them removes a render pass per
   item per frame.
 
@@ -516,7 +870,7 @@ Other decisions worth knowing:
   option.
 
 - **No mini player; a Playing entry in the rail instead.** A strip along the
-  bottom is a thumb affordance — reaching it by D-pad meant travelling past
+  bottom is a thumb affordance — reaching it by D-pad meant traveling past
   everything on the page first. The rail entry appears only while something is
   playing, carries the cover art in place of its glyph, and opens the full
   player. Removing the bar also gave every list back about 130dp of height.
@@ -617,7 +971,7 @@ Three details that matter:
 ## Smoothness
 
 - **Judge it in the `fast` variant, never `debug`.** A debuggable build keeps
-  debugging hooks on and skips the optimisations Compose relies on; it can
+  debugging hooks on and skips the optimizations Compose relies on; it can
   stutter where the real app won't. `fast` is debug-signed (installs over the
   debug build, data intact) but not debuggable. `profileinstaller` installs the
   Compose libraries' baseline profiles so hot paths are compiled ahead of time.
@@ -639,7 +993,7 @@ The library used to be one JSON blob in SharedPreferences, and it crashed the
 app out of memory (a 75MB allocation against a 256MB cap). Three things
 compounded:
 
-- every save serialised the **whole library** — each episode's full HTML show
+- every save serialized the **whole library** — each episode's full HTML show
   notes included — into a single string of tens of megabytes;
 - SharedPreferences holds its **entire contents in memory** for the life of
   the process, so a second full copy of the library sat on the heap permanently;
@@ -711,11 +1065,11 @@ groundwork: see `docs/handoff-sync-protocol.md`.
 ## The Cider pass, part three
 
 **The backdrop is the cover over its own reflection.** The earlier blurred
-field was a separately framed copy — zoomed to the screen's height and centred —
+field was a separately framed copy — zoomed to the screen's height and centered —
 so whatever sat just below the cover's foot came from the middle of the image,
-and the colour broke at the seam before settling into a mud of the whole. Cider
+and the color broke at the seam before settling into a mud of the whole. Cider
 mirrors the cover vertically underneath itself: the first thing below the foot
-is the foot, reflected, so every colour carries straight on. The cover and its
+is the foot, reflected, so every color carries straight on. The cover and its
 reflection are blurred as one image so the blur runs across the seam rather than
 stopping at it, and the sharp cover on top dissolves into its own blurred self.
 
@@ -727,9 +1081,9 @@ rather than fading out below and back in above. Restart and next narrow into the
 group's ends as they leave. The full layout is computed bottom-up from the
 panel's collapsed top so it holds on any screen height.
 
-**The panel is opaque, in the cover's hue,** under a *complete* dark colour
+**The panel is opaque, in the cover's hue,** under a *complete* dark color
 scheme. The translucent first version let the artwork show through behind the
-queue; and patching the app's scheme left every unnamed colour at its light-mode
+queue; and patching the app's scheme left every unnamed color at its light-mode
 value, which is why light mode looked worse. It now holds four tabs — Up Next,
 Info, Speed, Timer — and the moon appears beside cast only while a timer runs,
 opening the Timer tab. The queue rows are built for the panel: the old sheet's
@@ -778,8 +1132,8 @@ the wave — takes over at the top, so the player reads as making room rather
 than being covered.
 
 It is *tinted*, not painted: a dark translucent layer over the blurred artwork,
-so it takes the episode's colours without being given any. The queue and notes
-views are reused unchanged under a local colour scheme that makes them render
+so it takes the episode's colors without being given any. The queue and notes
+views are reused unchanged under a local color scheme that makes them render
 light-on-dark there and normally everywhere else.
 
 Info moved into the panel; its old slot holds speed, timer, and an output
@@ -796,7 +1150,7 @@ One direction (left, Cider's), one obvious icon; the right-swipe's
 `QueuePlayNext` read as a monitor with a plus on it. Every queueing path goes
 through one helper that raises a small confirmation pill with the cover in it.
 
-**The tab bar** is one travelling pill on an underdamped spring, chasing the
+**The tab bar** is one traveling pill on an underdamped spring, chasing the
 selected tab's live bounds while the tab widths themselves animate — the bounce
 is the physics of one object arriving, not an animation per item. **Pages
 slide** between tabs in the direction of travel and push/pop into shows, and
@@ -812,9 +1166,9 @@ around it: one function builds both the clip and the ring, so they can't
 disagree, and the progress is a `PathMeasure` segment of that curve from the
 top.
 
-**Themes are System / Light / Dark plus a dynamic-colour switch.** The old
-five-way list made artwork colour and brightness mutually exclusive. Stored
-values migrate: Lights out → Dark; Show colours → System with dynamic on.
+**Themes are System / Light / Dark plus a dynamic-color switch.** The old
+five-way list made artwork color and brightness mutually exclusive. Stored
+values migrate: Lights out → Dark; Show colors → System with dynamic on.
 
 ## The Cider pass
 
@@ -823,7 +1177,7 @@ Expressive, modelled on Cider's Android client.
 
 **The player's background is the artwork, blurred.** Every earlier version
 *derived* a background from the cover — a palette, then a four-swatch mesh, then
-clamps on the mesh — and every one had a seam somewhere, because a derived colour
+clamps on the mesh — and every one had a seam somewhere, because a derived color
 approximates the picture and approximations disagree with the original along
 some edge. A blurred copy of the same image can't disagree with it. The sharp
 cover dissolves (an alpha mask, as always) into an enlarged, blurred version of
@@ -927,7 +1281,7 @@ a rattle, not feedback.
 
 ## Loading skeletons
 
-`ui/Skeletons.kt`. Content-shaped grey placeholders with a highlight sweeping
+`ui/Skeletons.kt`. Content-shaped gray placeholders with a highlight sweeping
 across, laid out to the same metrics as the real rows.
 
 A spinner says "something is happening". A skeleton says what is about to be
@@ -956,13 +1310,13 @@ release. Not a trade worth making for a one-time migration.
 Two details that matter in practice: the file picker filters on `*/*` rather
 than an OPML MIME type, because exporters label these files as `text/xml`,
 `application/xml`, `application/octet-stream` or nothing at all and a strict
-filter greys out the very file you came to pick; and the import runs
+filter grays out the very file you came to pick; and the import runs
 sequentially with visible progress, because firing a few hundred feed fetches in
 parallel from a phone gets you rate-limited by the larger hosts.
 
 ## Four themes, not three
 
-`System`, `Light`, `Dark`, `Lights out`. Dark is a grey (`#17171B` base); Lights
+`System`, `Light`, `Dark`, `Lights out`. Dark is a gray (`#17171B` base); Lights
 out is true black for OLED.
 
 `System` resolves to Dark, never Lights out. True black is something a
@@ -972,9 +1326,9 @@ should be handed by their phone's night setting.
 Because "dark" now has two flavours, nothing may hardcode a near-black ground.
 The artwork wash, the drifting field and the splash all read
 `MaterialTheme.colorScheme.background` instead; a fixed `#0A0A0C` would show as
-a seam against grey and as a slightly-wrong black against true black.
+a seam against gray and as a slightly-wrong black against true black.
 
-## The colour system: hue carries identity, the theme pins lightness
+## The color system: hue carries identity, the theme pins lightness
 
 The palette used to preserve each cover's own lightness and clamp it into a wide
 band. That is unpredictable by construction — a dark cover gives a legible page,
@@ -984,7 +1338,7 @@ bolted onto the last.
 Inverted now. **Hue and saturation carry the identity; lightness is pinned by
 the theme.** Dark lands near L 0.13, light near L 0.91, always. The page is
 legible by construction, and the hue is what makes it this show's page — which
-is the part anyone recognises.
+is the part anyone recognizes.
 
 `ArtworkColors` is a finished set — `background`, `wash`, `elevated`, `accent`,
 `content`, `contentVariant`, `divider` — rather than raw swatches each caller
@@ -992,16 +1346,16 @@ re-interprets. Two details inside it:
 
 - **`wash` is the flat mean of the artwork's bottom 18%**, which is what a blur
   wide enough to lose the picture actually leaves at that edge. A mean and not a
-  quantised swatch, deliberately: a blur has no notion of which colour is
+  quantised swatch, deliberately: a blur has no notion of which color is
   important, so the page has to match what the blur *produced*, not what the
-  picture is about. Starting the page from that colour is what removes the seam
+  picture is about. Starting the page from that color is what removes the seam
   under the artwork.
 - **The accent is scored by saturation × √population.** The square root is the
   whole trick: without it a cover that's four-fifths black sky accents in black,
   and with the area term gone entirely a single vivid pixel wins.
 
-`contentVariant` sits at 0.80 alpha, not the usual 0.60 — a tint is a coloured
-ground, not black, so secondary text needs more of the content colour to
+`contentVariant` sits at 0.80 alpha, not the usual 0.60 — a tint is a colored
+ground, not black, so secondary text needs more of the content color to
 separate from it.
 
 ## Two surfaces, two grounds
@@ -1016,7 +1370,7 @@ by construction.
 The **player** is a poster. It fills the screen, carries no list, and its entire
 job is to look like the thing you're listening to. Pinning its lightness
 flattened exactly what made it worth looking at, so it keeps the mesh: four
-distinct swatches over the cover's own dominant colour, at its own lightness.
+distinct swatches over the cover's own dominant color, at its own lightness.
 
 `ArtworkColors` therefore carries both sets — `background`/`wash`/`content` for
 the app's grounds, `mesh`/`meshBase`/`onMesh`/`meshAccent` for the player. Same
@@ -1024,11 +1378,11 @@ extraction, two clamps, because they answer different questions.
 
 ## Matching the cover, not deriving from it
 
-The mesh used to clamp every colour into a 0.28–0.58 lightness band and multiply
+The mesh used to clamp every color into a 0.28–0.58 lightness band and multiply
 saturation. That's borrowed from a music player, where covers are photographs
 with no single flat field and a rich mesh is the goal. Podcast covers are not
-photographs — they're illustrations sitting on one flat background colour, and
-that colour is how you recognise the show.
+photographs — they're illustrations sitting on one flat background color, and
+that color is how you recognize the show.
 
 Measured against real covers, the clamp was doing this:
 
@@ -1036,35 +1390,35 @@ Measured against real covers, the clamp was doing this:
 |---|---|
 | `#FCF5FD` pale lavender | `#20158F` deep indigo |
 | `#3F6067` teal | `#63614C` olive |
-| `#6E251F` red | `#3F3832` brown-grey |
+| `#6E251F` red | `#3F3832` brown-gray |
 
 Derived from the artwork, and visibly nothing to do with it.
 
 The mesh now leads with the cover's **dominant** swatch, kept close to true —
 saturation nudged 1.12×, lightness only pulled back from the extremes that can't
 hold text at all. Blob alpha dropped from 0.85 to 0.55 so the base stays
-recognisable through them.
+recognizable through them.
 
 What used to be handled by forcing everything dark is handled by picking the
-text colour instead: dark type on a pale cover, light type on a deep one, with
+text color instead: dark type on a pale cover, light type on a deep one, with
 the scrim following suit and the status-bar icons with it. Forcing dark was the
-other half of the problem — it darkened the very colour the page was trying to
+other half of the problem — it darkened the very color the page was trying to
 match, to protect white text that never had to be white.
 
 ## The player ignores the theme
 
-Not an oversight. Its background is the artwork's colours, not the theme's, and
+Not an oversight. Its background is the artwork's colors, not the theme's, and
 those land wherever the cover lands — so "is this readable" cannot be answered
 by a setting. The fix both references use is the same: a dimmed floor under the
 mesh, a black scrim over it, white type on top, in every theme. It is also why
 dark mode looked right and light mode looked broken; the surface was never
-really light, so light-mode text colours were being asked to work over a dark
+really light, so light-mode text colors were being asked to work over a dark
 picture.
 
 Everything else still follows the theme. Only the player opts out, and it
-restores the status-bar icon colours on the way out.
+restores the status-bar icon colors on the way out.
 
-## Why the mesh was one flat colour
+## Why the mesh was one flat color
 
 Three causes, all showing as the same symptom:
 
@@ -1072,9 +1426,9 @@ Three causes, all showing as the same symptom:
   height every blob covered the whole screen, and four screen-sized gradients at
   high alpha average to a single tone. They are sized against the layer now, and
   the layer is scaled 1.3× so the blur's clamped edges fall off-screen.
-- **The colours weren't actually different.** `vibrantSwatch` and friends are a
+- **The colors weren't actually different.** `vibrantSwatch` and friends are a
   convenience over the full swatch set, and on a dark or desaturated cover most
-  come back null — so three "different" field colours were often one colour
+  come back null — so three "different" field colors were often one color
   three times. The whole swatch list is read by population now, near-duplicates
   dropped by hue and lightness distance, and any shortfall derived from the art
   itself rather than borrowed from the brand.
@@ -1109,13 +1463,13 @@ the player's, and the diagnosis generalises:
 
 > An overlay gradient runs 0→1 over **its own composable**. The page ground runs
 > 0→1 over **the screen**. Two gradients in different coordinate spaces cannot
-> agree at their shared boundary, whatever colours you give them.
+> agree at their shared boundary, whatever colors you give them.
 
 The backdrop now masks the blurred image's own alpha with `BlendMode.DstIn` and
-paints no colour at all, so the page ground is the single colour source across
+paints no color at all, so the page ground is the single color source across
 the whole screen and there is nothing left to disagree. The player learned this
 first; the show page had to learn it separately because the fade there was
-introduced as a colour, not as a mask.
+introduced as a color, not as a mask.
 
 The rule, stated once: **when something sits over a live or full-screen
 background, erase it — never tint it.**
@@ -1123,17 +1477,17 @@ background, erase it — never tint it.**
 ## The seam, and why an overlay can never fix it
 
 Twice I tried to blend the player's artwork into the mesh by painting a
-gradient *over* it — first ending on the theme's ground colour, then on the
+gradient *over* it — first ending on the theme's ground color, then on the
 mesh's dark base. Both produced a hard line exactly one screen-width down the
 page, which is the artwork's bottom edge.
 
-An overlay cannot work here. Whatever colour it ends on at the artwork's last
-row is a fixed colour, and the mesh one pixel below it is a live, moving,
+An overlay cannot work here. Whatever color it ends on at the artwork's last
+row is a fixed color, and the mesh one pixel below it is a live, moving,
 artwork-derived one. They will never agree.
 
 The artwork's own alpha is masked instead: `CompositingStrategy.Offscreen`, then
 a vertical gradient drawn with `BlendMode.DstIn`. The gradient supplies alpha
-and no colour, the artwork's bottom rows become genuinely transparent, and the
+and no color, the artwork's bottom rows become genuinely transparent, and the
 mesh shows through both halves because it was always the only thing back there.
 
 Also worth naming: resource qualifiers have a fixed order, and `night` comes
@@ -1142,14 +1496,14 @@ before density. `mipmap-hdpi-night` is silently not a valid folder;
 
 ## A fix worth remembering
 
-The player's artwork used to fade to the *ground colour* at its foot. The mesh
+The player's artwork used to fade to the *ground color* at its foot. The mesh
 behind it is a saturated, moving field, so the artwork ended in flat `#F7F7F9`
 while the page underneath carried on in olive or purple — and the two met as a
 hard line at exactly the artwork's bottom edge, one screen-width down.
 
 The dissolve now fades to transparent and lets the same mesh carry through both
 halves. Anything drawn over an artwork-derived background has to dissolve into
-*nothing*, never into a colour, or it will find an edge to disagree on.
+*nothing*, never into a color, or it will find an edge to disagree on.
 
 The mesh itself was also averaging into a single flat wash: blob radii at 0.72
 of the screen with a 44dp blur on top leaves no variation to see. Radii are now
@@ -1173,8 +1527,8 @@ Three things that make it read as glass rather than as a smudge:
   edge; without it a blurred panel just looks out of focus.
 - **The top ramp stops short of full blur.** A blur has nothing to sample past
   the top of its own layer, so pushed all the way it becomes a band of flat
-  material colour spreading down the page — the exact artefact it was added to
-  remove. It is also keyed to the *page's* colour, which on a show page means
+  material color spreading down the page — the exact artifact it was added to
+  remove. It is also keyed to the *page's* color, which on a show page means
   the artwork wash, not the theme background.
 - **The mini player's artwork tint stays low.** The point of glass is seeing the
   page move underneath; a heavy tint turns the panel back into a solid.
@@ -1228,7 +1582,7 @@ should say what it is before it offers to leave.
   a milestone-1 convenience and `FeedStore`'s surface is entirely StateFlows and
   suspend functions, so milestone 2 can swap the guts without the UI noticing.
   Do not let the blob survive past milestone 2 — a few thousand episodes
-  serialised on every position write will not hold.
+  serialized on every position write will not hold.
 - **Chapters are cut, not deferred.** They were pulled from the player at your
   call — an episode isn't a book, and there's no second scope to switch to, so
   the scrubber is simply the episode and the label under it is gone.

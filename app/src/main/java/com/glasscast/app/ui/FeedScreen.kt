@@ -36,6 +36,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.graphics.takeOrElse
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -58,6 +59,26 @@ import com.glasscast.app.data.Feed
 import com.glasscast.app.data.FeedStore
 import dev.chrisbanes.haze.HazeState
 import kotlinx.coroutines.launch
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.material.icons.outlined.Info
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.foundation.layout.fillMaxHeight
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -65,6 +86,7 @@ fun FeedScreen(
     feed: Feed,
     episodes: List<Episode>,
     sort: EpisodeSort,
+    onToggleSort: () -> Unit = {},
     store: FeedStore,
     refreshing: Boolean,
     bottomInset: Dp,
@@ -106,6 +128,7 @@ fun FeedScreen(
     }
 
     val (washColors, _) = rememberArtworkColors(feed.imageUrl)
+    var showInfo by remember { mutableStateOf(false) }
     var coverBitmap by remember(feed.url) { mutableStateOf<android.graphics.Bitmap?>(null) }
 
     val collapse by remember {
@@ -115,12 +138,231 @@ fun FeedScreen(
         }
     }
 
+    // The header and the episode list, shared by the two layouts below.
+    @Composable
+    fun ShowHeader(compact: Boolean) {
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp)
+                        .padding(bottom = 14.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Spacer(Modifier.statusBarsPadding().height(60.dp))
+                    Artwork(
+                        url = feed.imageUrl,
+                        sizeDp = if (compact) 220.dp else 268.dp,
+                        corner = 22.dp,
+                        onBitmap = { coverBitmap = it }
+                    )
+                    Spacer(Modifier.height(18.dp))
+
+                    // Marquee rather than three wrapped lines: show titles
+                    // run long, and a header that changes height between
+                    // shows makes the whole page feel unstable.
+                    Text(
+                        text = feed.title,
+                        style = MaterialTheme.typography.headlineMedium,
+                        color = washColors.content,
+                        maxLines = 1,
+                        softWrap = false,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .basicMarquee(
+                                iterations = Int.MAX_VALUE,
+                                initialDelayMillis = 2000,
+                                repeatDelayMillis = 2000
+                            )
+                    )
+                    if (feed.author.isNotBlank()) {
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            text = feed.author,
+                            style = MaterialTheme.typography.titleSmall,
+                            color = washColors.accent,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        text = buildString {
+                            append(tr("{0} EPISODES", sorted.size))
+                            val latest = sorted.maxOfOrNull { it.pubDate } ?: 0L
+                            if (latest > 0) append(tr(" · UPDATED {0}", formatDate(latest).uppercase()))
+                        },
+                        style = MaterialTheme.typography.labelMedium,
+                        color = washColors.contentVariant
+                    )
+                }
+    }
+
+    // The actions under the header: Cider's button group and the filters.
+    @Composable
+    fun ShowActions() {
+
+        /*
+         * One connected group rather than three separate buttons —
+         * Cider's album actions. Play takes the wide center slot and the
+         * library/refresh actions the narrow ends, so the thing you came
+         * here to do is also the biggest target.
+         */
+        val next = ordered.firstOrNull { !it.effectivelyPlayed } ?: ordered.firstOrNull()
+
+        // The cover's own background color, checked against the page
+        // the button sits on (see showPlayColors).
+        val darkPage = com.glasscast.app.ui.theme.LocalIsDark.current
+        val (playFill, playGlyph) = remember(washColors.accent, washColors.background, coverBitmap, darkPage) {
+            showPlayColors(coverBitmap, washColors.accent, washColors.background, darkPage)
+        }
+        val quiet = washColors.content.copy(alpha = 0.12f)
+
+        ButtonGroup(
+            height = 58.dp,
+            modifier = Modifier
+                .padding(horizontal = 40.dp)
+                .padding(bottom = 20.dp)
+        ) {
+            GroupButton(
+                position = GroupPosition.Start,
+                container = if (subscribed) washColors.accent.copy(alpha = 0.22f) else quiet,
+                content = if (subscribed) washColors.accent else washColors.content,
+                icon = if (subscribed) Icons.Filled.Check else Icons.Filled.Add,
+                description = if (subscribed) tr("In your library") else tr("Add to library"),
+                iconSize = 24.dp,
+                enabled = subscribed || !subscribing
+            ) {
+                if (!subscribed && !subscribing) onSubscribe()
+            }
+            GroupButton(
+                position = GroupPosition.Middle,
+                container = playFill,
+                content = playGlyph,
+                icon = Icons.Filled.PlayArrow,
+                label = tr("Play"),
+                weight = 2.1f,
+                iconSize = 24.dp,
+                enabled = next != null
+            ) {
+                next?.let(onPlay)
+            }
+            GroupButton(
+                position = GroupPosition.End,
+                container = quiet,
+                content = washColors.content,
+                icon = Icons.Filled.Refresh,
+                description = if (refreshing) "Refreshing" else tr("Refresh"),
+                iconSize = 24.dp,
+                // Dimmed while running rather than spinning: the list
+                // itself shows new episodes arriving, which is the
+                // feedback that matters.
+                enabled = subscribed && !refreshing
+            ) {
+                scope.launch { store.refresh(feed) }
+            }
+        }
+
+        if (subscribed) {
+            // Hide played, Downloaded (once there is one) and sort, in one
+            // row that always fits: sort keeps its size and the filters
+            // shorten with an ellipsis if a translation runs long. The
+            // "N unplayed" count is gone — Hide played covers it, and it
+            // was what pushed the row past the edge.
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp)
+                    .padding(bottom = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Pill(
+                    label = tr("Hide played"),
+                    active = hidePlayed,
+                    accent = washColors.accent,
+                    modifier = Modifier.weight(1f, fill = false),
+                    onClick = { onHidePlayedChange(!hidePlayed) }
+                )
+                if (downloads.values.any { it.feedUrl == feed.url && it.state == com.glasscast.app.data.DownloadState.DONE }) {
+                    Pill(
+                        label = tr("Downloaded"),
+                        active = downloadedOnly,
+                        accent = washColors.accent,
+                        modifier = Modifier.weight(1f, fill = false),
+                        onClick = { downloadedOnly = !downloadedOnly }
+                    )
+                }
+                SortPill(sort = sort, onToggle = onToggleSort)
+            }
+        }
+    }
+
+    fun LazyListScope.showEpisodes() {
+
+
+        items(ordered, key = { it.guid }) { episode ->
+            SwipeToQueue(
+                accent = washColors.accent,
+                onAddToQueue = { onAddToQueue(episode) },
+                played = episode.effectivelyPlayed,
+                onTogglePlayed = { onTogglePlayed(episode) },
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 3.dp),
+                enabled = subscribed
+            ) {
+                EpisodeRow(
+                    episode = episode,
+                    colors = washColors,
+                    playing = episode.guid == playingGuid,
+                    isPlaying = isPlaying,
+                    download = downloads[episode.guid],
+                    onClick = { onPlay(episode) },
+                    onLongClick = { onEpisodeActions(episode) }
+                )
+            }
+        }
+    }
+
+    // Landscape on a tablet: the header holds still on the left over a
+    // backdrop fixed behind both panes; the episodes scroll on the right.
+    // Portrait is as it always was — the header scrolls with the list.
+    val config = LocalConfiguration.current
+    val twoPane = config.screenWidthDp > config.screenHeightDp && config.screenHeightDp >= 480
+
     Box(
         Modifier
             .fillMaxSize()
             .background(artworkGround(washColors))
     ) {
 
+        if (twoPane) {
+            ArtworkBackdrop(url = feed.imageUrl, colors = washColors, modifier = Modifier.fillMaxSize())
+            Row(Modifier.fillMaxSize()) {
+                Box(
+                    Modifier
+                        .weight(0.42f)
+                        .fillMaxHeight()
+                        .padding(bottom = bottomInset)
+                        .verticalScroll(rememberScrollState()),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column {
+                        ShowHeader(compact = true)
+                        ShowActions()
+                    }
+                }
+                LazyColumn(
+                    state = listState,
+                    contentPadding = PaddingValues(top = 72.dp, end = 12.dp, bottom = bottomInset + 24.dp),
+                    modifier = Modifier
+                        .weight(0.58f)
+                        .fillMaxHeight()
+                        .statusBarsPadding()
+                ) {
+                    showEpisodes()
+                }
+            }
+        } else {
         LazyColumn(
             state = listState,
             contentPadding = PaddingValues(bottom = bottomInset + 24.dp),
@@ -145,172 +387,13 @@ fun FeedScreen(
                             .matchParentSize()
                     )
 
-                    Column(
-                        Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 24.dp)
-                            .padding(bottom = 14.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Spacer(Modifier.statusBarsPadding().height(60.dp))
-                        Artwork(
-                            url = feed.imageUrl,
-                            sizeDp = 268.dp,
-                            corner = 22.dp,
-                            onBitmap = { coverBitmap = it }
-                        )
-                        Spacer(Modifier.height(18.dp))
-
-                        // Marquee rather than three wrapped lines: show titles
-                        // run long, and a header that changes height between
-                        // shows makes the whole page feel unstable.
-                        Text(
-                            text = feed.title,
-                            style = MaterialTheme.typography.headlineMedium,
-                            color = washColors.content,
-                            maxLines = 1,
-                            softWrap = false,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .basicMarquee(
-                                    iterations = Int.MAX_VALUE,
-                                    initialDelayMillis = 2000,
-                                    repeatDelayMillis = 2000
-                                )
-                        )
-                        if (feed.author.isNotBlank()) {
-                            Spacer(Modifier.height(2.dp))
-                            Text(
-                                text = feed.author,
-                                style = MaterialTheme.typography.titleSmall,
-                                color = washColors.accent,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                        Spacer(Modifier.height(6.dp))
-                        Text(
-                            text = buildString {
-                                append("${sorted.size} EPISODES")
-                                val latest = sorted.maxOfOrNull { it.pubDate } ?: 0L
-                                if (latest > 0) append(" · UPDATED ${formatDate(latest).uppercase()}")
-                            },
-                            style = MaterialTheme.typography.labelMedium,
-                            color = washColors.contentVariant
-                        )
-                    }
+                    ShowHeader(compact = false)
                 }
 
-                /*
-                 * One connected group rather than three separate buttons —
-                 * Cider's album actions. Play takes the wide centre slot and the
-                 * library/refresh actions the narrow ends, so the thing you came
-                 * here to do is also the biggest target.
-                 */
-                val next = ordered.firstOrNull { !it.effectivelyPlayed } ?: ordered.firstOrNull()
-
-                // The accent comes from the whole cover, so a bright corner
-                // under this button gives a yellow button on a yellow stripe.
-                // Checked against the region it actually covers.
-                val (playFill, playGlyph) = remember(washColors.accent, coverBitmap) {
-                    visibleOn(washColors.accent, cornerLuminance(coverBitmap))
-                }
-                val quiet = washColors.content.copy(alpha = 0.12f)
-
-                ButtonGroup(
-                    height = 58.dp,
-                    modifier = Modifier
-                        .padding(horizontal = 40.dp)
-                        .padding(bottom = 20.dp)
-                ) {
-                    GroupButton(
-                        position = GroupPosition.Start,
-                        container = if (subscribed) washColors.accent.copy(alpha = 0.22f) else quiet,
-                        content = if (subscribed) washColors.accent else washColors.content,
-                        icon = if (subscribed) Icons.Filled.Check else Icons.Filled.Add,
-                        description = if (subscribed) "In your library" else "Add to library",
-                        iconSize = 24.dp,
-                        enabled = subscribed || !subscribing
-                    ) {
-                        if (!subscribed && !subscribing) onSubscribe()
-                    }
-                    GroupButton(
-                        position = GroupPosition.Middle,
-                        container = playFill,
-                        content = playGlyph,
-                        icon = Icons.Filled.PlayArrow,
-                        label = "Play",
-                        weight = 2.1f,
-                        iconSize = 24.dp,
-                        enabled = next != null
-                    ) {
-                        next?.let(onPlay)
-                    }
-                    GroupButton(
-                        position = GroupPosition.End,
-                        container = quiet,
-                        content = washColors.content,
-                        icon = Icons.Filled.Refresh,
-                        description = if (refreshing) "Refreshing" else "Refresh",
-                        iconSize = 24.dp,
-                        // Dimmed while running rather than spinning: the list
-                        // itself shows new episodes arriving, which is the
-                        // feedback that matters.
-                        enabled = subscribed && !refreshing
-                    ) {
-                        scope.launch { store.refresh(feed) }
-                    }
-                }
-
-                if (subscribed) {
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 20.dp)
-                            .padding(bottom = 16.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Pill(
-                            label = "Hide played",
-                            active = hidePlayed,
-                            accent = washColors.accent,
-                            onClick = { onHidePlayedChange(!hidePlayed) }
-                        )
-                        if (downloads.values.any { it.feedUrl == feed.url && it.state == com.glasscast.app.data.DownloadState.DONE }) {
-                            Pill(
-                                label = "Downloaded",
-                                active = downloadedOnly,
-                                accent = washColors.accent,
-                                onClick = { downloadedOnly = !downloadedOnly }
-                            )
-                        }
-                        val unplayed = sorted.count { !it.effectivelyPlayed }
-                        if (unplayed > 0) Pill(label = "$unplayed unplayed")
-                    }
-                }
+                ShowActions()
             }
-
-            items(ordered, key = { it.guid }) { episode ->
-                SwipeToQueue(
-                    accent = washColors.accent,
-                    onAddToQueue = { onAddToQueue(episode) },
-                    played = episode.effectivelyPlayed,
-                    onTogglePlayed = { onTogglePlayed(episode) },
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 3.dp),
-                    enabled = subscribed
-                ) {
-                    EpisodeRow(
-                        episode = episode,
-                        colors = washColors,
-                        playing = episode.guid == playingGuid,
-                        isPlaying = isPlaying,
-                        download = downloads[episode.guid],
-                        onClick = { onPlay(episode) },
-                        onLongClick = { onEpisodeActions(episode) }
-                    )
-                }
-            }
+            showEpisodes()
+        }
         }
 
         // The soft blur only once the header has scrolled away, as Cider does —
@@ -348,10 +431,113 @@ fun FeedScreen(
         ) {
             Icon(
                 imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                contentDescription = "Back",
+                contentDescription = tr("Back"),
                 tint = Color.White,
                 modifier = Modifier.size(22.dp)
             )
+        }
+
+        // Show info, the back button's twin on the right.
+        if (feed.description.isNotBlank() || feed.categories.isNotEmpty()) {
+            Box(
+                Modifier
+                    .align(Alignment.TopEnd)
+                    .statusBarsPadding()
+                    .padding(end = 14.dp, top = 6.dp)
+                    .size(44.dp)
+                    .clip(CircleShape)
+                    .background(Color.Black.copy(alpha = 0.34f))
+                    .clickable { showInfo = true },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.Info,
+                    contentDescription = tr("Info"),
+                    tint = Color.White,
+                    modifier = Modifier.size(22.dp)
+                )
+            }
+        }
+        if (showInfo) ShowInfoSheet(feed, episodes.size, washColors) { showInfo = false }
+    }
+}
+
+/**
+ * Show info, from the (i) on the show page: cover, name and publisher, the
+ * episode count and categories, and the feed's description in full — the
+ * header has room for a few lines of it at most. In the show's own colors.
+ */
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@Composable
+private fun ShowInfoSheet(feed: Feed, episodeCount: Int, colors: ArtworkColors, onDismiss: () -> Unit) {
+    val ink = if (colors.background.luminance() > 0.5f) Color(0xFF16141A) else Color.White
+    val description = remember(feed.description) { stripHtml(feed.description) }
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = colors.background,
+        contentColor = ink
+    ) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .navigationBarsPadding()
+                .padding(horizontal = 24.dp)
+                .padding(bottom = 28.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Artwork(url = feed.imageUrl, sizeDp = 76.dp, corner = 16.dp)
+                Spacer(Modifier.width(16.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        feed.title,
+                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                        color = ink,
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    if (feed.author.isNotBlank()) {
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            feed.author,
+                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                            color = colors.accent,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+            }
+            Spacer(Modifier.height(16.dp))
+            Text(
+                tr("{0} EPISODES", episodeCount),
+                style = MaterialTheme.typography.labelMedium,
+                color = ink.copy(alpha = 0.6f)
+            )
+            if (feed.categories.isNotEmpty()) {
+                Spacer(Modifier.height(12.dp))
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    feed.categories.distinct().take(8).forEach { category ->
+                        Text(
+                            category,
+                            style = MaterialTheme.typography.labelLarge,
+                            color = ink,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(percent = 50))
+                                .background(ink.copy(alpha = 0.08f))
+                                .padding(horizontal = 12.dp, vertical = 6.dp)
+                        )
+                    }
+                }
+            }
+            if (description.isNotBlank()) {
+                Spacer(Modifier.height(18.dp))
+                Text(description, style = MaterialTheme.typography.bodyLarge, color = ink.copy(alpha = 0.86f))
+            }
         }
     }
 }
@@ -380,7 +566,7 @@ private fun EpisodeRow(
         Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(20.dp))
-            .background(colors.elevated)
+            .background(colors.card.takeOrElse { colors.elevated })
             .combinedClickable(onClick = onClick, onLongClick = onLongClick)
             .padding(horizontal = 18.dp, vertical = 14.dp)
     ) {
@@ -399,7 +585,7 @@ private fun EpisodeRow(
                 Spacer(Modifier.width(6.dp))
                 Icon(
                     imageVector = Icons.Filled.CheckCircle,
-                    contentDescription = "Played",
+                    contentDescription = tr("Played"),
                     tint = colors.contentVariant,
                     modifier = Modifier.size(13.dp)
                 )

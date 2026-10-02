@@ -29,7 +29,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 /**
- * Grey stand-ins for content still on the wire, laid out to the same metrics as
+ * Gray stand-ins for content still on the wire, laid out to the same metrics as
  * the real rows so nothing jumps when the data lands.
  *
  * A spinner says "something is happening". A skeleton says what is about to be
@@ -73,7 +73,7 @@ fun ShimmerBox(modifier: Modifier = Modifier, shape: Shape = BlockShape) {
             .clip(shape)
             .drawWithCache {
                 // The band travels from fully off one edge to fully off the
-                // other, leaving a beat of flat grey between passes rather than
+                // other, leaving a beat of flat gray between passes rather than
                 // a highlight parked permanently somewhere on the block.
                 val band = size.width * 0.5f
                 val startX = -band + sweep * (size.width + band * 2)

@@ -126,7 +126,7 @@ fun SearchScreen(
             // Search has no scrolling content under its header, so it takes the
             // plain title rather than a glass ramp with nothing behind it.
             Text(
-                text = "Search",
+                text = tr("Search"),
                 style = MaterialTheme.typography.displaySmall,
                 color = MaterialTheme.colorScheme.onBackground
             )
@@ -160,7 +160,7 @@ fun SearchScreen(
                     }
                 }
 
-                !idle -> CenterNote("Nothing found. A feed URL always works.")
+                !idle -> CenterNote(tr("Nothing found. A feed URL always works."))
 
                 else -> LazyColumn(
                     contentPadding = PaddingValues(bottom = bottomInset + 24.dp)
@@ -194,7 +194,7 @@ fun SearchScreen(
                     if (loadingCharts) {
                         items(8) { index -> ResultRowSkeleton(index) }
                     } else if (charts.isEmpty()) {
-                        item { CenterNote("Charts didn't load. Search or paste a feed URL.") }
+                        item { CenterNote(tr("Charts didn't load. Search or paste a feed URL.")) }
                     } else {
                         itemsIndexed(charts, key = { _, r -> r.feedUrl }) { index, result ->
                             ResultRow(result, subscribed, addingUrl, openPreview, onAdd, rank = index + 1, tappedUrl = tappedUrl)
@@ -291,7 +291,7 @@ private fun SearchField(
                 Box(Modifier.weight(1f)) {
                     if (value.isEmpty()) {
                         Text(
-                            text = "Shows, hosts, topics",
+                            text = tr("Shows, hosts, topics"),
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -308,7 +308,7 @@ private fun SearchField(
                     ) {
                         Icon(
                             Icons.Filled.Close,
-                            contentDescription = "Clear",
+                            contentDescription = tr("Clear"),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(18.dp)
                         )
@@ -376,7 +376,7 @@ private fun DirectoryRow(
             )
             Text(
                 text = if (result.episodeCount > 0) {
-                    "${result.author} · ${result.episodeCount} episodes"
+                    tr("{0} · {1} episodes", result.author, result.episodeCount)
                 } else {
                     result.author
                 },
@@ -395,11 +395,11 @@ private fun DirectoryRow(
             )
             subscribed -> Icon(
                 Icons.Filled.Check,
-                contentDescription = "Subscribed",
+                contentDescription = tr("Subscribed"),
                 tint = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.size(20.dp)
             )
-            else -> Pill(label = "Add", active = true, onClick = onAdd)
+            else -> Pill(label = tr("Add"), active = true, onClick = onAdd)
         }
     }
 }

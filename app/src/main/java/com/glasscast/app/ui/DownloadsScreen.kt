@@ -31,6 +31,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -42,15 +43,30 @@ import com.glasscast.app.data.DownloadEntry
 import com.glasscast.app.data.DownloadState
 import com.glasscast.app.data.Episode
 import com.glasscast.app.data.Feed
+import androidx.activity.compose.BackHandler
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
+import androidx.compose.material.icons.outlined.SelectAll
+import androidx.compose.material.icons.outlined.Checklist
+import androidx.compose.material.icons.outlined.RadioButtonUnchecked
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.DownloadForOffline
+import androidx.compose.ui.graphics.Color
 
 /**
  * Downloads: what's saved on the phone, and what's on its way.
  *
  * In-flight downloads sit on top with their progress; finished ones below,
- * newest first, each with its size. Tap to play (it plays from the file, no
- * connection needed); the trailing button cancels or deletes. The header says
- * how much space it's all using, since that's the question a downloads page
- * exists to answer.
+ * newest first, each with its size and a downloaded mark. Tap to play (it
+ * plays from the file, no connection needed); swipe left to delete, as a
+ * show page's swipe left queues. The select button at the top turns the marks
+ * into circles: pick episodes (or all of them) and delete them together. An
+ * in-flight download keeps its cancel button. The header says how much space
+ * it's all using, since that's the question a downloads page exists to answer.
  */
 @Composable
 fun DownloadsScreen(
@@ -72,10 +88,47 @@ fun DownloadsScreen(
     val done = downloads.values.filter { it.state == DownloadState.DONE }.sortedByDescending { it.addedAt }
     val bytes = done.sumOf { it.bytes }
 
+    var selecting by rememberSaveable { mutableStateOf(false) }
+    var selected by remember { mutableStateOf(emptySet<String>()) }
+    var confirming by remember { mutableStateOf(false) }
+    // Selection only covers what's still on the phone.
+    val doneGuids = done.map { it.guid }.toSet()
+    LaunchedEffect(doneGuids) {
+        selected = selected intersect doneGuids
+        if (doneGuids.isEmpty()) selecting = false
+    }
+    fun exitSelecting() {
+        selecting = false
+        selected = emptySet()
+    }
+    BackHandler(enabled = selecting) { exitSelecting() }
+    if (confirming) {
+        AlertDialog(
+            onDismissRequest = { confirming = false },
+            title = {
+                Text(if (selected.size == 1) tr("Delete this download?") else tr("Delete {0} downloads?", selected.size))
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    selected.forEach(onRemove)
+                    confirming = false
+                    exitSelecting()
+                }) { Text(tr("Delete"), color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirming = false }) {
+                    Text(tr("Cancel"), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        )
+    }
+
     LazyColumn(
         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = bottomInset + 24.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
-        modifier = Modifier.fillMaxSize()
+        modifier = Modifier
+            .fillMaxSize()
+            .readableWidth()
     ) {
         item(key = "header") {
             Column(
@@ -84,15 +137,37 @@ fun DownloadsScreen(
                     .padding(horizontal = 8.dp)
                     .padding(top = 44.dp, bottom = 10.dp)
             ) {
-                Text(
-                    text = "Downloads",
-                    style = MaterialTheme.typography.displaySmall,
-                    color = MaterialTheme.colorScheme.onBackground
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = tr("Downloads"),
+                        style = MaterialTheme.typography.displaySmall,
+                        color = MaterialTheme.colorScheme.onBackground,
+                        modifier = Modifier.weight(1f)
+                    )
+                    if (selecting) {
+                        HeaderIcon(
+                            icon = Icons.Outlined.SelectAll,
+                            description = tr("Select all"),
+                            active = selected.size == doneGuids.size
+                        ) { selected = if (selected.size == doneGuids.size) emptySet() else doneGuids }
+                        Spacer(Modifier.width(8.dp))
+                        HeaderIcon(
+                            icon = Icons.Outlined.DeleteOutline,
+                            description = tr("Delete"),
+                            enabled = selected.isNotEmpty(),
+                            tint = MaterialTheme.colorScheme.error
+                        ) { confirming = true }
+                        Spacer(Modifier.width(8.dp))
+                        HeaderIcon(icon = Icons.Outlined.Close, description = tr("Cancel")) { exitSelecting() }
+                    } else if (done.isNotEmpty()) {
+                        HeaderIcon(icon = Icons.Outlined.Checklist, description = tr("Select")) { selecting = true }
+                    }
+                }
                 Text(
                     text = when {
-                        done.isEmpty() && active.isEmpty() -> "Episodes you save to listen offline"
-                        else -> "${done.size} episode${if (done.size == 1) "" else "s"} · ${formatBytes(bytes)} on this phone"
+                        selecting -> tr("{0} selected", selected.size)
+                        done.isEmpty() && active.isEmpty() -> tr("Episodes you save to listen offline")
+                        else -> tr(if (done.size == 1) tr("{0} episode · {1} on this phone") else tr("{0} episodes · {1} on this phone"), done.size, formatBytes(bytes))
                     },
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -116,13 +191,13 @@ fun DownloadsScreen(
                     )
                     Spacer(Modifier.height(12.dp))
                     Text(
-                        text = "Nothing downloaded yet",
+                        text = tr("Nothing downloaded yet"),
                         style = MaterialTheme.typography.titleMedium,
                         color = MaterialTheme.colorScheme.onBackground
                     )
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        text = "Long-press any episode and choose Download to keep it for when you're offline.",
+                        text = tr("Long-press any episode and choose Download to keep it for when you're offline."),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -143,14 +218,24 @@ fun DownloadsScreen(
         }
         items(done, key = { "done:" + it.guid }) { entry ->
             val episode = episodesByGuid[entry.guid]
-            DownloadRow(
-                entry = entry,
-                episode = episode,
-                feed = feedsByUrl[entry.feedUrl],
-                playing = entry.guid == playingGuid,
-                onClick = { episode?.let(onPlay) },
-                onRemove = { onRemove(entry.guid) }
-            )
+            SwipeToDelete(onDelete = { onRemove(entry.guid) }, enabled = !selecting) {
+                DownloadRow(
+                    entry = entry,
+                    episode = episode,
+                    feed = feedsByUrl[entry.feedUrl],
+                    playing = entry.guid == playingGuid,
+                    selecting = selecting,
+                    selected = entry.guid in selected,
+                    onClick = {
+                        if (selecting) {
+                            selected = if (entry.guid in selected) selected - entry.guid else selected + entry.guid
+                        } else {
+                            episode?.let(onPlay)
+                        }
+                    },
+                    onRemove = { onRemove(entry.guid) }
+                )
+            }
         }
     }
 }
@@ -162,15 +247,20 @@ private fun DownloadRow(
     feed: Feed?,
     playing: Boolean,
     onClick: () -> Unit,
-    onRemove: () -> Unit
+    onRemove: () -> Unit,
+    selecting: Boolean = false,
+    selected: Boolean = false
 ) {
+    // A light wash of the show's own color, so shows tell apart at a glance.
+    val (showColors, _) = rememberArtworkColors(feed?.imageUrl.orEmpty().ifBlank { episode?.imageUrl.orEmpty() })
+    val wash by androidx.compose.animation.animateColorAsState(showColors.elevated, androidx.compose.animation.core.tween(400), label = "rowWash")
     val art = episode?.imageUrl?.ifBlank { null } ?: feed?.imageUrl.orEmpty()
     Row(
         Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(20.dp))
-            .background(MaterialTheme.colorScheme.surfaceContainer)
-            .clickable(enabled = entry.state == DownloadState.DONE && episode != null, onClick = onClick)
+            .background(wash)
+            .clickable(enabled = entry.state == DownloadState.DONE && (selecting || episode != null), onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -200,7 +290,7 @@ private fun DownloadRow(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 DownloadState.FAILED -> Text(
-                    text = "Download failed — remove it and try again",
+                    text = tr("Download failed — remove it and try again"),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.error
                 )
@@ -214,19 +304,40 @@ private fun DownloadRow(
             }
         }
         Spacer(Modifier.width(10.dp))
-        Box(
-            Modifier
-                .size(40.dp)
-                .clip(CircleShape)
-                .clickable(onClick = onRemove),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = if (entry.state == DownloadState.DONE) Icons.Outlined.DeleteOutline else Icons.Outlined.Close,
-                contentDescription = if (entry.state == DownloadState.DONE) "Delete download" else "Cancel download",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(22.dp)
-            )
+        if (entry.state == DownloadState.DONE) {
+            // Downloaded: a mark, not a button — swipe or select to delete.
+            // While selecting, a circle that fills when picked.
+            Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) {
+                Icon(
+                    imageVector = when {
+                        !selecting -> Icons.Filled.DownloadForOffline
+                        selected -> Icons.Filled.CheckCircle
+                        else -> Icons.Outlined.RadioButtonUnchecked
+                    },
+                    contentDescription = when {
+                        !selecting -> tr("Downloaded")
+                        selected -> tr("{0} selected", 1)
+                        else -> null
+                    },
+                    tint = if (selecting && !selected) MaterialTheme.colorScheme.onSurfaceVariant else showColors.accent,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+        } else {
+            Box(
+                Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .clickable(onClick = onRemove),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.Close,
+                    contentDescription = tr("Cancel download"),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(22.dp)
+                )
+            }
         }
     }
 }
@@ -241,7 +352,7 @@ fun DownloadBadge(entry: DownloadEntry?, modifier: Modifier = Modifier) {
     when (entry?.state) {
         DownloadState.DONE -> Icon(
             Icons.Filled.DownloadDone,
-            contentDescription = "Downloaded",
+            contentDescription = tr("Downloaded"),
             tint = MaterialTheme.colorScheme.primary,
             modifier = modifier.size(16.dp)
         )
@@ -254,7 +365,7 @@ fun DownloadBadge(entry: DownloadEntry?, modifier: Modifier = Modifier) {
         )
         DownloadState.FAILED -> Icon(
             Icons.Filled.ErrorOutline,
-            contentDescription = "Download failed",
+            contentDescription = tr("Download failed"),
             tint = MaterialTheme.colorScheme.error,
             modifier = modifier.size(16.dp)
         )
@@ -267,4 +378,38 @@ internal fun formatBytes(bytes: Long): String = when {
     bytes >= 1_000_000 -> String.format("%.0f MB", bytes / 1_000_000.0)
     bytes > 0 -> "${bytes / 1000} KB"
     else -> "0 MB"
+}
+
+/** A round header button, as on the other pages' top bars. */
+@Composable
+private fun HeaderIcon(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    description: String,
+    enabled: Boolean = true,
+    active: Boolean = false,
+    tint: Color = MaterialTheme.colorScheme.onSurface,
+    onClick: () -> Unit
+) {
+    Box(
+        Modifier
+            .size(44.dp)
+            .clip(CircleShape)
+            .background(
+                if (active) MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)
+                else MaterialTheme.colorScheme.onBackground.copy(alpha = 0.08f)
+            )
+            .clickable(enabled = enabled, onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = description,
+            tint = when {
+                !enabled -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+                active -> MaterialTheme.colorScheme.primary
+                else -> tint
+            },
+            modifier = Modifier.size(22.dp)
+        )
+    }
 }

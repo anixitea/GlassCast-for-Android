@@ -22,7 +22,7 @@ import java.security.MessageDigest
  *
  * This replaces Coil for the whole app rather than running two image pipelines
  * side by side — Palette needs a real Bitmap anyway, and the caching rule above
- * has to hold for the artwork that drives the player's colour.
+ * has to hold for the artwork that drives the player's color.
  */
 class ImageStore(context: Context) {
 
@@ -58,6 +58,16 @@ class ImageStore(context: Context) {
                 }
             }
         }
+    }
+
+    /**
+     * The cover's file on disk, downloaded first if it isn't cached — what the
+     * Android Auto artwork provider hands to the car.
+     */
+    suspend fun cachedFile(url: String): File? = withContext(Dispatchers.IO) {
+        if (url.isBlank()) return@withContext null
+        val file = fileFor(url)
+        if (file.exists() || download(url, file)) file else null
     }
 
     private fun fileFor(url: String): File {

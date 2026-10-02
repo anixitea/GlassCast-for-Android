@@ -1,6 +1,8 @@
 package com.glasscast.app.ui
 
 import android.app.Activity
+import androidx.compose.material.icons.outlined.DownloadForOffline
+import androidx.compose.material.icons.filled.DownloadForOffline
 import androidx.compose.runtime.key
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
@@ -102,6 +104,10 @@ import com.glasscast.app.player.SleepTimer
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
+import com.glasscast.app.player.AdSkipper
+import com.glasscast.app.data.usable
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.animation.core.FastOutLinearInEasing
 
 private val OnPlayer = Color(0xFFF7F7F9)
 private val PlayGlyph = Color(0xFF141418)
@@ -112,7 +118,7 @@ private val PlayGlyph = Color(0xFF141418)
  * **The background is the artwork, blurred.** Every previous version tried to
  * *derive* a background from the cover — a palette, then a mesh of four
  * swatches, then clamps on the mesh — and each one had a seam somewhere,
- * because a derived colour is an approximation of the picture and an
+ * because a derived color is an approximation of the picture and an
  * approximation always disagrees with the original along some edge.
  *
  * A blurred copy of the same image cannot disagree with it. The sharp artwork
@@ -153,11 +159,27 @@ fun PlayerScreen(
     voiceBoost: Boolean = false,
     onSkipSilenceChange: (Boolean) -> Unit = {},
     onVoiceBoostChange: (Boolean) -> Unit = {},
+    skipAds: Boolean = false,
+    onSkipAdsChange: (Boolean) -> Unit = {},
     onShakeToggle: (Boolean) -> Unit,
-    onCollapse: () -> Unit
+    onCollapse: () -> Unit,
+    download: com.glasscast.app.data.DownloadEntry? = null,
+    onDownload: () -> Unit = {},
+    onRemoveDownload: () -> Unit = {}
 ) {
     val art = episode.imageUrl.ifBlank { feed?.imageUrl.orEmpty() }
     val (colors, _) = rememberArtworkColors(art)
+    // Ad breaks, colored on the progress line while Skip ads is on.
+    val adBreaks by AdSkipper.breaks.collectAsStateWithLifecycle()
+    val adMarks = remember(adBreaks, episode.guid, durationMs, skipAds) {
+        if (!skipAds || durationMs <= 0 || adBreaks.first != episode.guid) {
+            emptyList()
+        } else {
+            adBreaks.second.usable(durationMs).map {
+                (it.startMs.toFloat() / durationMs).coerceIn(0f, 1f)..(it.endMs.toFloat() / durationMs).coerceIn(0f, 1f)
+            }
+        }
+    }
     val accent = colors.meshAccent
     // The panel is dark in every case, so its accent is the pale tone of the
     // cover's accent — the same one the mini player's play button uses.
@@ -187,9 +209,9 @@ fun PlayerScreen(
     }
     val timerArmed = endsAt != null || endOfEpisode
     val timerLabel = when {
-        endOfEpisode -> "End of episode"
+        endOfEpisode -> tr("End of episode")
         timerRemaining != null -> formatTime(timerRemaining ?: 0L)
-        else -> "Timer"
+        else -> tr("Timer")
     }
 
     val progress = if (durationMs > 0) (positionMs.toFloat() / durationMs).coerceIn(0f, 1f) else 0f
@@ -223,10 +245,25 @@ fun PlayerScreen(
     }
     val scope = rememberCoroutineScope()
 
+    // Landscape closes as one sheet sliding away (see settle).
+    val landscapeScreen = LocalConfiguration.current.let {
+        it.screenWidthDp > it.screenHeightDp && it.screenHeightDp >= 480
+    }
+    var closing by remember { mutableStateOf(false) }
+
     fun settle(velocity: Float) {
         scope.launch {
             if (dragOffset.value > dismissThreshold || velocity > 1800f) {
                 haptics.play(Haptic.Select)
+                if (landscapeScreen) {
+                    // Landscape: the player leaves as one sheet, sliding down,
+                    // while the mini player fades in. Flying the cover from the
+                    // left of the screen to the bubble at the bottom right cut
+                    // diagonally across the page, after the drag had already
+                    // carried the cover down.
+                    closing = true
+                    dragOffset.animateTo(screenHeight, tween(240, easing = FastOutLinearInEasing))
+                }
                 // Straight to collapse, from wherever the finger left it: the
                 // cover then flies from its dragged position back into the
                 // mini player while the rest fades. Animating the whole player
@@ -331,25 +368,57 @@ fun PlayerScreen(
                 }
                 .pointerInput(Unit) {}
         ) {
-            // Zoomed a little past square, as Cider's is: the cover owns more
-            // of the screen, and the dissolve lands where the title begins.
-            val artHeight = maxWidth * 1.2f
+            // Zoomed a little past square, as Cider's is — but never so tall
+            // that the title lands on the cover's sharp part. The title sits
+            // 292dp above the panel strip (see the morph below); the cover is
+            // cut so that's 86% of the way down it, where the dissolve is past
+            // 70%. Phones never reach the cap; tall tablet screens did, and
+            // their titles sat over the sharp middle of the cover.
+            val titleTopPortrait = maxHeight - PanelHeaderHeight -
+                WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() - 292.dp
+            // (Floored, for a phone turned sideways: too short for the
+            // landscape layout, it keeps this one, and the cap alone would
+            // leave it a sliver of cover.)
+            val artHeight = minOf(maxWidth * 1.2f, titleTopPortrait / 0.86f)
+                .coerceAtLeast(minOf(maxWidth, maxHeight) * 0.6f)
+            // Landscape on a tablet: the portrait player turned on its side.
+            // The cover fills the height on the left and dissolves rightward
+            // into its blur; the controls keep their order in a column beside
+            // it, and the panel rises inside that column. (The portrait cover,
+            // maxWidth × 1.2 tall, was taller than a landscape screen: it hid
+            // every control, so they seemed to load late while it flew in.)
+            val landscape = maxWidth > maxHeight && maxHeight >= 480.dp
+            val artWidth = if (landscape) minOf(maxHeight, maxWidth * 0.55f) else maxWidth
 
-            PlayerBackdrop(url = art, artHeight = artHeight, modifier = Modifier.fillMaxSize())
+            PlayerBackdrop(
+                url = art,
+                band = if (landscape) artWidth else artHeight,
+                sideways = landscape,
+                aspect = if (landscape) maxHeight / artWidth else artHeight / maxWidth,
+                modifier = Modifier.fillMaxSize()
+            )
 
             // ---- sharp artwork, dissolving into its own blur ----
             PlayerArtwork(
                 url = art,
                 modifier = Modifier
-                    .sharedArtwork(artKey, LocalPlayerScope.current, clip = FlightClip)
-                    .fillMaxWidth()
-                    .height(artHeight)
+                    .then(
+                        if (closing) Modifier
+                        else Modifier.sharedArtwork(artKey, LocalPlayerScope.current, clip = FlightClip)
+                    )
+                    .then(
+                        if (landscape) Modifier.width(artWidth).fillMaxHeight()
+                        else Modifier.fillMaxWidth().height(artHeight)
+                    ),
+                sideways = landscape
             )
 
             // Top scrim for the status bar and the handle; the cover up there
-            // could be anything, including white.
+            // could be anything, including white. Above the cover while it
+            // flies in, or it only appears once the cover lands.
             Box(
                 Modifier
+                    .aboveFlyingArtwork(LocalPlayerScope.current)
                     .fillMaxWidth()
                     .height(140.dp)
                     .background(
@@ -364,6 +433,7 @@ fun PlayerScreen(
             Box(
                 Modifier
                     .align(Alignment.TopCenter)
+                    .aboveFlyingArtwork(LocalPlayerScope.current)
                     .statusBarsPadding()
                     .padding(top = 10.dp)
                     .size(width = 40.dp, height = 5.dp)
@@ -388,7 +458,10 @@ fun PlayerScreen(
 
             // The cover dims as the panel rises, so the compact controls that
             // arrive over it stay legible on a bright cover.
-            if (e > 0f) {
+            // Not in landscape: there the panel covers only the column and
+            // the compact controls sit over the blur, never the cover — a
+            // dimmed column read as a dark box cut out of the screen.
+            if (e > 0f && !landscape) {
                 Box(
                     Modifier
                         .fillMaxSize()
@@ -411,15 +484,35 @@ fun PlayerScreen(
              * panel's collapsed top, so it holds its shape on any screen height.
              */
             val side = 26.dp
-            val volumeTop = collapsedTop - 18.dp - 32.dp
+            // The controls' column: the full width in portrait (the same
+            // numbers as ever); beside the cover in landscape, starting just
+            // inside its dissolve. The compact header above an open panel
+            // follows the column too.
+            val colLeft = if (landscape) artWidth - 24.dp else side
+            val colW = if (landscape) w - colLeft - side else w - side * 2
+            val cLeft = if (landscape) colLeft else 24.dp
+            val cW = if (landscape) colW else w - 48.dp
+            // Landscape: the stack (title to volume, 274dp) centers in the
+            // height above the strip, beside a cover that fills it, instead
+            // of sitting on the strip as it does under a portrait cover.
+            val lift = if (landscape) {
+                ((collapsedTop - 18.dp - (statusInset + 32.dp) - 274.dp) / 2).coerceAtLeast(0.dp)
+            } else {
+                0.dp
+            }
+            val volumeTop = collapsedTop - 18.dp - 32.dp - lift
             val groupTop = volumeTop - 22.dp - 76.dp
             val timesTop = groupTop - 16.dp - 18.dp
             val sliderTop = timesTop - 6.dp - 30.dp
             val titleTop = sliderTop - 14.dp - 60.dp
 
             // Title and show name, scaled down into the header.
-            val titleFull = DpRect(side, titleTop, w - side * 2 - 100.dp, 60.dp)
-            val titleCompact = DpRect(24.dp, compactTop, w - 48.dp - 178.dp - 12.dp, 48.dp)
+            // The icons beside the title: download and cast. (A moon joined
+            // them while a timer ran; it took room from the title and repeated
+            // the one in the panel bar, which now shows a running timer.)
+            val iconsWidth = 96.dp
+            val titleFull = DpRect(colLeft, titleTop, colW - iconsWidth - 4.dp, 60.dp)
+            val titleCompact = DpRect(cLeft, compactTop, cW - 178.dp - 12.dp, 48.dp)
             val titleScale = mix(1f, 0.8f, e)
             Column(
                 Modifier
@@ -479,23 +572,22 @@ fun PlayerScreen(
                 )
             }
 
-            // Cast, and the moon — but only while a timer is running. It's a
-            // status as much as a button: tapping it opens the timer tab.
+            // Download and cast.
             if (fade > 0f) {
                 Row(
                     Modifier
-                        .offset(w - side - 96.dp, titleTop + 8.dp)
-                        .width(96.dp)
+                        .offset(colLeft + colW - iconsWidth, titleTop + 8.dp)
+                        .width(iconsWidth)
                         .graphicsLayer { alpha = fade },
                     horizontalArrangement = Arrangement.End,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    if (timerArmed) {
-                        PlayerIconButton(Icons.Filled.Bedtime, "Timer: $timerLabel", tint = panelAccent) {
-                            openPanel(PanelTab.TIMER)
-                        }
+                    DownloadIconButton(download) {
+                        haptics.play(Haptic.Tap)
+                        if (download == null || download.state == com.glasscast.app.data.DownloadState.FAILED) onDownload()
+                        else onRemoveDownload()
                     }
-                    PlayerIconButton(Icons.Filled.Cast, "Play on another device") {
+                    PlayerIconButton(Icons.Filled.Cast, tr("Play on another device")) {
                         haptics.play(Haptic.Tap)
                         showDevices = true
                     }
@@ -504,8 +596,8 @@ fun PlayerScreen(
 
             // The wave, thinning into the header's.
             val sliderRect = mix(
-                DpRect(side, sliderTop, w - side * 2, 30.dp),
-                DpRect(24.dp, compactTop + 60.dp, w - 48.dp, 18.dp),
+                DpRect(colLeft, sliderTop, colW, 30.dp),
+                DpRect(cLeft, compactTop + 60.dp, cW, 18.dp),
                 e
             )
             WavySlider(
@@ -519,6 +611,8 @@ fun PlayerScreen(
                 strokeWidth = mix(4.5.dp, 3.5.dp, e),
                 showThumb = e < 0.5f,
                 voice = { com.glasscast.app.player.VoiceLevel.current() },
+                marks = adMarks,
+                markColor = colors.adMark,
                 onScrubStart = {
                     scrubbing = true
                     scrubValue = progress
@@ -537,8 +631,8 @@ fun PlayerScreen(
             if (fade > 0f) {
                 Row(
                     Modifier
-                        .offset(side, timesTop)
-                        .width(w - side * 2)
+                        .offset(colLeft, timesTop)
+                        .width(colW)
                         .graphicsLayer { alpha = fade }
                 ) {
                     Text(
@@ -558,9 +652,9 @@ fun PlayerScreen(
             // The transport: five buttons at rest, three in the header. Back
             // and forward 30 and play travel to their compact slots; restart
             // and next narrow away into the group's ends as they fade.
-            val fullSlots = DpRect(side, groupTop, w - side * 2, 76.dp)
+            val fullSlots = DpRect(colLeft, groupTop, colW, 76.dp)
                 .split(listOf(0.78f, 1f, 1.7f, 1f, 0.78f), 4.dp)
-            val compactSlots = DpRect(w - 24.dp - 178.dp, compactTop, 178.dp, 48.dp)
+            val compactSlots = DpRect(cLeft + cW - 178.dp, compactTop, 178.dp, 48.dp)
                 .split(listOf(1f, 1.3f, 1f), 4.dp)
             val playCorner by animateDpAsState(
                 targetValue = if (isPlaying) 22.dp else 38.dp,
@@ -581,7 +675,7 @@ fun PlayerScreen(
                     rect = mix(fullSlots[0], leftEdge, e),
                     corners = Corners(30.dp, 10.dp, 10.dp, 30.dp),
                     container = quiet, content = OnPlayer,
-                    icon = Icons.Filled.SkipPrevious, description = "Restart episode",
+                    icon = Icons.Filled.SkipPrevious, description = tr("Restart episode"),
                     iconSize = 24.dp, alpha = fade
                 ) {
                     haptics.play(Haptic.SkipBack)
@@ -592,7 +686,7 @@ fun PlayerScreen(
                 rect = mix(fullSlots[1], compactSlots[0], e),
                 corners = mix(Corners(10.dp, 10.dp, 10.dp, 10.dp), Corners(20.dp, 8.dp, 8.dp, 20.dp), e),
                 container = quiet, content = OnPlayer,
-                icon = Icons.Filled.Replay30, description = "Back 30 seconds",
+                icon = Icons.Filled.Replay30, description = tr("Back 30 seconds"),
                 iconSize = mix(28.dp, 20.dp, e)
             ) {
                 haptics.play(Haptic.SkipBack)
@@ -609,7 +703,7 @@ fun PlayerScreen(
                     corners = Corners(c, c, c, c),
                     container = OnPlayer, content = PlayGlyph,
                     icon = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                    description = if (isPlaying) "Pause" else "Play",
+                    description = if (isPlaying) "Pause" else tr("Play"),
                     iconSize = mix(38.dp, 24.dp, e)
                 ) {
                     haptics.play(if (isPlaying) Haptic.Pause else Haptic.Resume)
@@ -629,7 +723,7 @@ fun PlayerScreen(
                 rect = mix(fullSlots[3], compactSlots[2], e),
                 corners = mix(Corners(10.dp, 10.dp, 10.dp, 10.dp), Corners(8.dp, 20.dp, 20.dp, 8.dp), e),
                 container = quiet, content = OnPlayer,
-                icon = Icons.Filled.Forward30, description = "Forward 30 seconds",
+                icon = Icons.Filled.Forward30, description = tr("Forward 30 seconds"),
                 iconSize = mix(28.dp, 20.dp, e)
             ) {
                 haptics.play(Haptic.SkipForward)
@@ -641,7 +735,7 @@ fun PlayerScreen(
                     corners = Corners(10.dp, 30.dp, 30.dp, 10.dp),
                     container = quiet, content = OnPlayer,
                     icon = Icons.Filled.SkipNext,
-                    description = if (upNextCount > 0) "Next episode" else "Nothing queued",
+                    description = if (upNextCount > 0) "Next episode" else tr("Nothing queued"),
                     iconSize = 24.dp, alpha = fade, enabled = upNextCount > 0
                 ) {
                     haptics.play(Haptic.SkipForward)
@@ -652,8 +746,8 @@ fun PlayerScreen(
             if (fade > 0f) {
                 Box(
                     Modifier
-                        .offset(side, volumeTop)
-                        .width(w - side * 2)
+                        .offset(colLeft, volumeTop)
+                        .width(colW)
                         .graphicsLayer { alpha = fade }
                 ) {
                     VolumeRow(accent = OnPlayer, onGround = OnPlayer.copy(alpha = 0.66f))
@@ -674,7 +768,10 @@ fun PlayerScreen(
                 onDrag = { dragPanel(it) },
                 onDragEnd = { settlePanel(it) },
                 modifier = Modifier
-                    .fillMaxWidth()
+                    .then(
+                        if (landscape) Modifier.offset(x = colLeft - 10.dp).width(colW + side + 10.dp)
+                        else Modifier.fillMaxWidth()
+                    )
                     .height(maxHeight - expandedTop)
                     .offset(y = mix(collapsedTop, expandedTop, e))
             ) { tab ->
@@ -707,7 +804,9 @@ fun PlayerScreen(
                         skipSilence = skipSilence,
                         voiceBoost = voiceBoost,
                         onSkipSilence = onSkipSilenceChange,
-                        onVoiceBoost = onVoiceBoostChange
+                        onVoiceBoost = onVoiceBoostChange,
+                        skipAds = skipAds,
+                        onSkipAds = onSkipAdsChange
                     )
                     PanelTab.TIMER -> TimerPanel(
                         armed = timerArmed,
@@ -816,14 +915,14 @@ private fun MorphButton(
  *
  * The first version blurred a separate, full-screen copy of the cover. That
  * copy was framed differently from the sharp artwork above it (zoomed to the
- * screen's height, centred), so whatever sat just below the cover's bottom edge
- * came from the *middle* of the image. On a cover whose centre differs from its
- * foot, the colour broke at the seam and settled into a mud of the whole.
+ * screen's height, centered), so whatever sat just below the cover's bottom edge
+ * came from the *middle* of the image. On a cover whose center differs from its
+ * foot, the color broke at the seam and settled into a mud of the whole.
  *
  * Cider mirrors the cover vertically underneath itself. Then the first thing
- * below the bottom edge is that same edge, reflected, and every colour carries
+ * below the bottom edge is that same edge, reflected, and every color carries
  * straight on down — the legs in a photo continue as their own reflection, a
- * coloured band at the foot of the art continues as the same band. The pair
+ * colored band at the foot of the art continues as the same band. The pair
  * (cover over its reflection) is blurred as one image, so the blur runs across
  * the seam instead of stopping at it, and the sharp cover laid on top dissolves
  * into its own blurred self before the reflection begins.
@@ -833,20 +932,25 @@ private fun MorphButton(
  * always reads.
  */
 @Composable
-private fun PlayerBackdrop(url: String, artHeight: Dp, modifier: Modifier = Modifier) {
+private fun PlayerBackdrop(url: String, band: Dp, sideways: Boolean, aspect: Float, modifier: Modifier = Modifier) {
+    // Rounded, so the mirror is made once per layout, not on every tiny change.
+    val aspectKey = (aspect * 100f).roundToInt() / 100f
     val store = LocalImageStore.current
     // Both layers are made once per cover, off the main thread, as tiny
     // pre-blurred bitmaps (see SoftBitmaps.kt). They used to be live
     // Modifier.blur layers — two full-screen GPU blurs recomputed on every
     // frame, and the player redraws every frame while the wave moves.
     var field by remember(url) { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
-    var mirror by remember(url) { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
-    LaunchedEffect(url) {
+    var mirror by remember(url, sideways, aspectKey) { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
+    LaunchedEffect(url, sideways, aspectKey) {
         if (url.isBlank()) return@LaunchedEffect
         val source = store.peek(url, 160) ?: store.load(url, 160) ?: return@LaunchedEffect
         withContext(Dispatchers.Default) {
             val soft = softened(source).asImageBitmap()
-            val pair = softenedMirror(source, aspect = 1.2f).asImageBitmap()
+            // Portrait: the reflection below. Landscape: to the right, flipped
+            // sideways — stretching the portrait one sideways smeared the
+            // cover's right edge across the controls.
+            val pair = (if (sideways) softenedMirrorSideways(source, aspectKey) else softenedMirror(source, aspectKey)).asImageBitmap()
             withContext(Dispatchers.Main) {
                 field = soft
                 mirror = pair
@@ -879,33 +983,44 @@ private fun PlayerBackdrop(url: String, artHeight: Dp, modifier: Modifier = Modi
                 contentDescription = null,
                 contentScale = ContentScale.FillBounds,
                 filterQuality = FilterQuality.Low,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(artHeight * 2)
+                modifier = if (sideways) {
+                    Modifier.width(band * 2).fillMaxHeight()
+                } else {
+                    Modifier.fillMaxWidth().height(band * 2)
+                }
             )
         }
 
         // Clear over the cover, deepening through the reflection toward the
-        // controls — the "common colour" the foot settles into is the blurred
-        // reflection darkened, so it's always this cover's own colour.
+        // controls — the "common color" the foot settles into is the blurred
+        // reflection darkened, so it's always this cover's own color.
         Box(
             Modifier
                 .fillMaxSize()
                 .background(
-                    Brush.verticalGradient(
-                        0.00f to Color.Black.copy(alpha = 0.06f),
-                        0.42f to Color.Black.copy(alpha = 0.16f),
-                        0.62f to Color.Black.copy(alpha = 0.34f),
-                        1.00f to Color.Black.copy(alpha = 0.62f)
-                    )
+                    if (sideways) {
+                        Brush.horizontalGradient(
+                            0.00f to Color.Black.copy(alpha = 0.06f),
+                            0.42f to Color.Black.copy(alpha = 0.16f),
+                            0.62f to Color.Black.copy(alpha = 0.34f),
+                            1.00f to Color.Black.copy(alpha = 0.62f)
+                        )
+                    } else {
+                        Brush.verticalGradient(
+                            0.00f to Color.Black.copy(alpha = 0.06f),
+                            0.42f to Color.Black.copy(alpha = 0.16f),
+                            0.62f to Color.Black.copy(alpha = 0.34f),
+                            1.00f to Color.Black.copy(alpha = 0.62f)
+                        )
+                    }
                 )
         )
     }
 }
 
-/** The sharp cover, erased at its foot — a mask, never a colour overlay. */
+/** The sharp cover, erased at its foot — a mask, never a color overlay. */
 @Composable
-private fun PlayerArtwork(url: String, modifier: Modifier = Modifier) {
+private fun PlayerArtwork(url: String, modifier: Modifier = Modifier, sideways: Boolean = false) {
     val store = LocalImageStore.current
     var bitmap by remember(url) { mutableStateOf(store.peek(url, 1080)) }
     LaunchedEffect(url) {
@@ -917,14 +1032,17 @@ private fun PlayerArtwork(url: String, modifier: Modifier = Modifier) {
             .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
             .drawWithContent {
                 drawContent()
+                // The same dissolve either way: downward in portrait, toward the
+                // controls in landscape.
+                val stops = arrayOf(
+                    0.00f to Color.Black,
+                    0.56f to Color.Black,
+                    0.74f to Color.Black.copy(alpha = 0.70f),
+                    0.88f to Color.Black.copy(alpha = 0.28f),
+                    1.00f to Color.Transparent
+                )
                 drawRect(
-                    brush = Brush.verticalGradient(
-                        0.00f to Color.Black,
-                        0.56f to Color.Black,
-                        0.74f to Color.Black.copy(alpha = 0.70f),
-                        0.88f to Color.Black.copy(alpha = 0.28f),
-                        1.00f to Color.Transparent
-                    ),
+                    brush = if (sideways) Brush.horizontalGradient(*stops) else Brush.verticalGradient(*stops),
                     blendMode = BlendMode.DstIn
                 )
             }
@@ -936,6 +1054,35 @@ private fun PlayerArtwork(url: String, modifier: Modifier = Modifier) {
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize()
             )
+        }
+    }
+}
+
+@Composable
+private fun DownloadIconButton(
+    entry: com.glasscast.app.data.DownloadEntry?,
+    onClick: () -> Unit
+) {
+    Box(
+        Modifier
+            .size(44.dp)
+            .clip(CircleShape)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        when (entry?.state) {
+            com.glasscast.app.data.DownloadState.QUEUED, com.glasscast.app.data.DownloadState.RUNNING ->
+                CircularProgressIndicator(
+                    progress = { entry.progress.coerceAtLeast(0.04f) },
+                    strokeWidth = 2.5.dp,
+                    color = OnPlayer,
+                    trackColor = OnPlayer.copy(alpha = 0.25f),
+                    modifier = Modifier.size(20.dp)
+                )
+            com.glasscast.app.data.DownloadState.DONE ->
+                Icon(Icons.Filled.DownloadForOffline, contentDescription = tr("Remove download"), tint = OnPlayer, modifier = Modifier.size(24.dp))
+            else ->
+                Icon(Icons.Outlined.DownloadForOffline, contentDescription = tr("Download"), tint = OnPlayer, modifier = Modifier.size(24.dp))
         }
     }
 }

@@ -15,7 +15,7 @@ import com.glasscast.app.GlassCastApp
  *
  * The second condition matters. Feeds re-list old episodes, change guids after
  * a hosting move, or come back from a failed fetch with their whole back
- * catalogue — all of which would otherwise look "new". And a show with no
+ * catalog — all of which would otherwise look "new". And a show with no
  * episodes stored yet is skipped outright, so a first successful fetch never
  * fires two hundred notifications.
  *
@@ -45,6 +45,9 @@ class RefreshWorker(context: Context, params: WorkerParameters) : CoroutineWorke
                 .filter { it.guid !in knownGuids && it.pubDate > newest }
                 .map { feed to it }
         }.sortedByDescending { it.second.pubDate }
+
+        // Pick up progress and follows from other devices while we're here.
+        runCatching { app.gpodder.sync() }
 
         store.flushNow()
 

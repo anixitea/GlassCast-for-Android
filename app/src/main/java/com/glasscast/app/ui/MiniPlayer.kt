@@ -83,7 +83,7 @@ import dev.chrisbanes.haze.HazeState
  * except the bar, which gives up room on its right for the bubble.
  *
  * The bubble's position comes from the tab bar's measured bounds ([barBounds],
- * in root coordinates), so it sits centred on the bar at any screen size.
+ * in root coordinates), so it sits centered on the bar at any screen size.
  */
 @Composable
 fun MiniPlayer(
@@ -106,8 +106,16 @@ fun MiniPlayer(
     // Cider's card: solid, dark in both themes, in the cover's own hue.
     val surface by animateColorAsState(colors.chromeSurface, tween(600), label = "miniSurface")
     val button by animateColorAsState(colors.chromeButton, tween(600), label = "miniButton")
-    val ringPlayed by animateColorAsState(colors.ringPlayed, tween(600), label = "ringPlayed")
-    val ringTrack by animateColorAsState(colors.ringTrack, tween(600), label = "ringTrack")
+
+    // The card's own pair. In light mode, Cider's: the dark surface, with the
+    // cover's pale tone on the play button and the progress line. In dark
+    // mode that dark card sank into the dark page, so the card swaps them — a
+    // pale card, the dark tone on the button. The bubble's ring keeps the
+    // original pair (surface, button) in both themes.
+    val dark = com.glasscast.app.ui.theme.LocalIsDark.current
+    val cardAccent = if (dark) surface else button
+    val cardInk = if (dark) Color(0xFF16141A) else Color.White
+    val cardGlyph = if (dark) button else Color(0xFF16141A)
     val progress = if (durationMs > 0) (positionMs.toFloat() / durationMs).coerceIn(0f, 1f) else 0f
     val progressState = rememberUpdatedState(progress)
 
@@ -132,8 +140,9 @@ fun MiniPlayer(
                 val f = m.frame(collapse.value.coerceIn(0f, 1f), size.width, barBounds(), selfBounds)
                 // The container: card → pill → circle, fading as it becomes the bubble.
                 if (f.bgAlpha > 0f) {
+                    val bg = if (dark) button else surface
                     drawRoundRect(
-                        color = surface.copy(alpha = surface.alpha * f.bgAlpha),
+                        color = bg.copy(alpha = bg.alpha * f.bgAlpha),
                         topLeft = f.rect.topLeft,
                         size = f.rect.size,
                         cornerRadius = CornerRadius(f.radius)
@@ -147,11 +156,11 @@ fun MiniPlayer(
                     val ring = cookiePath(f.rect.width, f.rect.height, rotation = rotation, inset = stroke / 2f, steps = 72)
                     ring.close()
                     translate(f.rect.left, f.rect.top) {
-                        drawPath(ring, ringTrack.copy(alpha = f.ringAlpha), style = Stroke(stroke))
+                        drawPath(ring, surface.copy(alpha = f.ringAlpha), style = Stroke(stroke))
                         val measure = PathMeasure().apply { setPath(ring, true) }
                         val arc = Path()
                         measure.getSegment(0f, measure.length * progressState.value, arc, true)
-                        drawPath(arc, ringPlayed.copy(alpha = f.ringAlpha), style = Stroke(stroke, cap = StrokeCap.Round))
+                        drawPath(arc, button.copy(alpha = f.ringAlpha), style = Stroke(stroke, cap = StrokeCap.Round))
                     }
                 }
             }
@@ -182,14 +191,14 @@ fun MiniPlayer(
                     Text(
                         text = episode.title,
                         style = MaterialTheme.typography.titleSmall,
-                        color = Color.White,
+                        color = cardInk,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
                     Text(
                         text = feed?.title.orEmpty(),
                         style = MaterialTheme.typography.bodySmall,
-                        color = Color.White.copy(alpha = 0.70f),
+                        color = cardInk.copy(alpha = 0.70f),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -197,7 +206,7 @@ fun MiniPlayer(
                     WavySlider(
                         progress = progress,
                         playing = isPlaying,
-                        color = button,
+                        color = cardAccent,
                         enabled = false,
                         height = 8.dp,
                         amplitude = 1.8.dp,
@@ -211,8 +220,8 @@ fun MiniPlayer(
                 Spacer(Modifier.width(12.dp))
                 MiniPlayButton(
                     isPlaying = isPlaying,
-                    fill = button,
-                    tint = Color(0xFF16141A),
+                    fill = cardAccent,
+                    tint = cardGlyph,
                     onClick = {
                         haptics.play(if (isPlaying) Haptic.Pause else Haptic.Resume)
                         onPlayPause()
@@ -248,6 +257,8 @@ fun MiniPlayer(
                     val b = m.bubblePhase(collapse.value.coerceIn(0f, 1f))
                     // Tell the flight what shape to land on (see FlightClip).
                     MiniArtShape.roundness = 0.25f + 0.25f * (b * 2f).coerceAtMost(1f)
+                    MiniArtShape.bubble = b
+                    MiniArtShape.rotation = (spin.value / 2.4f) * (2 * PI / CookieLobes).toFloat()
                     val clip = if (b < 0.5f) {
                         Path().apply {
                             addRoundRect(
@@ -286,7 +297,7 @@ private class MorphMetrics(density: androidx.compose.ui.unit.Density) {
     val artCorner = with(density) { 12.dp.toPx() }
     val artLead = with(density) { 10.dp.toPx() }
     val barPad = with(density) { 8.dp.toPx() }
-    /** The bubble's centre below this box's top: the 76dp box, then half of the 60dp bar. */
+    /** The bubble's center below this box's top: the 76dp box, then half of the 60dp bar. */
     val fallbackDrop = with(density) { 106.dp.toPx() }
     val ringStroke = with(density) { 3.5.dp.toPx() }
     val contentDrift = with(density) { 40.dp.toPx() }
@@ -365,7 +376,7 @@ private fun MiniPlayButton(
     ) {
         Icon(
             imageVector = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-            contentDescription = if (isPlaying) "Pause" else "Play",
+            contentDescription = if (isPlaying) "Pause" else tr("Play"),
             tint = tint,
             modifier = Modifier.size(24.dp)
         )

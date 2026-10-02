@@ -18,6 +18,8 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.security.MessageDigest
+import java.net.HttpURLConnection
+import java.net.URL
 
 enum class DownloadState { QUEUED, RUNNING, DONE, FAILED }
 
@@ -78,31 +80,81 @@ class Downloads(private val context: Context) {
 
     private val DownloadEntry.active get() = state == DownloadState.QUEUED || state == DownloadState.RUNNING
 
+    /** Episodes whose address is being resolved — a second tap mustn't start a second download. */
+    private val resolving = mutableSetOf<String>()
+
     fun start(episode: Episode, feed: Feed?) {
         val existing = _entries.value[episode.guid]
         if (existing != null && existing.state != DownloadState.FAILED) return
+        if (!resolving.add(episode.guid)) return
         val name = fileNameFor(episode)
-        val request = DownloadManager.Request(Uri.parse(episode.audioUrl))
-            .setTitle(episode.title)
-            .setDescription(feed?.title ?: "GlassCast")
-            .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE)
-            .setDestinationInExternalFilesDir(context, Environment.DIRECTORY_PODCASTS, name)
-            .setAllowedOverRoaming(false)
-        val id = runCatching { manager?.enqueue(request) }.getOrNull() ?: return
-        commit(
-            _entries.value + (episode.guid to DownloadEntry(
-                guid = episode.guid,
-                feedUrl = episode.feedUrl,
-                title = episode.title,
-                downloadId = id,
-                fileName = name,
-                state = DownloadState.QUEUED,
-                progress = 0f,
-                bytes = 0L,
-                addedAt = System.currentTimeMillis()
-            ))
-        )
-        watch()
+        scope.launch {
+            val url = withContext(Dispatchers.IO) { resolveRedirects(episode.audioUrl) }
+            resolving.remove(episode.guid)
+            val request = DownloadManager.Request(Uri.parse(url))
+                .setTitle(episode.title)
+                .setDescription(feed?.title ?: "GlassCast")
+                .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE)
+                .setDestinationInExternalFilesDir(context, Environment.DIRECTORY_PODCASTS, name)
+                .setAllowedOverRoaming(false)
+                .addRequestHeader("User-Agent", USER_AGENT)
+            val id = runCatching { manager?.enqueue(request) }.getOrNull() ?: return@launch
+            commit(
+                _entries.value + (episode.guid to DownloadEntry(
+                    guid = episode.guid,
+                    feedUrl = episode.feedUrl,
+                    title = episode.title,
+                    downloadId = id,
+                    fileName = name,
+                    state = DownloadState.QUEUED,
+                    progress = 0f,
+                    bytes = 0L,
+                    addedAt = System.currentTimeMillis()
+                ))
+            )
+            watch()
+        }
+    }
+
+    /**
+     * Where the episode's address really leads, following up to 15 redirects.
+     *
+     * Podcast audio often passes through several tracking services before
+     * the file (Audioboom shows like The Broski Report among them). Android's
+     * DownloadManager gives up after 5 redirects; the player follows 20 —
+     * which is how an episode could stream fine and fail to download. Each
+     * hop is still requested once, here, so the show's download counts are
+     * unaffected, and DownloadManager is handed the last address.
+     *
+     * Asks for a single byte, so nothing is downloaded twice. On any error it
+     * returns the address it got to, and DownloadManager carries on from there.
+     */
+    private fun resolveRedirects(start: String): String {
+        var url = start
+        repeat(15) {
+            val conn = try {
+                (URL(url).openConnection() as HttpURLConnection).apply {
+                    instanceFollowRedirects = false
+                    connectTimeout = 10_000
+                    readTimeout = 10_000
+                    setRequestProperty("User-Agent", USER_AGENT)
+                    setRequestProperty("Range", "bytes=0-0")
+                }
+            } catch (e: Exception) {
+                return url
+            }
+            try {
+                val code = conn.responseCode
+                if (code !in 300..399) return url
+                val location = conn.getHeaderField("Location") ?: return url
+                url = URL(URL(url), location).toString()
+            } catch (e: Exception) {
+                return url
+            } finally {
+                conn.disconnect()
+            }
+        }
+        return url
     }
 
     /** Cancels a download in flight, or deletes a finished one. */
@@ -165,7 +217,13 @@ class Downloads(private val context: Context) {
                             progress = 1f,
                             bytes = File(folder, entry.fileName).length().takeIf { it > 0 } ?: soFar
                         )
-                        DownloadManager.STATUS_FAILED -> entry.copy(state = DownloadState.FAILED)
+                        DownloadManager.STATUS_FAILED -> {
+                            // Android's reason code: an HTTP status (4xx/5xx), or
+                            // 1000-range errors (1005 = too many redirects).
+                            val reason = runCatching { c.getInt(c.getColumnIndexOrThrow(DownloadManager.COLUMN_REASON)) }.getOrDefault(-1)
+                            android.util.Log.w("GlassCastDownloads", "'${entry.title}' failed, reason $reason")
+                            entry.copy(state = DownloadState.FAILED)
+                        }
                         DownloadManager.STATUS_RUNNING -> entry.copy(
                             state = DownloadState.RUNNING,
                             progress = if (total > 0) (soFar.toFloat() / total).coerceIn(0f, 1f) else entry.progress,
@@ -177,7 +235,7 @@ class Downloads(private val context: Context) {
                 }
             }
         }
-        // Cancelled from the notification: DownloadManager forgets it.
+        // Canceled from the notification: DownloadManager forgets it.
         active.filter { it.downloadId !in seen }.forEach { out[it.guid] = null }
         return out
     }
@@ -222,3 +280,6 @@ class Downloads(private val context: Context) {
         }
     }.getOrDefault(emptyMap())
 }
+
+/** How GlassCast introduces itself to podcast hosts when downloading. */
+private const val USER_AGENT = "GlassCast/1.4 (Android)"

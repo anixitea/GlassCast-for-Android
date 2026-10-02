@@ -64,6 +64,18 @@ import com.glasscast.app.data.Episode
 import com.glasscast.app.data.Feed
 import com.glasscast.app.player.SleepTimer
 import kotlin.math.roundToInt
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 
 enum class PanelTab { UP_NEXT, INFO, SPEED, TIMER }
 
@@ -86,8 +98,8 @@ private val InkDim = Color.White.copy(alpha = 0.62f)
  * and cover type behind the queue, which is what made it look broken. It's a
  * solid surface now, the cover's own hue at a fixed dark lightness, so it
  * belongs to the episode and still reads cleanly. And it renders under a full
- * dark colour scheme rather than a patched copy of the app's, so nothing in it
- * can pick up a light-theme colour — which is why light mode looked worse.
+ * dark color scheme rather than a patched copy of the app's, so nothing in it
+ * can pick up a light-theme color — which is why light mode looked worse.
  */
 @Composable
 fun PlayerPanel(
@@ -174,10 +186,10 @@ fun PlayerPanel(
                     Column {
                         Text(
                             text = when (shown) {
-                                PanelTab.INFO -> "Episode info"
-                                PanelTab.SPEED -> "Speed & sound"
-                                PanelTab.TIMER -> "Sleep timer"
-                                else -> "Playing Next"
+                                PanelTab.INFO -> tr("Episode info")
+                                PanelTab.SPEED -> tr("Speed & sound")
+                                PanelTab.TIMER -> tr("Sleep timer")
+                                else -> tr("Playing Next")
                             },
                             style = MaterialTheme.typography.titleMedium,
                             color = Ink,
@@ -185,12 +197,12 @@ fun PlayerPanel(
                         )
                         Text(
                             text = when {
-                                shown == PanelTab.INFO -> "Notes, chapters and transcript"
+                                shown == PanelTab.INFO -> tr("Notes, chapters and transcript")
                                 shown == PanelTab.SPEED -> formatSpeed(speed)
-                                shown == PanelTab.TIMER -> if (timerArmed) "Running" else "Off"
-                                upNextCount == 0 -> "Nothing queued"
-                                upNextCount == 1 -> "1 episode"
-                                else -> "$upNextCount episodes"
+                                shown == PanelTab.TIMER -> if (timerArmed) tr("Running") else tr("Off")
+                                upNextCount == 0 -> tr("Nothing queued")
+                                upNextCount == 1 -> tr("1 episode")
+                                else -> tr("{0} episodes", upNextCount)
                             },
                             style = MaterialTheme.typography.bodySmall,
                             color = InkDim,
@@ -211,18 +223,20 @@ fun PlayerPanel(
                     horizontalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
                     PanelTabButton(open && tab == PanelTab.UP_NEXT, { onTab(PanelTab.UP_NEXT) }) {
-                        Icon(Icons.AutoMirrored.Filled.QueueMusic, "Up Next", Modifier.size(21.dp), tint = Ink)
+                        Icon(Icons.AutoMirrored.Filled.QueueMusic, tr("Up Next"), Modifier.size(21.dp), tint = Ink)
                     }
                     PanelTabButton(open && tab == PanelTab.INFO, { onTab(PanelTab.INFO) }) {
-                        Icon(Icons.Outlined.Info, "Episode info", Modifier.size(21.dp), tint = Ink)
+                        Icon(Icons.Outlined.Info, tr("Episode info"), Modifier.size(21.dp), tint = Ink)
                     }
                     PanelTabButton(open && tab == PanelTab.SPEED, { onTab(PanelTab.SPEED) }) {
                         Text(formatSpeed(speed), style = MaterialTheme.typography.titleSmall, color = Ink)
                     }
-                    PanelTabButton(open && tab == PanelTab.TIMER, { onTab(PanelTab.TIMER) }) {
+                    // Lit while a timer runs, not only while its tab is open —
+                    // with the accent moon, the timer's only status in the player.
+                    PanelTabButton((open && tab == PanelTab.TIMER) || timerArmed, { onTab(PanelTab.TIMER) }) {
                         Icon(
                             Icons.Filled.Bedtime,
-                            "Sleep timer",
+                            tr("Sleep timer"),
                             Modifier.size(20.dp),
                             tint = if (timerArmed) accent else Ink
                         )
@@ -238,7 +252,7 @@ fun PlayerPanel(
                 .weight(1f)
                 .graphicsLayer { alpha = ((expand - 0.2f) / 0.5f).coerceIn(0f, 1f) }
         ) {
-            PanelColours(accent) { body(tab) }
+            PanelColors(accent) { body(tab) }
         }
     }
 }
@@ -260,7 +274,7 @@ private fun PanelTabButton(active: Boolean, onClick: () -> Unit, content: @Compo
  * field I didn't name at its light-theme value — which is what broke light mode.
  */
 @Composable
-private fun PanelColours(accent: Color, content: @Composable () -> Unit) {
+private fun PanelColors(accent: Color, content: @Composable () -> Unit) {
     MaterialTheme(
         colorScheme = darkColorScheme(
             primary = accent,
@@ -289,7 +303,7 @@ private fun PanelColours(accent: Color, content: @Composable () -> Unit) {
  *
  * Built here rather than borrowed from the old sheet, whose rows had the same
  * flaw the episode rows once did — a "Remove" reveal drawn permanently behind
- * a transparent row. Here each row is opaque in the panel's own colour and the
+ * a transparent row. Here each row is opaque in the panel's own color and the
  * reveal draws only mid-swipe. Unlike queueing, removing *is* a dismissal, so
  * the swipe is allowed to complete and the row leaves the list.
  */
@@ -319,10 +333,10 @@ fun PanelQueue(
                 modifier = Modifier.size(40.dp)
             )
             Spacer(Modifier.height(12.dp))
-            Text("Nothing queued", style = MaterialTheme.typography.titleMedium, color = Ink)
+            Text(tr("Nothing queued"), style = MaterialTheme.typography.titleMedium, color = Ink)
             Spacer(Modifier.height(4.dp))
             Text(
-                text = "Swipe any episode left to add it here.",
+                text = tr("Swipe any episode left to add it here."),
                 style = MaterialTheme.typography.bodyMedium,
                 color = InkDim
             )
@@ -347,7 +361,7 @@ fun PanelQueue(
                     .clickable(onClick = onClear)
                     .padding(horizontal = 16.dp, vertical = 8.dp)
             ) {
-                Text("Clear", style = MaterialTheme.typography.titleSmall, color = Ink)
+                Text(tr("Clear"), style = MaterialTheme.typography.titleSmall, color = Ink)
             }
         }
         LazyColumn(
@@ -380,7 +394,7 @@ fun PanelQueue(
                                     .padding(end = 28.dp),
                                 contentAlignment = Alignment.CenterEnd
                             ) {
-                                Icon(Icons.Filled.DeleteOutline, "Remove", tint = Ink)
+                                Icon(Icons.Filled.DeleteOutline, tr("Remove"), tint = Ink)
                             }
                         }
                     }
@@ -448,7 +462,9 @@ fun SpeedPanel(
     skipSilence: Boolean = false,
     voiceBoost: Boolean = false,
     onSkipSilence: (Boolean) -> Unit = {},
-    onVoiceBoost: (Boolean) -> Unit = {}
+    onVoiceBoost: (Boolean) -> Unit = {},
+    skipAds: Boolean = false,
+    onSkipAds: (Boolean) -> Unit = {}
 ) {
     Column(
         Modifier
@@ -503,30 +519,21 @@ fun SpeedPanel(
                 }
             }
         }
-        Spacer(Modifier.height(8.dp))
-        Text(
-            text = "Voices keep their natural pitch at every speed.",
-            style = MaterialTheme.typography.bodySmall,
-            color = InkDim
-        )
-
         Spacer(Modifier.height(22.dp))
         Text(
-            text = "SOUND",
+            text = tr("SOUND"),
             style = MaterialTheme.typography.labelMedium,
             color = InkDim
         )
         Spacer(Modifier.height(4.dp))
         PanelSwitchRow(
-            title = "Skip silence",
-            detail = "Trims the pauses between sentences, never the speech.",
+            title = tr("Skip silence"),
             checked = skipSilence,
             accent = accent,
             onChange = onSkipSilence
         )
         PanelSwitchRow(
-            title = "Boost voices",
-            detail = "Lifts quiet speakers so a soft guest and a loud host sit level.",
+            title = tr("Boost voices"),
             checked = voiceBoost,
             accent = accent,
             onChange = onVoiceBoost
@@ -537,7 +544,7 @@ fun SpeedPanel(
 @Composable
 private fun PanelSwitchRow(
     title: String,
-    detail: String,
+    detail: String? = null,
     checked: Boolean,
     accent: Color,
     onChange: (Boolean) -> Unit
@@ -552,7 +559,7 @@ private fun PanelSwitchRow(
     ) {
         Column(Modifier.weight(1f)) {
             Text(title, style = MaterialTheme.typography.titleSmall, color = Ink)
-            Text(detail, style = MaterialTheme.typography.bodySmall, color = InkDim)
+            if (detail != null) Text(detail, style = MaterialTheme.typography.bodySmall, color = InkDim)
         }
         Spacer(Modifier.width(12.dp))
         Switch(
@@ -591,7 +598,7 @@ fun TimerPanel(
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                text = if (armed) remainingLabel else "Off",
+                text = if (armed) remainingLabel else tr("Off"),
                 style = MaterialTheme.typography.displaySmall,
                 color = if (armed) accent else Ink
             )
@@ -604,7 +611,7 @@ fun TimerPanel(
                         .clickable { SleepTimer.cancel() }
                         .padding(horizontal = 18.dp, vertical = 10.dp)
                 ) {
-                    Text("Cancel", style = MaterialTheme.typography.titleSmall, color = Ink)
+                    Text(tr("Cancel"), style = MaterialTheme.typography.titleSmall, color = Ink)
                 }
             }
         }
@@ -614,11 +621,11 @@ fun TimerPanel(
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             TimerPresets.forEach { minutes ->
-                PanelChip(label = "$minutes min", active = false, accent = accent) {
+                PanelChip(label = tr("{0} min", minutes), active = false, accent = accent) {
                     SleepTimer.armMinutes(minutes)
                 }
             }
-            PanelChip(label = "End of episode", active = false, accent = accent) {
+            PanelChip(label = tr("End of episode"), active = false, accent = accent) {
                 SleepTimer.armEndOfEpisode()
             }
         }
@@ -632,12 +639,7 @@ fun TimerPanel(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(Modifier.weight(1f)) {
-                Text("Shake to restart", style = MaterialTheme.typography.titleSmall, color = Ink)
-                Text(
-                    text = "Still awake when it stops? Shake the phone to run it again.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = InkDim
-                )
+                Text(tr("Shake to restart"), style = MaterialTheme.typography.titleSmall, color = Ink)
             }
             Spacer(Modifier.width(12.dp))
             Switch(

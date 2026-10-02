@@ -1,5 +1,8 @@
 package com.glasscast.app.tv
 
+import com.glasscast.app.data.Episode
+import com.glasscast.app.ui.tr
+import com.glasscast.app.data.EpisodeSort
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.ui.draw.clip
@@ -73,21 +76,29 @@ import com.glasscast.app.ui.artworkGround
 import com.glasscast.app.ui.requestWhenReady
 import com.glasscast.app.ui.rememberArtworkColors
 import kotlinx.coroutines.launch
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.lifecycle.repeatOnLifecycle
+import androidx.compose.foundation.focusable
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.type
 
 private enum class TvTab(val label: String, val icon: ImageVector) {
     /**
      * Not a tab in the routing sense — selecting it opens the player. It lives
      * in the rail because on a TV the mini bar was the wrong idea: a strip
      * along the bottom is a thumb affordance, and reaching it by D-pad meant
-     * travelling past everything else on the page. One rail stop, always in the
+     * traveling past everything else on the page. One rail stop, always in the
      * same place, is the whole interaction.
      */
-    PLAYING("Playing", Icons.Filled.PlayArrow),
-    LIBRARY("Library", Icons.Outlined.GridView),
-    LATEST("Latest", Icons.Outlined.Inbox),
-    DISCOVER("Discover", Icons.Outlined.Explore),
-    SEARCH("Search", Icons.Filled.Search),
-    SETTINGS("Settings", Icons.Filled.Tune)
+    PLAYING(tr("Playing"), Icons.Filled.PlayArrow),
+    LIBRARY(tr("Library"), Icons.Outlined.GridView),
+    LATEST(tr("Latest"), Icons.Outlined.Inbox),
+    DISCOVER(tr("Discover"), Icons.Outlined.Explore),
+    SEARCH(tr("Search"), Icons.Filled.Search),
+    SETTINGS(tr("Settings"), Icons.Filled.Tune)
 }
 
 /**
@@ -123,6 +134,40 @@ fun TvRoot(
     val upNext by player.upNext.collectAsStateWithLifecycle()
     val speed by player.speed.collectAsStateWithLifecycle()
     val discoverHidden by settings.discoverHidden.collectAsStateWithLifecycle()
+    val episodeOrder by settings.episodeOrder.collectAsStateWithLifecycle()
+    val skipSilence by settings.skipSilence.collectAsStateWithLifecycle()
+    val voiceBoost by settings.voiceBoost.collectAsStateWithLifecycle()
+    val skipAds by settings.skipAds.collectAsStateWithLifecycle()
+    fun orderFor(url: String) = episodeOrder[url] ?: sort
+    fun flipOrder(url: String): EpisodeSort {
+        val next = if (orderFor(url) == EpisodeSort.NEWEST_FIRST) EpisodeSort.OLDEST_FIRST else EpisodeSort.NEWEST_FIRST
+        settings.setEpisodeOrder(url, next)
+        return next
+    }
+
+    // A show opened from Discover or Search is previewed, not followed:
+    // Follow on its page adds it. (Opening one used to subscribe on the spot.)
+    var previewUrl by remember { mutableStateOf<String?>(null) }
+    var preview by remember { mutableStateOf<com.glasscast.app.data.FeedFetch?>(null) }
+    var menuFor by remember { mutableStateOf<Episode?>(null) }
+    var showMenu by remember { mutableStateOf<TvShowMenuRequest?>(null) }
+    var confirmUnfollow by remember { mutableStateOf<Feed?>(null) }
+    val toast = remember { TvToastState() }
+    // Skip ads says so when it skips, as the phone does.
+    val adLifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(adLifecycle) {
+        adLifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
+            com.glasscast.app.player.AdSkipper.skipped.collect { guid ->
+                val ep = feedStore.episodeByGuid(guid)
+                val art = ep?.let { it.imageUrl.ifBlank { feedStore.feedFor(it)?.imageUrl.orEmpty() } }.orEmpty()
+                toast.show(tr("Ad skipped"), art)
+            }
+        }
+    }
+    // Sort is an icon on the show page now, so a flip says which way it went.
+    fun toggleSort(url: String) {
+        toast.show(if (flipOrder(url) == EpisodeSort.NEWEST_FIRST) tr("Newest first") else tr("Oldest first"))
+    }
     // Kept as a State and read only inside the rail bubble's draw lambda — so
     // its ring advances without the shell ever recomposing.
     val positionState = player.positionMs.collectAsStateWithLifecycle()
@@ -137,8 +182,29 @@ fun TvRoot(
     val railFocus = remember { FocusRequester() }
 
     val selectedFeed = feeds.firstOrNull { it.url == selectedFeedUrl }
+    fun openShow(url: String) {
+        val known = feeds.firstOrNull { it.url.equals(url, ignoreCase = true) }
+        if (known != null) {
+            tab = TvTab.LIBRARY
+            selectedFeedUrl = known.url
+            previewUrl = null
+        } else {
+            previewUrl = url
+        }
+    }
+    LaunchedEffect(previewUrl) {
+        preview = null
+        val url = previewUrl ?: return@LaunchedEffect
+        val fetched = runCatching { feedStore.preview(url) }.getOrNull()
+        if (fetched == null) {
+            toast.show(tr("Couldn't open that show"))
+            previewUrl = null
+        } else {
+            preview = fetched
+        }
+    }
 
-    // The whole shell takes its colour from whatever is playing, exactly as the
+    // The whole shell takes its color from whatever is playing, exactly as the
     // phone's show page does. On a large panel this matters more, not less.
     val art = nowPlaying?.imageUrl?.ifBlank { nowPlayingFeed?.imageUrl.orEmpty() }.orEmpty()
     val (colors, _) = rememberArtworkColors(art)
@@ -162,7 +228,14 @@ fun TvRoot(
 
     // Claimed by the new screen a frame after the tab changes, rather than by
     // the rail during its own click — see requestWhenReady.
-    LaunchedEffect(tab, selectedFeedUrl) { contentFocus.requestWhenReady() }
+    // Focus goes to the page whenever what's on it changes — including a show
+    // opened from Discover or Search, which is a preview, not a Library pick.
+    // That case was missing: the clicked card vanished, nothing took focus,
+    // and Android gave it to the only thing left on screen, the rail. Closing
+    // the player drops focus the same way, so it's caught here too.
+    LaunchedEffect(tab, selectedFeedUrl, previewUrl, preview != null, playerOpen) {
+        if (!playerOpen) contentFocus.requestWhenReady()
+    }
 
     // Brushes rebuilt only when the palette changes. Without remember these are
     // reallocated on every recomposition of the shell, which on TV means every
@@ -174,105 +247,164 @@ fun TvRoot(
     val railAccent by animateColorAsState(colors.chromeButton, tween(600), label = "railAccent")
     val dim by animateFloatAsState(if (railFocused) 1f else 0f, tween(220), label = "railDim")
 
+    val showPage = previewUrl != null || (tab == TvTab.LIBRARY && selectedFeed != null)
     Box(
         Modifier
             .fillMaxSize()
             .background(ground)
     ) {
-        Row(Modifier.fillMaxSize()) {
-
-            // Constant. This was the rail's *animated* width, so every frame of
-            // the rail opening re-laid-out the page under it — a five-column
-            // grid re-measured thirty times a second. The page now starts after
-            // the collapsed rail and the expanded rail slides over it.
-            Spacer(Modifier.width(TvSpacing.railCollapsed))
-
-            Box(Modifier.weight(1f).fillMaxHeight()) {
-                when {
-                    tab == TvTab.LIBRARY && selectedFeed != null -> TvShowScreen(
-                        feed = selectedFeed,
-                        episodes = episodeMap[selectedFeed.url].orEmpty(),
-                        sort = sort,
-                        colors = colors,
-                        refreshing = refreshing,
-                        hasNowPlaying = nowPlaying != null,
-                        focusRequester = contentFocus,
-                        onRefresh = { scope.launch { feedStore.refresh(selectedFeed) } },
-                        onBack = { selectedFeedUrl = null },
-                        onPlay = { episode ->
-                            player.play(episode, feedStore.feedFor(episode))
-                            playerOpen = true
-                        },
-                        onQueue = { episode ->
-                            player.addToQueue(episode, feedStore.feedFor(episode))
-                        },
-                        playingGuid = nowPlaying?.guid
-                    )
-
-                    tab == TvTab.LIBRARY -> TvLibraryScreen(
-                        feeds = feeds,
-                        showSort = showSort,
-                        latestAt = { feedStore.latestEpisodeAt(it) },
-                        colors = colors,
-                        hasNowPlaying = nowPlaying != null,
-                        focusRequester = contentFocus,
-                        onOpenFeed = { selectedFeedUrl = it.url }
-                    )
-
-                    tab == TvTab.LATEST -> TvLatestScreen(
-                        feeds = feeds,
-                        episodeMap = episodeMap,
-                        colors = colors,
-                        refreshing = refreshing,
-                        hasNowPlaying = nowPlaying != null,
-                        focusRequester = contentFocus,
-                        onRefresh = { scope.launch { feedStore.refreshAll() } },
-                        onPlay = { episode ->
-                            player.play(episode, feedStore.feedFor(episode))
-                            playerOpen = true
-                        },
-                        playingGuid = nowPlaying?.guid
-                    )
-
-                    tab == TvTab.DISCOVER -> TvDiscoverScreen(
-                        feeds = feeds,
-                        store = feedStore,
-                        colors = colors,
-                        hasNowPlaying = nowPlaying != null,
-                        focusRequester = contentFocus,
-                        onSubscribed = { url ->
-                            tab = TvTab.LIBRARY
-                            selectedFeedUrl = url
-                        },
-                        hidden = discoverHidden
-                    )
-
-                    tab == TvTab.SEARCH -> TvSearchScreen(
-                        store = feedStore,
-                        subscribed = feeds,
-                        colors = colors,
-                        hasNowPlaying = nowPlaying != null,
-                        focusRequester = contentFocus,
-                        onSubscribed = { url ->
-                            tab = TvTab.LIBRARY
-                            selectedFeedUrl = url
+        // The browse pages move too: the now-playing cover's living blur,
+        // darkened evenly (see TvCoverBackdrop). A show page draws its own, so
+        // this one steps aside for it; nothing playing leaves the still ground.
+        // Under the open player every backdrop holds still.
+        CompositionLocalProvider(LocalTvBackdropMoving provides !playerOpen) {
+        if (!showPage && art.isNotBlank()) {
+            TvCoverBackdrop(url = art, colors = colors, even = true)
+        }
+        // A show page paints its own backdrop, so it's laid out edge to edge
+        // and runs under the rail — otherwise the strip beside the rail stays
+        // the shell's now-playing color while the page is another. Only its
+        // content is inset. Every other page starts after the rail.
+        //
+        // The inset is the *collapsed* rail, and constant. It used to be the
+        // rail's animated width, so every frame of the rail opening re-laid-out
+        // the page under it — a five-column grid re-measured thirty times a
+        // second. The expanded rail slides over the page instead.
+        Box(
+            Modifier
+                .fillMaxSize()
+                .padding(start = if (showPage) 0.dp else TvSpacing.railCollapsed)
+        ) {
+            when {
+                previewUrl != null -> {
+                    val p = preview
+                    if (p == null) {
+                        // Holds focus while the show loads, so it can't fall to the rail.
+                        Box(
+                            Modifier
+                                .fillMaxSize()
+                                .padding(start = TvSpacing.railCollapsed)
+                                .focusRequester(contentFocus)
+                                .focusable(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            androidx.compose.material3.CircularProgressIndicator(color = colors.chromeButton)
                         }
-                    )
-
-                    tab == TvTab.SETTINGS -> TvSettingsScreen(
-                        settings = settings,
-                        sort = sort,
-                        showSort = showSort,
-                        colors = colors,
-                        hasNowPlaying = nowPlaying != null,
-                        focusRequester = contentFocus
-                    )
-
-                    // PLAYING opens the player rather than routing, so it never
-                    // reaches here; Library is the safe resting state.
-                    else -> Unit
+                    } else {
+                        TvShowScreen(
+                            feed = p.feed,
+                            episodes = p.episodes,
+                            sort = orderFor(p.feed.url),
+                            refreshing = false,
+                            hasNowPlaying = nowPlaying != null,
+                            focusRequester = contentFocus,
+                            onRefresh = {},
+                            onPlay = { episode ->
+                                player.play(episode, p.feed)
+                                playerOpen = true
+                            },
+                            onEpisodeMenu = { menuFor = it },
+                            playingGuid = nowPlaying?.guid,
+                            subscribed = false,
+                            onFollow = {
+                                scope.launch {
+                                    val reason = feedStore.subscribe(previewUrl ?: p.feed.url)
+                                    if (reason == null) {
+                                        toast.show(tr("Added to library"), p.feed.imageUrl)
+                                        val added = feedStore.feeds.value.lastOrNull()
+                                        tab = TvTab.LIBRARY
+                                        selectedFeedUrl = added?.url ?: p.feed.url
+                                        previewUrl = null
+                                    } else {
+                                        toast.show(reason)
+                                    }
+                                }
+                            },
+                            onToggleSort = { toggleSort(p.feed.url) },
+                            leadingInset = TvSpacing.railCollapsed
+                        )
+                    }
                 }
+                tab == TvTab.LIBRARY && selectedFeed != null -> TvShowScreen(
+                    feed = selectedFeed,
+                    episodes = episodeMap[selectedFeed.url].orEmpty(),
+                    sort = orderFor(selectedFeed.url),
+                    refreshing = refreshing,
+                    hasNowPlaying = nowPlaying != null,
+                    focusRequester = contentFocus,
+                    onRefresh = { scope.launch { feedStore.refresh(selectedFeed) } },
+                    onPlay = { episode ->
+                        player.play(episode, feedStore.feedFor(episode))
+                        playerOpen = true
+                    },
+                    onEpisodeMenu = { menuFor = it },
+                    playingGuid = nowPlaying?.guid,
+                    subscribed = true,
+                    onUnfollow = { confirmUnfollow = selectedFeed },
+                    onToggleSort = { toggleSort(selectedFeed.url) },
+                    leadingInset = TvSpacing.railCollapsed
+                )
+
+                tab == TvTab.LIBRARY -> TvLibraryScreen(
+                    feeds = feeds,
+                    showSort = showSort,
+                    latestAt = { feedStore.latestEpisodeAt(it) },
+                    colors = colors,
+                    hasNowPlaying = nowPlaying != null,
+                    focusRequester = contentFocus,
+                    onOpenFeed = { selectedFeedUrl = it.url }
+                )
+
+                tab == TvTab.LATEST -> TvLatestScreen(
+                    feeds = feeds,
+                    episodeMap = episodeMap,
+                    colors = colors,
+                    refreshing = refreshing,
+                    hasNowPlaying = nowPlaying != null,
+                    focusRequester = contentFocus,
+                    onRefresh = { scope.launch { feedStore.refreshAll() } },
+                    onPlay = { episode ->
+                        player.play(episode, feedStore.feedFor(episode))
+                        playerOpen = true
+                    },
+                    playingGuid = nowPlaying?.guid,
+                    onEpisodeMenu = { menuFor = it }
+                )
+
+                tab == TvTab.DISCOVER -> TvDiscoverScreen(
+                    feeds = feeds,
+                    store = feedStore,
+                    colors = colors,
+                    hasNowPlaying = nowPlaying != null,
+                    focusRequester = contentFocus,
+                    onSubscribed = { url -> openShow(url) },
+                    hidden = discoverHidden,
+                    onShowMenu = { showMenu = it }
+                )
+
+                tab == TvTab.SEARCH -> TvSearchScreen(
+                    store = feedStore,
+                    subscribed = feeds,
+                    colors = colors,
+                    hasNowPlaying = nowPlaying != null,
+                    focusRequester = contentFocus,
+                    onSubscribed = { url -> openShow(url) }
+                )
+
+                tab == TvTab.SETTINGS -> TvSettingsScreen(
+                    settings = settings,
+                    sort = sort,
+                    showSort = showSort,
+                    colors = colors,
+                    hasNowPlaying = nowPlaying != null,
+                    focusRequester = contentFocus
+                )
+
+                // PLAYING opens the player rather than routing, so it never
+                // reaches here; Library is the safe resting state.
+                else -> Unit
             }
+        }
         }
 
         // The page dims while the rail is open, so the panel reads as on top.
@@ -298,6 +430,20 @@ fun TvRoot(
                     .background(railSurface.copy(alpha = 0.96f))
                     .focusGroup()
                     .onFocusChanged { railFocused = it.hasFocus }
+                    // Right always leads back to the page. requestFocus() doesn't
+                    // say whether focus moved — only that the target exists — so
+                    // this checks that the rail actually let go. If it didn't,
+                    // the key isn't consumed and the ordinary move to the right
+                    // gets its turn. (Consuming it regardless was the trap: on
+                    // a show opened from Search or Discover, right did nothing.)
+                    .onPreviewKeyEvent { e ->
+                        if (e.type == KeyEventType.KeyDown && e.key == Key.DirectionRight) {
+                            runCatching { contentFocus.requestFocus() }
+                            !railFocused
+                        } else {
+                            false
+                        }
+                    }
                     .padding(vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
@@ -342,6 +488,7 @@ fun TvRoot(
                         },
                         onClick = {
                             if (tab == entry && entry == TvTab.LIBRARY) selectedFeedUrl = null
+                            previewUrl = null
                             tab = entry
                         }
                     )
@@ -374,16 +521,96 @@ fun TvRoot(
                         onSpeedChange = player::setSpeed,
                         onPlayFromUpNext = player::playFromUpNext,
                         onRemoveFromUpNext = { player.removeFromQueue(it.guid) },
-                        onClose = { playerOpen = false }
+                        onClose = { playerOpen = false },
+                        skipSilence = skipSilence,
+                        voiceBoost = voiceBoost,
+                        onSkipSilenceChange = settings::setSkipSilence,
+                        onVoiceBoostChange = settings::setVoiceBoost,
+                        skipAds = skipAds,
+                        onSkipAdsChange = settings::setSkipAds
                     )
                 }
             }
         }
+
+        menuFor?.let { ep ->
+            val feed = feedStore.feedFor(ep) ?: preview?.feed?.takeIf { it.url == ep.feedUrl }
+            val art = ep.imageUrl.ifBlank { feed?.imageUrl.orEmpty() }
+            TvEpisodeMenu(
+                episode = ep,
+                feed = feed,
+                colors = colors,
+                onDismiss = { menuFor = null },
+                onPlay = {
+                    player.play(ep, feed)
+                    playerOpen = true
+                },
+                onPlayNext = {
+                    player.playNext(ep, feed)
+                    toast.show(tr("Playing next"), art)
+                },
+                onAddToQueue = {
+                    player.addToQueue(ep, feed)
+                    toast.show(tr("Added to Up Next"), art)
+                },
+                onTogglePlayed = {
+                    val played = ep.effectivelyPlayed
+                    feedStore.setPlayed(ep, !played)
+                    toast.show(if (played) tr("Marked as unplayed") else tr("Marked as played"), art)
+                }
+            )
+        }
+        confirmUnfollow?.let { feed ->
+            TvConfirmDialog(
+                title = tr("Unfollow?"),
+                message = tr("{0} will be removed from your library.", feed.title),
+                confirmLabel = tr("Unfollow"),
+                colors = colors,
+                onConfirm = {
+                    scope.launch { feedStore.unsubscribe(feed) }
+                    selectedFeedUrl = null
+                    toast.show(tr("Removed from library"), feed.imageUrl)
+                },
+                onDismiss = { confirmUnfollow = null }
+            )
+        }
+        showMenu?.let { req ->
+            val result = req.result
+            TvShowMenu(
+                result = result,
+                onDismiss = {
+                    showMenu = null
+                    req.onClosed(false)
+                },
+                onFollow = {
+                    showMenu = null
+                    req.onClosed(true)
+                    scope.launch {
+                        val reason = feedStore.subscribe(result.feedUrl)
+                        if (reason == null) {
+                            toast.show(tr("Added to library"), result.artworkUrl)
+                        } else {
+                            req.onRestore()
+                            toast.show(reason)
+                        }
+                    }
+                },
+                onNotInterested = {
+                    showMenu = null
+                    req.onClosed(true)
+                    settings.hideFromDiscover(result.feedUrl, result.title, result.artworkUrl)
+                    toast.show(tr("Removed from recommendations"), result.artworkUrl)
+                }
+            )
+        }
+        TvToastHost(toast, accent = colors.chromeButton)
     }
 
     BackHandler(enabled = playerOpen) { playerOpen = false }
-    BackHandler(enabled = !playerOpen && selectedFeedUrl != null) { selectedFeedUrl = null }
-    BackHandler(enabled = !playerOpen && selectedFeedUrl == null && tab != TvTab.LIBRARY) {
+    BackHandler(enabled = !playerOpen && (previewUrl != null || selectedFeedUrl != null)) {
+        if (previewUrl != null) previewUrl = null else selectedFeedUrl = null
+    }
+    BackHandler(enabled = !playerOpen && previewUrl == null && selectedFeedUrl == null && tab != TvTab.LIBRARY) {
         tab = TvTab.LIBRARY
     }
 }
@@ -517,7 +744,7 @@ private fun TvRailNowPlaying(
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
                 Text(
-                    text = if (isPlaying) "NOW PLAYING" else "PAUSED",
+                    text = if (isPlaying) tr("NOW PLAYING") else tr("PAUSED"),
                     style = MaterialTheme.typography.labelSmall,
                     color = accent,
                     maxLines = 1
