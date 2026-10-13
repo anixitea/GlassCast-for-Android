@@ -1,5 +1,7 @@
 # GlassCast
 
+![GlassCast: every show, in its own color](docs/images/banner.jpg)
+
 GlassCast is a podcast app for Android phones and Google TV. I started it after
 moving over from an iPhone, because I couldn't find an Android podcast app I
 actually liked using.
@@ -7,6 +9,15 @@ actually liked using.
 You can download the latest APK from the
 [releases page](https://github.com/anixitea/GlassCast-for-Android/releases/latest).
 The app checks that page for updates itself, so you only need to install it once.
+There's more about it, in English and Korean, at
+[anixitea.github.io/glasscast](https://anixitea.github.io/glasscast/).
+
+<p align="center">
+  <img src="docs/images/player.webp" width="24%" alt="The player, in the colors of the episode's cover">
+  <img src="docs/images/latest.webp" width="24%" alt="Latest, with new episodes from every show you follow">
+  <img src="docs/images/show.webp" width="24%" alt="A show's page, tinted by its cover">
+  <img src="docs/images/speed.webp" width="24%" alt="Speed and sound, with Skip silence and Boost voices">
+</p>
 
 ## What it does
 
@@ -62,8 +73,8 @@ launch.
 
 The next time you open GlassCast, Settings has a Crash report row under About.
 Tapping Send lets you share the report however you like, by email or in a
-GitHub issue. It stays on your device unless you send it, and it's deleted
-once you do.
+[GitHub issue](https://github.com/anixitea/GlassCast-for-Android/issues/new?template=crash-report.yml).
+It stays on your device unless you send it, and it's deleted once you do.
 
 ## Building it
 
