@@ -1,0 +1,29 @@
+name: Crash or freeze
+description: GlassCast closed by itself, froze, or Android said it isn't responding
+title: "Crash: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time. GlassCast keeps a report of what happened, and it's the most useful thing you can send me.
+  - type: textarea
+    id: report
+    attributes:
+      label: Crash report
+      description: Open GlassCast and go to Settings → About → Crash report. Tap Send, choose Copy, and paste it here.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: doing
+    attributes:
+      label: What were you doing when it happened?
+      description: For example, pulling down to refresh the Library, opening the player, or casting to a TV.
+  - type: dropdown
+    id: often
+    attributes:
+      label: How often does it happen?
+      options:
+        - Once
+        - Sometimes
+        - Every time
