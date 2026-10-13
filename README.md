@@ -9,6 +9,10 @@ actually liked using.
 You can download the latest APK from the
 [releases page](https://github.com/anixitea/GlassCast-for-Android/releases/latest).
 The app checks that page for updates itself, so you only need to install it once.
+If you use Obtainium, you can add it there instead.
+
+[<img src="docs/images/obtainium.png" alt="Get it on Obtainium" height="48">](https://apps.obtainium.imranr.dev/redirect?r=obtainium://app/%7B%22id%22%3A%22com.glasscast.app%22%2C%22url%22%3A%22https%3A%2F%2Fgithub.com%2Fanixitea%2FGlassCast-for-Android%22%2C%22author%22%3A%22anixitea%22%2C%22name%22%3A%22GlassCast%22%7D)
+
 There's more about it, in English and Korean, at
 [anixitea.github.io/glasscast](https://anixitea.github.io/glasscast/).
 
