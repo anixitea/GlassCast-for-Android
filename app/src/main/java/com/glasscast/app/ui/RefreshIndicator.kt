@@ -7,7 +7,9 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.pulltorefresh.PullToRefreshState
@@ -20,6 +22,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 /**
@@ -66,8 +69,24 @@ fun CookieRefreshIndicator(
                 rotationZ = if (refreshing) spin else f * 220f
             }
             .size(48.dp)
-            .shadow(10.dp, CookieShape(), clip = false)
     ) {
+        /*
+         * The shadow is cast by a plain circle tucked just inside the
+         * scallops' dips, not by the cookie itself. A shadow from a concave
+         * outline has to be cut into triangles by the system's renderer, and
+         * this one turns and grows on every frame of the pull and spins
+         * through the refresh, so that work ran every frame. On an Android 17
+         * pad it took the render thread seconds a frame, and the app stopped
+         * answering mid-pull (two reports, both "phone library", both waiting
+         * on a drag). A circle's shadow is drawn straight from its radius.
+         * The cookie covers the circle, so it looks the same.
+         */
+        Box(
+            Modifier
+                .matchParentSize()
+                .padding(CookieShadowInset)
+                .shadow(10.dp, CircleShape)
+        )
         Canvas(Modifier.size(48.dp)) {
             drawPath(cookiePath(size.width, size.height), color = surface)
             val stroke = 3.dp.toPx()
@@ -85,3 +104,10 @@ fun CookieRefreshIndicator(
         }
     }
 }
+
+/**
+ * How far in from the 48dp indicator's edge the scallops dip: the cookie's
+ * crests touch the edge, its dips sit at (1 - depth) / (1 + depth) of the
+ * radius (cookiePath), about 2.7dp in.
+ */
+private val CookieShadowInset: Dp = 24.dp * (1f - (1f - CookieDepth) / (1f + CookieDepth)) + 0.5.dp

@@ -12,8 +12,8 @@ android {
         applicationId = "com.glasscast.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 16
-        versionName = "1.5"
+        versionCode = 20
+        versionName = "1.8"
     }
 
     buildTypes {
@@ -83,6 +83,10 @@ dependencies {
     // and every control — notification, lock screen, the app — keeps working.
     implementation(libs.androidx.media3.cast)
     implementation(libs.play.services.cast.framework)
+    // Google Drive backups: Play services' AuthorizationClient hands out
+    // tokens for Drive's app data folder (data/DriveBackup.kt). 21.4.0 is the
+    // first with revokeAccess and clearToken.
+    implementation(libs.play.services.auth)
     // Background checks for new episodes. WorkManager survives reboots and
     // respects Doze, which a hand-rolled alarm would not.
     implementation(libs.androidx.work.runtime)

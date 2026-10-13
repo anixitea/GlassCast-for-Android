@@ -66,6 +66,8 @@ for p, s in sources.items():
     for name, fqs in known.items():
         if name in simple_imported or name in decls and pkgs[p] in decls[name]: continue
         if any(fq.rsplit(".", 1)[0] in wild for fq in fqs): continue
+        # Same package as the class (R, from com.glasscast.app itself): no import needed.
+        if any(fq.rsplit(".", 1)[0] == pkgs[p] for fq in fqs): continue
         if not re.search(r'(?<![\w.])' + re.escape(name) + r'\b', body): continue
         if re.search(r'(class|object|interface|typealias|fun|val|var)\s+' + re.escape(name) + r'\b', body): continue
         # An enum entry declared in this file (Haptic.Pause), not the library class.

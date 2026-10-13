@@ -428,8 +428,10 @@ fun Color.luminance(): Float = 0.2126f * red + 0.7152f * green + 0.0722f * blue
 /*
  * Chrome colors — the mini player, tab bar and player panel.
  *
- * All dark, in both themes, as Cider's are: they're the player's surfaces, and
- * the player is dark. What changes with the episode is the hue. Each is the
+ * Dark, as Cider's are: they're the player's surfaces, and the player is
+ * dark. Over a dark page the mini player and tab bar turn to their pale
+ * versions ([chromeButton], [chromeBarPale]) so they still stand out (see
+ * GlassCastRoot, chromeMix). What changes with the episode is the hue. Each is the
  * cover's own color pushed to a fixed lightness, so a red cover gives a deep
  * red bar and a gray one a neutral charcoal — the same rule that makes the
  * pages legible, applied to the chrome.
@@ -445,6 +447,17 @@ val ArtworkColors.chromeBar: Color
 /** A pale tone of the accent for filled buttons on the chrome — Cider's pink pill. */
 val ArtworkColors.chromeButton: Color
     get() = meshAccent.withHsl({ it.coerceIn(0.22f, 0.62f) }, { 0.82f })
+
+/**
+ * The tab bar's pale version, for a dark page (see GlassCastRoot, chromeMix):
+ * the mini player's pale card is [chromeButton], and the bar sits a step
+ * lighter under it, so the two still stack as one object.
+ */
+val ArtworkColors.chromeBarPale: Color
+    get() = meshAccent.withHsl({ it.coerceIn(0.16f, 0.48f) }, { 0.90f })
+
+/** What reads on the pale chrome. */
+val ChromeInk = Color(0xFF16141A)
 
 /** The player's pull-up panel: darker again, and opaque enough to read on. */
 val ArtworkColors.panelSurface: Color

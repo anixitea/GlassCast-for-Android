@@ -1,8 +1,12 @@
 package com.glasscast.app.tv
 
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.AnimationSpec
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.gestures.BringIntoViewSpec
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -38,6 +42,7 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalViewConfiguration
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -158,12 +163,12 @@ private class FocusIndicationNode(
         if (now == focused) return
         focused = now
         coroutineScope.launch {
+            // Quick, with no bounce. The bouncy spring took about half a
+            // second to settle on every press, so with the D-pad held the
+            // whole screen looked like it was moving in slow motion.
             level.animateTo(
                 targetValue = if (now) 1f else 0f,
-                animationSpec = spring(
-                    dampingRatio = Spring.DampingRatioLowBouncy,
-                    stiffness = Spring.StiffnessMediumLow
-                )
+                animationSpec = tween(if (now) 140 else 110, easing = FastOutSlowInEasing)
             )
         }
     }
@@ -193,6 +198,49 @@ private class FocusIndicationNode(
             )
         }
     }
+}
+
+// ------------------------------------------------------------ scrolling
+
+/**
+ * How every TV list scrolls to the item that takes focus. Critically damped,
+ * so a new focus while a scroll is still moving carries its speed on; the
+ * default restarted from a standstill on every press, and holding the D-pad
+ * crawled.
+ */
+internal val TvScrollSpring: AnimationSpec<Float> = spring(dampingRatio = 1f, stiffness = 650f)
+
+/**
+ * Scrolls only as far as it must, so the focused item (grown, with its ring)
+ * sits at least [marginPx] inside the list's edges.
+ *
+ * Without this, Compose on a device with Android TV's leanback feature pins
+ * every focused item 30% of the way in. Rows jumped as focus moved, and the
+ * first cards of a shelf were sliced at its edge.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+class TvBringIntoView(private val marginPx: Float) : BringIntoViewSpec {
+    override val scrollAnimationSpec: AnimationSpec<Float> = TvScrollSpring
+
+    override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float {
+        // A list too small for both margins keeps what it can.
+        val margin = marginPx.coerceAtMost(((containerSize - size) / 2f).coerceAtLeast(0f))
+        val start = margin
+        val end = containerSize - margin
+        return when {
+            offset < start -> offset - start
+            offset + size > end -> offset + size - end
+            else -> 0f
+        }
+    }
+}
+
+/** [TvBringIntoView] for this screen's density. Provided once, at the TV root. */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun rememberTvBringIntoView(margin: Dp = 48.dp): BringIntoViewSpec {
+    val px = with(LocalDensity.current) { margin.toPx() }
+    return remember(px) { TvBringIntoView(px) }
 }
 
 // ------------------------------------------------------------ hold select

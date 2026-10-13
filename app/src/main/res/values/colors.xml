@@ -1,5 +1,8 @@
 <resources>
     <color name="ic_launcher_background">#9B50D1</color>
     <color name="ground_light">#FAFAFA</color>
-    <color name="ground_dark">#0A0A0C</color>
+    <!-- The in-app grounds (ui/theme: LightGround0, DarkGround0). The window
+         and the launch screen show these before Compose draws, so they must
+         match exactly or the handover flashes. -->
+    <color name="ground_dark">#17171B</color>
 </resources>

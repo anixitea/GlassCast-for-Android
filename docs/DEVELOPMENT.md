@@ -1,6 +1,805 @@
 # GlassCast — developer notes
 
-## 1.5 (in progress) — tablets, TV focus, Downloads
+## 1.8
+
+**Version 1.8 (versionCode 20).** The released 1.7 was built from 619148b:
+Sign in with Google switched off, and none of the fifth and sixth rounds'
+fixes. 1.8 is everything since, with sign-in on.
+
+**The crash reports.** Both GitHub issues are the same hang. #1 (Pixel 9 Pro,
+Android 17, on 1.7) has the RenderThread inside
+`SkBaseShadowTessellator::computeConcaveShadow` with the main thread waiting
+on it, "phone library": the pull-to-refresh cookie casting its shadow from a
+concave outline, retriangulated every frame. That is the fifth round's fix
+(the shadow now comes from a circle inside the scallops), which the 1.7 build
+didn't have. #2 (Redmi, Android 13, on 1.6) predates RenderThread stacks in
+reports but shows the same main-thread wait. A search of every `shadow(`
+found no other concave shape: the update banner, the toast, the color
+picker's swatch and the refresh circle are all convex now, and nothing sets
+`shadowElevation`.
+
+**Sign-in.** `GOOGLE_SIGN_IN = true`. Google's side on October 13: In
+production, External, `drive.appdata` only (non-sensitive, so the user cap
+doesn't apply), one Android client "GlassCast release" (release key only, so
+debug builds can't sign in). Branding is under review with a logo: privacy
+policy and branding guidelines passed, the homepage check failed with "not
+registered to you" because Google looked less than 24 hours after the Search
+Console verification (October 12, 15:14 UTC). A scheduled check on October 14
+looks again and drafts a reply to Google's Trust and Safety thread if one
+arrives. Until branding passes, sign-in works, but the consent screen may not
+show GlassCast's name and logo.
+
+**License.** GPL-3.0, in `LICENSE` and on GitHub, with a section in the
+README.
+
+## 1.7, seventh round: Sign in with Google is on, with a site of its own
+
+Still 1.7 (versionCode 19).
+
+**Why it could go public after all.** The console's "100 user cap" only
+counts users of an app asking for sensitive or restricted scopes Google
+hasn't approved (the console says so under Audience once it's published).
+GlassCast asks for `drive.appdata` alone, which is non-sensitive, so in
+production there is no cap and no review, and since every library lives in
+its user's own Drive it costs nothing at any number of users. What
+publishing needed was a home page and a privacy policy on a domain
+registered in Branding.
+
+**The site.** `site/` in this project, published by GitHub Pages from the
+public repo `anixitea/anixitea.github.io` (main, root): `/` lists the apps,
+`/glasscast/` is the home page, `/glasscast/privacy/` the privacy policy,
+plus `style.css`, `favicon.png`, `glasscast/icon.webp` (the launcher art,
+WebP, 3 KB) and `google1dad3bd2eb45c4c8.html`, Search Console's ownership
+file (keep it, or the verification lapses). It had to be a user site (a repo
+named exactly `anixitea.github.io`): Google wants the top private domain
+verified, and `github.io` is a public suffix, so the domain is
+`anixitea.github.io`, and only a user site serves files at its root. The
+privacy policy lists exactly what the app contacts (podcast hosts, Apple's
+iTunes Search API for search and charts, GitHub for updates, gPodder or
+Nextcloud if set up, cast devices, Google if signed in), the scope, what the
+library file holds, the Limited Use statement, and how to sign out and delete
+the Drive copy. Contact is the GitHub issues page, not an email address.
+Uploaded through GitHub's web upload, folder by folder (this session can't
+push to his GitHub); to change the site later, upload the changed files the
+same way or push from his Mac.
+
+**Google's side.** Search Console: URL-prefix property `https://anixitea.github.io/`,
+verified by the HTML file. Branding: home page and privacy policy links,
+authorized domain `anixitea.github.io`, no logo (a logo would need a review).
+Audience: published, In production. Brand verification (so the consent
+screen shows GlassCast's name) was refused on the first try with "not
+registered to you": Google asks for 24 hours between verifying ownership and
+retrying. Until it passes, sign-in works but the consent screen doesn't show
+the app's name. Retry from Branding > the (i) panel > Verify branding.
+
+**In the app.** `GOOGLE_SIGN_IN = true`; the account card is back. README and
+the 1.7 notes say Sign in with Google again, and README links the privacy
+policy.
+
+## 1.7, sixth round: a calmer tab bar, switches that show off
+
+Still 1.7 (versionCode 19).
+
+**The tab bar shook as it settled.** Seen in Jonathan's recording, frame by
+frame. Three causes, one per symptom:
+- *The whole row wobbled sideways.* Every tab's width follows `pill`, the
+  traveling index, and `barSpring` was damped at 0.62: the pill ran about 8%
+  past its tab and back, and every icon in the row moved with it. Now 0.86
+  (stiffness 460), which barely overshoots.
+- *The label flickered between cuts* ("Dow…", "Downl…", "Downlo…"). The label
+  was measured to the tab's width of that frame, so it was re-ellipsized as
+  the width moved. It's now measured to the room it has once settled
+  (`labelRoom`, written by the bar as it measures), and only revealed and
+  faded by the moving width.
+- *"Downloads" stayed cut short at rest.* The selected tab got a fixed 1.4
+  tabs' worth of extra width. Now each tab's extra is its own label's width
+  (TabItem reports the icon alone as its min intrinsic width and icon plus
+  label as its max), scaled by one factor for all tabs only if the bar is
+  too narrow for the longest label.
+- Also: the tab being left keeps its label and fades it as it narrows (it
+  used to vanish the frame another tab was tapped), and the press squash is
+  0.92 on a 0.75 spring (was 0.86 on 0.5, which bounced back past full size).
+
+**Off switches were empty ovals.** Material's off switch draws its thumb and
+rim in the theme's `outline`, and the light theme's outline is LightGround3,
+the same gray as the off track. `glassSwitchColors()` (Components.kt) gives
+off a gray thumb in a rimmed track in both themes, and on the accent with a
+white thumb (dark on a pale custom accent). Used by Settings' switches and
+the sleep sheet's; the show page's and the player panel's already set their
+own.
+
+## 1.7, fifth round: the hang on pull-to-refresh, the sideways player's backdrop and panel
+
+Still 1.7 (versionCode 19).
+
+**The hang (two reports from Jonathan's OPPO OPD2515, Android 17).** Both
+were not-responding kills on "phone library", each waiting 5 s on a drag
+(`action=MOVE`). The main thread was in `nSyncAndDrawFrame`, waiting for the
+RenderThread, the same shape as 1.6.1's Redmi report, and this time the
+report carried the RenderThread: running, 7 to 9 s of CPU, inside
+`SkBaseShadowTessellator::computeConcaveShadow` ← `SkShadowTessellator::MakeSpot`
+← `EndReorderBarrierDrawable::drawShadow`. That's a view shadow cast from a
+concave outline. The only one in the app was the pull-to-refresh
+indicator: `.shadow(10.dp, CookieShape())`, a 217-point scalloped outline,
+inside a layer that turns and grows on every frame of the pull and spins
+through the refresh. A concave shadow has to be triangulated on the CPU, and
+the turning layer meant it was redone every frame. Fixed by casting the
+shadow from a plain circle tucked inside the scallops' dips
+(`CookieShadowInset`, about 3dp); the cookie is drawn over it, so it looks
+the same. Nothing else casts a shadow from a path (checked every `.shadow`
+and `shadowElevation`; the TV's cookie is a clip only). The 1.6.1 Redmi
+report (a tap waiting 8 s behind the RenderThread) may well have been this,
+since the indicator is on the library, Latest and Discover; its report had no
+RenderThread stack to say.
+
+**The color block down the right of the sideways player.** The backdrop is
+the cover and its mirror image, blurred as one (`softenedMirrorSideways`),
+sized to twice the cover's width. A phone on its side is more than twice as
+wide as it is tall (about 880 by 405dp here), so the mirror ended about 70dp
+short of the right edge and the plain blur under it showed as a strip of
+another color. The mirror now reaches the far edge: both builders take a
+`reach` (the image's length over the cover's, 2 to 4) and stretch the
+reflection to fill it. Portrait phones stay at 2, so nothing changes there;
+a very tall portrait screen gets the same fix.
+
+**The open panel on a sideways phone.** The header above the open panel
+(title, three buttons, wave) took 104dp under a 40dp gap, so on a phone's
+~405dp the panel opened only halfway up, and the sleep timer's chips and
+Shake to restart were below its edge. In short landscape the header now sits
+4dp under the status bar (the dismiss handle fades as the panel rises; a
+drag down closes the panel first anyway) with the wave 52dp down rather
+than 60, and the panel starts 80dp below it rather than 104: about 60dp
+more panel. The timer tab also scrolls now, as Speed & sound already did, so
+nothing in a tab can be out of reach at any height.
+
+## 1.7, fourth round: Sign in with Google switched off for now
+
+Still 1.7 (versionCode 19).
+
+**The Cloud setup is done, but it can't go public yet.** Project
+`glasscast-511413` (Jonathan's account): Google Drive API enabled; Google
+Auth Platform configured (app name GlassCast, External, support and contact
+email his Gmail, the API Services User Data Policy agreed); Data access has
+`drive.appdata` (listed as non-sensitive); an Android client "GlassCast
+release" for `com.glasscast.app` with the release key's SHA-1
+`69:C6:1B:BA:A6:37:63:4A:C3:E0:1B:DA:29:93:14:09:AA:D1:5F:E0` (read from the
+built APK's signature block; there's no debug client). Publishing is the
+step left, and the console keeps Publish app disabled until Branding has an
+application home page and a privacy policy link, hosted on a domain
+registered under Authorized domains (and, for brand verification, one he
+owns, checked in Search Console). GlassCast has no site, so the app stays in
+Testing, where only listed test users can sign in.
+
+**So the feature is off.** Jonathan's call: build a site later, hide sign-in
+for now, and say in the update notes that it's coming. `GOOGLE_SIGN_IN`
+(top of `data/GoogleAccount.kt`) is `false`: the Settings account card isn't
+shown, the app doesn't schedule syncs on open and close, the daily job skips
+its sync, and an account no longer asks for the background job. The code,
+the dependency and the strings stay. The backup file is unaffected.
+
+**To turn it on:** a home page and a privacy policy (GitHub Pages under his
+GitHub account is the free way, at a `*.github.io` address verified in
+Search Console), their links and domain in Branding, Publish app in Audience,
+then `GOOGLE_SIGN_IN = true`. To try it before that, add the Gmail under
+Audience > Test users (access lapses after 7 days there). Debug and fast
+builds need a second Android client with the debug key's SHA-1.
+
+## 1.7, third round: the tab bar, a custom color, landscape, Sign in with Google
+
+Still 1.7 (versionCode 19).
+
+**The tab bar stays dark again.** The page-following colors were meant for
+the mini player only. The mini player still goes pale over a dark page and
+dark over a light one, crossfading; the bar is dark as it always was. It
+follows the card only with Settings > Appearance > Adaptive tab bar on (off
+by default). Both still read their colors while drawing.
+
+**The selected tab's icon no longer jumps out of the pill.** Seen in
+Jonathan's recording (the mini player becoming the bubble, the bar
+narrowing to make room): the label faded in and out on its own timing (an
+`AnimatedVisibility` fade, full width from the first frame to the last) while
+the tab's width moved on the bar's spring. For a few frames the icon and
+label were wider than the tab, the row couldn't center them, and the icon was
+pushed out past the pill's left edge, then snapped back when the label left.
+`TabItem` is now a hand-written layout: the label takes only the share of its
+width the bar's own numbers give the tab (the reveal is the same value that
+gives the tab its extra width), it's ellipsized to the room there is, and the
+pair is centered every frame. Only the selected tab shows a label; tabs the
+pill passes over still widen for it but stay icon-only.
+
+**Custom color.** Settings > Appearance > Custom color: a swatch and a
+switch; the row opens a sheet with three sliders (hue, saturation,
+brightness), each track painted with the colors it moves through, a preview
+and the hex value, and Use this color. It becomes the app's accent the way
+the cover's does with Dynamic color (clamped for legibility on the page); the
+two are exclusive, turning one on turns the other off.
+
+**The player on a phone held sideways.** It used the portrait layout, which
+needs about 400dp above the panel strip; a phone sideways has about 390 in
+all, so the title went up under the status bar, the controls crowded, and the
+cover was only the blur behind them (Jonathan's screenshot). It now gets the
+tablet's landscape layout, packed for the height: the cover fills the height
+on the left and dissolves into the controls' column; the volume row goes
+(the phone's buttons are right there), the transport is 64dp instead of 76,
+the gaps tighten, so title to transport is 196dp and centers between the
+status bar and the panel strip; the column keeps clear of a camera cutout or
+three-button bar on the right. The player now closes sideways as one sheet
+on phones too.
+
+**Sign in with Google (`data/GoogleAccount.kt`, `ui/BackupSettings.kt`).**
+Jonathan wanted an account rather than a Drive backup: sign in, and the
+library, progress and bookmarks are kept for that account and follow it to
+other phones. Asked where the data should live, he chose the person's own
+Google account over a Firebase backend: no server, and the README's promise
+that nothing is sent anywhere holds.
+- *The card at the top of Settings*: signed out, "Sign in with Google";
+  signed in, the account's photo, name and email, and when it last synced
+  (or what went wrong). Tapping it opens the account sheet: Sync now, Sign
+  out. Name, email and photo come from Drive's `about` call, under the same
+  single permission (`drive.appdata`).
+- *Storage*: one library document in the account's app folder (hidden, only
+  GlassCast can read it): the backup document plus each show's follow time,
+  the unfollows, and deleted bookmark ids.
+- *Merging*, both ways, every sync. Shows: the latest of following and
+  unfollowing wins by time (a journal of both, kept from
+  `FeedStore.onSubscriptionChanged`; the times written after a sync are the
+  account's, not the moment this phone caught up). Marks and places:
+  whichever is further along (so "mark unplayed" doesn't travel; played
+  wins). Bookmarks: by id, the newer memo wins (`editedAt`, new), deletions
+  carry everywhere (`BookmarkStore.onRemoved`). Settings and the queue: taken
+  from the account once, on a phone's first sign-in.
+- *When*: on signing in; when the app opens and when it's left
+  (`SyncWorker`, so it finishes after a swipe away; at most every two
+  minutes); once a day with the background job; Sync now.
+- An empty phone with no account copy writes nothing.
+- Sign out revokes GlassCast's access at Google and forgets the account and
+  its journal; the library stays on the phone and the account copy stays for
+  next time.
+- The backup file (Save a backup file, Restore a backup file) stays, for
+  moving phones without an account.
+- Type-checked against the real play-services-auth 21.4.0 (with
+  auth-base 18.0.10 and auth-api-phone 18.0.2), staged from the Mac once
+  Gradle had fetched them. The button
+  says "Sign in with Google" in GlassCast's own style; Google's branding
+  rules ask for its official button artwork with that phrase, which can be
+  dropped in if the app ever goes to the Play Store.
+
+**"Code 8".** Jonathan's first try failed with 8, Play services'
+INTERNAL_ERROR. Nothing in the app can fix that: Google answers it before
+any of GlassCast's own calls run. The usual cause is that the Google Cloud
+setup below isn't done yet or doesn't match the installed build (its package
+and signing key's SHA-1), or that the consent screen is still in Testing
+without the account as a test user. The error now says "Couldn't sign in with
+Google (code 8)"; code 10 says the setup is missing outright.
+
+**Google sign-in setup (once, in Google Cloud).**
+1. console.cloud.google.com: create a project (GlassCast).
+2. APIs and services > Library: enable the **Google Drive API** (it's the
+   storage behind the account).
+3. Google Auth Platform (the OAuth consent screen): app name GlassCast, a
+   support email, audience External. Under Data access add the scope
+   `https://www.googleapis.com/auth/drive.appdata`. Then **Publish** the app
+   (In production): with only non-sensitive scopes there's no review, and
+   while it's left in Testing only listed test users can sign in and their
+   access lapses after 7 days.
+4. Clients > Create client > **Android**: package `com.glasscast.app`, and
+   the SHA-1 of the key that signed the installed build. Release:
+   `keytool -list -v -keystore "<the .jks in ~/Documents/App Key>" -alias <alias>`.
+   A second Android client with the debug key's SHA-1 for debug and fast
+   builds: `keytool -list -v -keystore ~/.android/debug.keystore -alias androiddebugkey -storepass android`.
+5. Nothing goes in the app: Google matches the package and signing key.
+   Changes can take a few minutes to reach phones.
+
+## 1.7, second round: chrome that follows the page, backups, update images
+
+Still 1.7 (versionCode 19); 1.7 hadn't gone out yet.
+
+**The chrome contrasts with the page, and fades between versions.** Before,
+the mini player swapped dark and pale by the theme, and the tab bar was dark
+always, so in dark mode a pale card sat on a dark bar that sank into the
+page. Now both follow the page that's actually showing: a show or a preview
+by its own ground (from its cover), every other tab by the app's. Over a
+light page they're dark (as before); over a dark page both go pale
+(`chromeButton` for the card, the new `chromeBarPale` a step lighter for the
+bar, `ChromeInk` on them). `chromeMix` animates 0 to 1 over 450 ms and every
+chrome color is a blend along it, so they crossfade rather than snap, as
+Cider's do. The bar reads its colors as functions while drawing
+(`tint: () -> Color`, `content: () -> Color`); only the tab items recompose
+during a fade, never the root. Grounds are theme-pinned today, so in practice
+light mode keeps the dark chrome and dark mode gets the pale one; the rule is
+written against the page so a page with its own ground just works.
+
+**Buy Me a Coffee** in Settings > About (buymeacoffee.com/theglassmaker),
+opening the browser.
+
+**Images in update notes.** GitHub writes a dragged-in image as an HTML tag
+(`<img … src="https://github.com/user-attachments/assets/…">`), older ones
+as Markdown `![alt](…)`, sometimes wrapped in a link; all three showed as
+code. `noteBlocks` splits the notes into text and pictures; pictures load
+through the artwork pipeline at the sheet's width (cached, downsampled), keep
+their shape, and round like the box; one that won't load leaves nothing.
+Leftover tags (`<p>`, `<br>`), links (shown as their text) and entities are
+cleaned out of the text. Only https images load. Tested on a sample body.
+
+**Backup and restore (`data/Backup.kt`, `ui/BackupSettings.kt`).** Settings >
+Backup: Google Drive, Save a backup file, Restore a backup file.
+- *The document*: shows (with when each was followed and last played),
+  every episode's played mark and place, the queue, bookmarks, settings
+  (per-show order and auto-download, hidden Discover shows). Not downloads,
+  not the gPodder password.
+- *Restoring merges.* Missing shows are followed one at a time (the OPML
+  import's path, with progress under the rows); marks and places only move
+  forward (`FeedStore.applyProgress`: played wins, the later place wins);
+  bookmarks are added beside existing ones, never twice; the queue only if
+  nothing is loaded (`PlayerConnection.loadQueue`); auto-download restarts
+  from now so nothing published meanwhile pours in. It asks first
+  (`ConfirmSheet`, now with a non-destructive accent version).
+- *Files* go through the system's Save and Open dialogs
+  ("GlassCast backup 2026-10-12.json"); no storage permission.
+
+**Google Drive backups** came next, and were replaced in the third round by
+signing in with Google (below): same storage, one account instead of a
+backup per phone.
+
+## 1.7 — GlassBook's menus, bookmarks, the car, auto-download, widget, shortcuts
+
+Version 1.7 (versionCode 19).
+
+**Menus and placement, from the GlassBook notes.**
+- *Sheets stop below the camera.* Every bottom sheet goes through
+  `GlassSheet` (`ui/GlassSheet.kt`): fully expanded or closed, never half,
+  and its content capped at the screen height less the status bar and 96dp,
+  so a long sheet ends under the cutout instead of behind it. All eleven
+  `ModalBottomSheet`s were converted.
+- *Confirmations are sheets, not dialogs.* `ConfirmSheet`: the cover, the
+  title, a line of detail, one red pill for the destructive action (haptic
+  ToggleOff) and Cancel. It replaces the stock dialogs for Discover's Not
+  interested, Unfollow, and deleting downloads (one or many, with the size).
+- *Settings is the sixth tab*, where GlassBook keeps it; the button on the
+  Podcasts title is gone. `SettingsScreen` is grouped cards with a colored
+  badge on each row (Apple's palette): Appearance (theme tiles drawn as
+  little phones in the icon's gradient, dynamic color), Playback (skip 15/30,
+  headphone buttons Skip/Next), Library (show order, OPML, gPodder),
+  Notifications, Discover (hidden shows), About (updates with the version,
+  the crash report when there is one). The old `SettingsSheet` is deleted.
+- *The blur follows the chrome.* `BottomGlassFade` takes its height as a
+  lambda read in layout (tab bar, plus the mini player while it's a card), so
+  it tracks the collapse without recomposing.
+- *The chrome takes its own touches.* The tab bar and the mini-player card
+  consume pointer input, so a tap on them never falls through to a row
+  underneath.
+- *The mini player's card clips what's inside it* in every phase of the
+  morph (a reused `Path`, no allocation per frame).
+- *Big titles fade by distance* (`rememberTitleCollapse`, 100dp of travel)
+  rather than by item index.
+
+**Not taken from GlassBook, and why.**
+- Only the tapped cover flies (5a) and the bar drawn over flying covers (2c):
+  GlassCast removed page-to-page cover flights in 1.2, because they hung if
+  you scrolled mid-flight. Only the mini player to full player flight is left.
+- Add-sheet tiles (4c): GlassCast's add sheet is a feed address field, not a
+  list of rows.
+- No pull-down that opens a sheet (4d): already true; pulling down only
+  refreshes.
+- Shake to restart is already only in the Timer; Skip silence and Boost
+  voices stay in the player's panel only.
+
+**The player.** Tapping the episode title opens its show (closing the
+player, Library tab). **Bookmarks** are a panel tab between Info and Speed:
+"Bookmark 12:34" adds one at the playhead and opens its memo; each row is a
+time pill (tap to seek), the memo (inline edit) and the date; swipe left to
+delete. Marked as dots on the wave scrubber. `data/Bookmarks.kt` keeps them
+by episode guid in `files/bookmarks.json`, written behind under a mutex
+through a temp file; unfollowing a show keeps them.
+
+**Headphone buttons.** Most earbuds send next and previous (double and
+triple tap), which in a podcast drop the episode you're in. With Settings >
+Playback > Headphone buttons on Skip (the default) they skip back and
+forward by the skip setting instead: `AutoLibrary.onMediaButtonEvent`, which
+Media3 1.5.1 calls before its own handling. Media button intents that come
+through the service (the notification's own buttons on Android 12 and
+older, the widget) arrive as the media notification controller and keep
+their meaning. A one-button wired headset's double click is still next:
+Media3 turns a double play/pause into next after the callback.
+
+**Skip buttons in the car (`player/CarButtons.kt`).** Android Auto draws its
+controls from the platform session's custom actions, and since Android 13
+the phone's media notification draws from the same place. The earlier lesson
+(back/forward custom buttons came out reversed on HyperOS) still holds, so
+the buttons are added only while a car is connected:
+- on: `onConnect` from Android Auto (`isAutoCompanionController`) or a car
+  running Android (`isAutomotiveController`) sets the session's custom
+  layout (Media3's `ICON_SKIP_BACK_15/30`, `ICON_SKIP_FORWARD_15/30`) and
+  reserves the previous and next slots (session extras), so the skip
+  buttons sit beside next and previous rather than taking a slot over;
+- off: `PlaybackService.onUnbind` for the media browser interface, i.e. the
+  last browser (the car) has gone. It returns true so `onRebind` follows and
+  the next drive turns them on again. Media3 never reports a browser
+  disconnecting, and drops idle car controllers after five minutes, so its
+  own callbacks can't be the off switch.
+- `onCustomCommand` answers both with `seekBack` / `seekForward` through
+  `SkipPlayer`; every controller gets the two commands, the notification
+  controller included (the platform session lists only buttons that
+  controller may use). The labels follow the skip setting live.
+Untested in a car. Things to watch: where Auto places the two buttons, and
+the phone's notification while connected (it shows them too).
+
+**Auto-download, per show (`data/AutoDownload.kt`).** A switch in the show's
+info sheet ("Download new episodes", Wi-Fi only); the (i) button now shows
+on every followed show. `Settings.autoDownload` keeps feed URL → when it was
+turned on. After every refresh (`FeedStore.onRefreshed`, in the app and in
+the background job) and only on an unmetered network, each such show's three
+newest episodes are checked: published since it was turned on (less 12
+hours, for feeds that list an episode late), not played. `Downloads.
+startAutomatic` starts each one at most once ever (`auto_tried`, the last
+500), so deleting one keeps it deleted, and holds the download to unmetered
+networks (`setAllowedOverMetered(false)`). The address is resolved when the
+download starts, on Wi-Fi, so a host's short-lived link is fresh. Nothing is
+deleted automatically. The background job now runs when notifications are on
+or any show auto-downloads (`Settings.backgroundRefreshWanted`), and waits
+for the downloads to be queued before it returns. Download polling slows to
+every 15 s while downloads only wait for a network.
+
+**Home-screen widget (`widget/NowPlayingWidget.kt`).** 4×1, resizable:
+cover, episode, show, back / play-pause / forward, on a card filtered to the
+cover's dark muted color. The service updates it on episode changes and
+play/pause (`playWhenReady`, so buffering doesn't flicker it); with the
+service gone it shows the saved queue's first episode. Buttons are media
+button intents to the service, as Media3's notification sends them: play
+starts it as a foreground service (from a stopped app Media3 resumes the
+saved queue through `onPlaybackResumption`, and playback makes it
+foreground); back and forward use a plain service start, so they never
+start a service that would have nothing to play. Tapping the card opens the
+player.
+
+**Launcher shortcuts (`Shortcuts.kt`).** Resume, Latest, Search, Downloads.
+Dynamic, set each time the app opens, so the labels come from `tr()` (an XML
+shortcut can only use string resources, and GlassCast's text isn't in
+resources). Adaptive icons: the app icon's purple behind a white Material
+glyph. Resume plays the saved queue as soon as it's back in the player
+(`PlayerConnection.resume`) and opens the player.
+
+**Smaller.**
+- Downloads introduce themselves with the installed version (was "1.4").
+- TV Settings: the explanatory paragraph at the bottom is gone (it also
+  claimed the TV doesn't sync, which gPodder changed).
+- Tooling: the type-check now runs here whenever the session is linked to
+  the Mac (see tools/typecheck/README.md); `gen_r.py` reads layout ids;
+  `owncheck` accepts a same-package class without an import.
+
+## 1.6.1 — the first field report
+
+Version 1.6.1 (versionCode 18).
+
+**What came in.** A user's report from 1.6 on a Xiaomi 2201117TG (Redmi
+Note 11, Snapdragon 680, Android 13): a not-responding kill, "Input
+dispatching timed out … Waited 8001ms for MotionEvent(action=DOWN)", closed
+by the user from the dialog ("user request after error"). The app was already
+open and in use (the main thread had used about 15 s of CPU), so this isn't
+the pad's start-up hang. Separately, Jonathan hears of crashes on Pixels; no
+report from one yet.
+
+**What the trace says.** The main thread wasn't running GlassCast code. It
+was inside `ViewRootImpl.draw` → `HardwareRenderer.nSyncAndDrawFrame`, waiting
+in `DrawFrameTask::drawFrame` for the RenderThread: the thread that sends
+each frame to the GPU had not finished, so the main thread couldn't hand it
+the next one, and a tap waited behind that for 8 seconds. The cause is on the
+RenderThread (or the GPU, its driver, or the display's buffers), and 1.6's
+report only sent the main thread. So the report couldn't say why.
+
+**Changed.**
+- Not-responding reports now carry the threads that matter: main,
+  `RenderThread` and the `hwui` workers, plus up to four threads running
+  GlassCast's own code, each capped (`CrashLog.keyThreads`). Checked on a
+  sample dump laid out like a real one, compiled against android-35.
+- Which screen was up: `CrashLog.noteState` stores a few words ("phone
+  library player playing") with the process through
+  `ActivityManager.setProcessStateSummary` (Android 11+, in memory, 128
+  bytes, updated only when the screen changes), and the report prints it as
+  "showing:". Both roots note tab, show page, preview, player, playing, and
+  on the phone whether the launch mark is still up.
+
+**Suspects for a stalled RenderThread, for when the next report has its
+stack.** Not changed yet, per the ground rule.
+- *Haze's progressive blur.* The glass bars (`ui/Glass.kt`,
+  `HazeProgressive.verticalGradient`) on Android 13+ run Haze 1.3.1's own
+  runtime shader: for every pixel under the bar, every frame the page moves,
+  a loop of up to 150 taps sampling twice each, in two passes. That's the
+  heaviest GPU work in the app and lands hardest on a phone like the Redmi.
+  Haze 1.4.0 changed that shader from `half` to `float` because `half`
+  overflowed on some GPUs (Haze #520/#528, Samsung, seen as clipping). If the
+  RenderThread stack shows GPU waits (`kgsl`/`gsl` fences, `GrGLGpu`,
+  `SkiaOpenGLPipeline`) with the library or a show page up, options in
+  order: a plain (non-progressive) blur on weaker GPUs, then Haze's later
+  versions (check their Compose requirement first).
+- *Full-screen offscreen layers* (the player cover's dissolve, the show
+  page backdrop), on a 1080×2400 panel.
+- *Display buffers*: a RenderThread stuck in `dequeueBuffer` points at the
+  display side, not at our drawing. The exit's importance was 325 (top
+  activity, device sleeping), so the screen went off around the hang.
+
+## 1.6 (in progress) — the OPPO Pad mini, and what came over from GlassPlay
+
+Version 1.6 (versionCode 17).
+
+On Jonathan's OPPO Pad mini (8.8", 2520×1680, 60–144 Hz, Snapdragon 8 Gen 5,
+ColorOS 16, possibly a China-market unit) GlassCast often crashes or sticks on
+the opening logo. His Xiaomi 17 Pro Max never has. The work below follows
+his brief: get evidence first, then fix the suspects the code itself shows.
+
+**The cause, as far as the pad has shown it.** No crash report or log (adb
+isn't an option for Jonathan). His answers:
+
+- *It sticks on the launcher icon on a plain field*, Android's own launch
+  screen in 1.5. So the main thread is busy or blocked before GlassCast's
+  first frame. The splash replaying (2b) would show the purple mark instead,
+  so it isn't what sticks, though it was still wrong.
+- *The Play Store works*, so Play services is installed and running.
+
+What 1.5's main thread did before the first frame, checked file by file:
+open six small SharedPreferences, check every finished download's file
+through `getExternalFilesDir`, and call `CastContext.getSharedInstance(this)`
+synchronously, in `GlassCastApp.onCreate` and again in the playback
+service's `onCreate`. Everything else (the feed library, palettes, images)
+was already off it. The Cast call is the only one that waits on another
+process: it binds into Play services and loads the Cast module from it. On
+the Xiaomi's global ROM Play services is a privileged system app that's
+always up. On a China-market ColorOS unit it's an add-on that ColorOS
+manages like any other app, freezing it and controlling when one app may
+wake another. When Play services wasn't running at the moment GlassCast
+cold-started, the main thread waited on it with nothing drawn; long enough,
+and Android or ColorOS kills the app, which looks like a crash. That fits
+"often", not "always", and fits the phone never doing it. It's the most
+likely cause, not a confirmed one: the confirmation is ten clean cold starts
+on 1.6, or, if it still sticks, the exit record's not-responding stack
+(below), which 1.6's first launch can also read for 1.5's hangs.
+
+In 1.6 nothing waits on another process before the first frame: both Cast
+calls are asynchronous, and the download check runs on IO. If it still
+sticks, 1.6's launch screen is a plain field with no icon.
+
+### Evidence
+
+**Crash log** (`data/CrashLog`, from GlassPlay). The uncaught-exception
+handler writes the stack, version, device, Android version and thread to
+`files/crash/last.txt` as the process dies. Settings > About shows a "Crash
+report … Send" row only when there's a report; Send opens the share sheet
+with the text and then deletes it. Nothing leaves the device otherwise.
+
+Two changes from GlassPlay's version:
+
+- *Hangs.* A main thread that's stuck never throws, so the handler never
+  runs. The system kills the app for not responding (or ColorOS kills it
+  quietly), and from the outside that looks like a crash, which is exactly
+  the pad's symptom. Android 11+ records why each of the app's processes
+  ended (`ActivityManager.getHistoricalProcessExitReasons`), and for a
+  not-responding kill it keeps the stack of every thread. Each launch reads
+  that record off the main thread and keeps the unusual endings in
+  `files/crash/exits.txt`: crashes, native crashes, not responding, failed
+  starts, excessive resource use, and kills or low-memory kills while the app
+  was on screen (in the background those are routine on ColorOS). Leaving on
+  purpose, force stops, updates and permission changes don't count. For the
+  two newest not-responding kills the report includes the main thread's
+  stack only (the whole dump is far too long to share). The record survives
+  app updates, so the first launch of 1.6 can report how 1.5 died; those
+  lines say "(previous version)". Sending the report sets a cut-off, so the
+  same exits aren't reported twice.
+- *Installed in `attachBaseContext`*, not as the first line of `onCreate`.
+  The app's content providers (WorkManager's start-up, the profile
+  installer, the artwork provider) are created between the two, and a
+  failure there would otherwise go unrecorded.
+
+`CrashLog` and the StrictMode setup type-check against API 35's android.jar
+(compiled with kotlinc in the workspace, the only parts that could be).
+
+**StrictMode, debug builds only** (`FLAG_DEBUGGABLE`, so not `fast` or
+release). Thread policy: disk reads, disk writes, network, custom slow calls,
+logged under `GlassCastStrict` (a penalty listener on Android 9+, plain
+`penaltyLog` before). Also set in `attachBaseContext`, so it sees the
+providers' main-thread work too. `adb logcat -s GlassCastStrict` during a cold
+start lists what the main thread did before the first frame.
+
+### Cast on the main thread (brief 2a, the top suspect)
+
+`GlassCastApp.initCast()` called `CastContext.getSharedInstance(this)` in
+`onCreate`, before the first frame, and `PlaybackService.setUpCast` called it
+again when the service started. That call is synchronous: it loads the Cast
+module out of Google Play services on the main thread. `runCatching` stopped
+it from crashing where Play services is missing; it didn't stop it from
+blocking while Play services tried. The slow case is Play services that's
+present but switched off or out of date, which is common on China-market
+ColorOS units (Jonathan's other OPPO devices are China ROMs). A main thread
+stuck there is "stuck on the logo", and a long enough stall is a
+not-responding kill or, once the playback service has been asked to go
+foreground, a "did not call startForeground" crash.
+
+Now `player/CastSupport` (from GlassPlay) starts Cast with the asynchronous
+overload, `CastContext.getSharedInstance(context, Dispatchers.IO.asExecutor())`,
+which returns a `Task<CastContext>`; the module loads on the IO pool and the
+Task's listeners come back on the main thread. Every step is guarded, so a
+device without Cast never calls back and the phone player stays in charge.
+The playback service starts it (once per process) and builds its
+`CastPlayer` in the callback, if the service is still alive. The device sheet
+also asks for it, in case it opens first. The output-switcher params are now
+built on the router's existing ones (`MediaRouterParams.Builder(current)`)
+instead of replacing them. `initCast()` is gone.
+
+Verifying the overload: Google Maven is blocked from the workspace, so the
+21.5.0 jar couldn't be opened. Google's own Cast sample (CastVideos-android)
+calls `getSharedInstance(context, executor).result` against
+cast-framework 21.4.0, and GlassPlay compiles the same call against 21.5.0.
+`getRouterParams()` and `MediaRouterParams.Builder(MediaRouterParams)` are in
+AndroidX's public mediarouter API.
+
+### The launch mark replaying (brief 2b)
+
+`showSplash` was a plain `remember` in `GlassCastRoot`, and the real UI only
+composed after it flipped, inside a `Crossfade`. So any activity recreation
+the manifest didn't cover played the mark again from the start: a second, the
+420ms crossfade, and only then the first real frame's work. Several in a row
+look like being stuck on the logo. MainActivity's `configChanges` lacked:
+
+- `smallestScreenSize`: split screen, ColorOS floating windows
+- `density`: a display-size or app-scaling change
+- `keyboard`, `navigation`: a keyboard cover attaching
+
+All four are in now. Compose follows each of them without a recreation
+(`AndroidComposeView.onConfigurationChanged` rebuilds its density). Locale
+is still not listed on purpose: `tr()` relies on the recreation.
+
+The mark plays once per process (`GlassCastApp.splashPlayed`, set as it
+starts), so a recreation goes straight to the app. And the app now composes
+underneath it from the first frame: `SplashScreen` is the last child of the
+root `Box`, takes every touch until it's gone, and fades out over 420ms
+after its second. The update check, the notification-permission prompt and an
+OPML arriving from a share all wait for `opened` (when the fade starts)
+instead of the splash being removed.
+
+### The launch screen (brief 2c)
+
+Android 12+ draws its own launch screen until the first frame. GlassCast had
+no `values-v31` theme, so that was the launcher icon on the system's color.
+Now `values-v31` and `values-night-v31` set
+`windowSplashScreenBackground` to the ground and
+`windowSplashScreenAnimatedIcon` to transparent: a plain field, then the mark
+fades in on the same field. It also makes the two stages easy to tell apart:
+a blank field is Android still waiting for the first frame, the mark is the
+app drawing.
+
+While matching the grounds: `ground_dark` (the window background in dark
+mode) was `#0A0A0C`, but the in-app dark ground is `DarkGround0`, `#17171B`.
+That was a small flash on every dark cold start. It's `#17171B` now. The
+launch screen follows the system's dark setting, not the app's, so with the
+app forced to the other theme there's still one change from the launch
+screen to the mark. The bar icons follow the in-app theme and the mark's
+field is the in-app ground, so GlassPlay's `SplashBars` flag isn't needed.
+
+### Other startup work (brief 2d)
+
+- `Downloads` checked `File.exists` for every finished download, through
+  `getExternalFilesDir`, in its constructor, on the main thread. That check
+  now runs on IO; missing files are dropped when it returns.
+- `BackgroundRefresh.apply` (WorkManager, which opens its database) and the
+  crash log's exit scan run on an IO coroutine from `onCreate`. gPodder's
+  launch sync shares the same scope.
+- Left as they are until StrictMode says otherwise: the SharedPreferences
+  opened by `Settings`, `QueueStore`, `Downloads`, `AppUpdater`, gPodder's
+  status and `FeedStore`'s migration check.
+
+### Not changed yet, waiting on evidence
+
+- *Memory (2e).* Only if a report shows `OutOfMemoryError`: then cap
+  `ImageStore`'s cache at an eighth of the heap on large screens and decode
+  at the tile's own size.
+- *144 Hz (2f).* Measure first with `adb shell dumpsys gfxinfo
+  com.glasscast.app framestats` on the `fast` build, then try Haze off, the
+  refresh-rate request off, and offscreen layers only while needed, one at a
+  time. Keep only what measurably helps.
+- *ColorOS (2g).* Look for `ForegroundServiceStartNotAllowedException` and
+  `RemoteServiceException` in a report. Asked Jonathan to allow background
+  activity and auto launch; the README now says how.
+
+### Remembering what was playing
+
+Jonathan noticed GlassPlay still shows the last song after the app is closed
+and reopened, and GlassCast doesn't. GlassCast did have the code for it
+(`QueueStore` mirrors the queue's guids, `restorePersistedQueue` puts them
+back), but it never worked after a cold start. On connecting,
+`PlayerConnection` called `syncQueue()` first, which saved the new service's
+empty playlist over the saved queue, and only then `restorePersistedQueue()`,
+which read back the empty list it had just written. The same empty write
+broke Android Auto and headset resumption, which read `QueueStore` too.
+
+Now:
+
+- The saved queue is read once, when `PlayerConnection` is built, before
+  anything can write to it. It becomes the current episode and Up Next right
+  away, so the mini player is back as soon as the library has loaded (with
+  the saved position on its ring), without waiting for the service.
+- On connecting to an empty player, the queue goes back into it first.
+  `syncQueue` won't save an empty playlist while that's pending, and the
+  ticker and `pullState` leave the remembered progress alone while the
+  player is empty. Restored, not resumed: nothing plays until you press play.
+- A controller whose service has gone is replaced. When the app was swiped
+  away while paused, the service stopped itself but the process could live
+  on, holding a dead controller; `connect()` saw "already connected" and did
+  nothing, so play did nothing either. `MediaController.Listener.onDisconnected`
+  now drops it, and `connect()` also checks `isConnected`.
+
+Playing an episode from a show you don't follow subscribes to it first (that
+was already so), so every queued episode is in the library to restore from.
+
+### Skip buttons: 15 or 30 seconds
+
+Settings > Skip buttons (phone and TV): 15 or 30 seconds, 30 by default
+(`Settings.skipSeconds`). The player's back and forward buttons use it, on
+the phone and the TV, with matching icons and descriptions ("Back {0}
+seconds").
+
+- *Icons.* Material has 5, 10 and 30 second skip icons but no 15.
+  `ic_replay_15` and `ic_forward_15` are built from Material's own shapes:
+  the 10s icon's arrow and 1, with the 5s icon's 5 moved into the 0's place
+  (centered on it, same baseline), so they match `Replay30`/`Forward30`
+  exactly. `ui/SkipIcons.kt` picks the pair.
+- *Everything outside the app.* ExoPlayer and CastPlayer take their skip
+  amounts when they're built, so a setting can't change them. The
+  notification, a headset's rewind and fast-forward keys (most headsets
+  send next and previous instead) and Android Auto skip through the
+  session's `seekBack`/`seekForward`, so the session now gets a `SkipPlayer`
+  (a `ForwardingPlayer`) around whichever player is active, which answers
+  those (and the increments it reports) from the setting each time. Checked
+  against Media3 1.5.1: `ForwardingPlayer`'s `seekBack`, `seekForward` and
+  the increment getters are overridable, and it forwards
+  `canAdvertiseSession`, which `MediaSession` requires.
+- The TV scrubber's left and right stay at 10 seconds; that's scrubbing, not
+  the skip buttons.
+
+### TV, from GlassPlay
+
+- **Focus without the bounce.** `TvFocusIndicationNode` animated with
+  `spring(DampingRatioLowBouncy, StiffnessMediumLow)`, about half a second
+  to settle on every press, so with the D-pad held the whole screen looked
+  like slow motion. Now `tween(140 in, 110 out, FastOutSlowInEasing)`. The
+  ring and the lift are unchanged.
+- **Scrolling that keeps its speed.** Every TV list gets `TvBringIntoView`,
+  provided once at the root of `TvRoot`: scroll only as far as needed to
+  keep a 48dp margin, with `TvScrollSpring` (`spring(dampingRatio = 1f,
+  stiffness = 650f)`), so a new focus mid-scroll carries the speed on. Before,
+  every list but the show page had leanback's default, which pins focus 30%
+  in, jumps rows and slices the first cards. The show page keeps
+  `TvHoldStillSpec` (holds while the header has focus, 10–85% band) and now
+  scrolls with the same spring; before, it set only the distance.
+  `BringIntoViewSpec` and `LocalBringIntoViewSpec` are still
+  `@ExperimentalFoundationApi` in foundation 1.7 (checked against 1.7.3's
+  source); `scrollAnimationSpec` is a member there.
+- **The backdrop holds still while the D-pad is in use.** A key-down in the
+  root's `onPreviewKeyEvent` sets `navigating` (only when it changes, so a
+  held key recomposes nothing) and restarts a job that clears it 900ms after
+  the last press. `LocalTvBackdropMoving provides (!playerOpen &&
+  !navigating)`.
+- **Level bars** on the playing episode's row (GlassPlay's `TvLevelBars`):
+  not ported. Asked Jonathan first.
+
+### Workflow
+
+- `tools/typecheck/`: a real type-check with the Compose plugin against the
+  actual jars. Needs the jars from the Mac's Gradle cache through a linked
+  session (`tools/typecheck/README.md` lists them, Cast in `extra/`). Not
+  run yet: this session wasn't linked to the Mac. The harness was
+  smoke-tested: with the wrong jars it stops and says so, and it only
+  reports clean when the app's classes were actually produced.
+- `tools/l10n.py` regenerates `ui/L10n.kt`'s tables from
+  `docs/translations.txt`; `--check` lists `tr()` text with no translation.
+  Its first run found the two had drifted: translations.txt had straight
+  closing quotes in eleven German strings (`„Suchen"`) where L10n.kt had the
+  right ones (`„Suchen“`). Fixed in translations.txt; the tables are now
+  generated from it, so table order follows the file.
+- Release notes live in `docs/release-notes/<version>.md`, in the README's
+  voice; the text is the GitHub release body.
+- Packaging is `git archive` of a committed tree, so build output never
+  rides along.
+
+## 1.5 — tablets, TV focus, Downloads
 
 Version 1.5 (versionCode 16).
 
@@ -74,7 +873,7 @@ in the error color). Select (top right) turns marks into circles, with
 Select all, Delete (confirmed) and Cancel; Back leaves select mode. Rows
 still downloading keep their cancel button. No auto-delete (Jonathan's call).
 
-## 1.4 (in progress) — Google TV fixes, the living backdrop, the palette, Android Auto, Boost voices
+## 1.4 — Google TV fixes, the living backdrop, the palette, Android Auto, Boost voices
 
 Version 1.4 (versionCode 15). More 1.4 goals to come before release (ad skipping).
 

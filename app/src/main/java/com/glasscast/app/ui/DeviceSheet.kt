@@ -32,6 +32,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -82,6 +83,11 @@ fun DeviceSheet(
             .build()
     }
 
+    // Cast devices are only discovered once the Cast SDK is running. The
+    // playback service normally starts it; this covers the sheet opening
+    // first. A no-op where Cast can't run, and once it's up.
+    LaunchedEffect(Unit) { com.glasscast.app.player.CastSupport.whenReady(context) { } }
+
     var routes by remember { mutableStateOf<List<MediaRouter.RouteInfo>>(emptyList()) }
     var selectedId by remember { mutableStateOf(router?.selectedRoute?.id) }
     var connectingId by remember { mutableStateOf<String?>(null) }
@@ -107,9 +113,8 @@ fun DeviceSheet(
 
     val casting = routes.any { it.id == selectedId }
 
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+    GlassSheet(
+        onDismiss = onDismiss,
         containerColor = surface,
         contentColor = Ink,
         dragHandle = {

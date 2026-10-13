@@ -52,7 +52,8 @@ data class DownloadEntry(
  * claiming an episode is offline when it isn't.
  *
  * Progress is polled (every 0.7s) only while something is actually
- * downloading; with nothing in flight there's no work at all.
+ * downloading, and every 15s while downloads are only waiting for a network;
+ * with nothing in flight there's no work at all.
  */
 class Downloads(private val context: Context) {
 
@@ -60,6 +61,12 @@ class Downloads(private val context: Context) {
     private val prefs = context.getSharedPreferences("glasscast_downloads", Context.MODE_PRIVATE)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var polling: Job? = null
+
+    /** How GlassCast introduces itself to podcast hosts when downloading, with the installed version. */
+    private val userAgent by lazy {
+        val version = runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull()
+        "GlassCast/${version ?: "1"} (Android)"
+    }
 
     private val folder: File
         get() = context.getExternalFilesDir(Environment.DIRECTORY_PODCASTS)
@@ -70,12 +77,19 @@ class Downloads(private val context: Context) {
 
     init {
         // Anything marked done whose file has gone (storage cleanup, a manual
-        // delete) is forgotten; anything in flight resumes being watched.
-        val kept = _entries.value.filterValues { entry ->
-            entry.state != DownloadState.DONE || File(folder, entry.fileName).exists()
+        // delete) is forgotten; anything in flight resumes being watched. The
+        // check is off the main thread: it's a storage lookup plus one
+        // File.exists per download, and this runs during a cold start.
+        scope.launch {
+            val current = _entries.value
+            val missing = withContext(Dispatchers.IO) {
+                current.filterValues { entry ->
+                    entry.state == DownloadState.DONE && !File(folder, entry.fileName).exists()
+                }.keys
+            }
+            if (missing.isNotEmpty()) commit(_entries.value - missing)
+            if (_entries.value.values.any { it.active }) watch()
         }
-        if (kept.size != _entries.value.size) commit(kept)
-        if (kept.values.any { it.active }) watch()
     }
 
     private val DownloadEntry.active get() = state == DownloadState.QUEUED || state == DownloadState.RUNNING
@@ -84,36 +98,76 @@ class Downloads(private val context: Context) {
     private val resolving = mutableSetOf<String>()
 
     fun start(episode: Episode, feed: Feed?) {
+        // Main.immediate: from the UI this runs at once, up to the address lookup.
+        scope.launch { enqueue(episode, feed, unmeteredOnly = false) }
+    }
+
+    /**
+     * Auto-download's downloads (see AutoDownload): each episode at most once
+     * ever, so one deleted by hand stays deleted, and on an unmetered network
+     * only. Returns once they're queued.
+     */
+    suspend fun startAutomatic(items: List<Pair<Episode, Feed?>>) = withContext(Dispatchers.Main.immediate) {
+        for ((episode, feed) in items) {
+            // Checked and marked with no suspension between: two refreshes
+            // finishing together can't both start the same episode.
+            if (episode.guid in autoTried || _entries.value[episode.guid] != null) continue
+            markTried(episode.guid)
+            enqueue(episode, feed, unmeteredOnly = true)
+        }
+    }
+
+    /** Runs on the main thread (scope), which keeps [resolving] single-threaded. */
+    private suspend fun enqueue(episode: Episode, feed: Feed?, unmeteredOnly: Boolean) {
         val existing = _entries.value[episode.guid]
         if (existing != null && existing.state != DownloadState.FAILED) return
         if (!resolving.add(episode.guid)) return
         val name = fileNameFor(episode)
-        scope.launch {
-            val url = withContext(Dispatchers.IO) { resolveRedirects(episode.audioUrl) }
+        val url = try {
+            withContext(Dispatchers.IO) { resolveRedirects(episode.audioUrl) }
+        } finally {
             resolving.remove(episode.guid)
-            val request = DownloadManager.Request(Uri.parse(url))
-                .setTitle(episode.title)
-                .setDescription(feed?.title ?: "GlassCast")
-                .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE)
-                .setDestinationInExternalFilesDir(context, Environment.DIRECTORY_PODCASTS, name)
-                .setAllowedOverRoaming(false)
-                .addRequestHeader("User-Agent", USER_AGENT)
-            val id = runCatching { manager?.enqueue(request) }.getOrNull() ?: return@launch
-            commit(
-                _entries.value + (episode.guid to DownloadEntry(
-                    guid = episode.guid,
-                    feedUrl = episode.feedUrl,
-                    title = episode.title,
-                    downloadId = id,
-                    fileName = name,
-                    state = DownloadState.QUEUED,
-                    progress = 0f,
-                    bytes = 0L,
-                    addedAt = System.currentTimeMillis()
-                ))
-            )
-            watch()
         }
+        val request = DownloadManager.Request(Uri.parse(url))
+            .setTitle(episode.title)
+            .setDescription(feed?.title ?: "GlassCast")
+            .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE)
+            .setDestinationInExternalFilesDir(context, Environment.DIRECTORY_PODCASTS, name)
+            .setAllowedOverRoaming(false)
+            // Auto-downloads wait for Wi-Fi again rather than finishing over
+            // mobile data if the phone leaves it partway.
+            .setAllowedOverMetered(!unmeteredOnly)
+            .addRequestHeader("User-Agent", userAgent)
+        val id = runCatching { manager?.enqueue(request) }.getOrNull() ?: return
+        commit(
+            _entries.value + (episode.guid to DownloadEntry(
+                guid = episode.guid,
+                feedUrl = episode.feedUrl,
+                title = episode.title,
+                downloadId = id,
+                fileName = name,
+                state = DownloadState.QUEUED,
+                progress = 0f,
+                bytes = 0L,
+                addedAt = System.currentTimeMillis()
+            ))
+        )
+        watch()
+    }
+
+    /** Episodes auto-download has started before, newest last; read and written on the main thread. */
+    private val autoTried: MutableSet<String> by lazy {
+        runCatching {
+            val arr = JSONArray(prefs.getString(KEY_AUTO_TRIED, "[]"))
+            (0 until arr.length()).mapTo(LinkedHashSet()) { arr.getString(it) }
+        }.getOrDefault(LinkedHashSet())
+    }
+
+    private fun markTried(guid: String) {
+        autoTried += guid
+        // A few hundred is years of new episodes; the oldest drop off.
+        while (autoTried.size > 500) autoTried.remove(autoTried.first())
+        prefs.edit().putString(KEY_AUTO_TRIED, JSONArray(autoTried.toList()).toString()).apply()
     }
 
     /**
@@ -137,7 +191,7 @@ class Downloads(private val context: Context) {
                     instanceFollowRedirects = false
                     connectTimeout = 10_000
                     readTimeout = 10_000
-                    setRequestProperty("User-Agent", USER_AGENT)
+                    setRequestProperty("User-Agent", userAgent)
                     setRequestProperty("Range", "bytes=0-0")
                 }
             } catch (e: Exception) {
@@ -188,7 +242,14 @@ class Downloads(private val context: Context) {
                     }
                     commit(next)
                 }
-                delay(700)
+                // Quick while something is moving or was just asked for, so
+                // progress shows; slow while downloads only wait for a
+                // network (an auto-download can wait hours for Wi-Fi).
+                val now = System.currentTimeMillis()
+                val busy = _entries.value.values.any {
+                    it.state == DownloadState.RUNNING || (it.active && now - it.addedAt < 60_000L)
+                }
+                delay(if (busy) 700L else 15_000L)
             }
         }
     }
@@ -281,5 +342,4 @@ class Downloads(private val context: Context) {
     }.getOrDefault(emptyMap())
 }
 
-/** How GlassCast introduces itself to podcast hosts when downloading. */
-private const val USER_AGENT = "GlassCast/1.4 (Android)"
+private const val KEY_AUTO_TRIED = "auto_tried"

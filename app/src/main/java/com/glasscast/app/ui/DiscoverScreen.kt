@@ -6,6 +6,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -275,31 +276,15 @@ fun DiscoverScreen(
     }
 
     pendingHide?.let { result ->
-        AlertDialog(
-            onDismissRequest = { pendingHide = null },
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-            titleContentColor = MaterialTheme.colorScheme.onSurface,
-            textContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-            title = { Text(tr("Not interested?"), style = MaterialTheme.typography.titleMedium) },
-            text = {
-                Text(
-                    tr("{0} won't be recommended again.", result.title),
-                    style = MaterialTheme.typography.bodyMedium
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    onNotInterested(result)
-                    pendingHide = null
-                }) {
-                    Text(tr("Not interested"), color = MaterialTheme.colorScheme.error)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { pendingHide = null }) {
-                    Text(tr("Cancel"), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
+        ConfirmSheet(
+            artUrl = result.artworkUrl,
+            title = result.title,
+            subtitle = result.author,
+            meta = if (result.episodeCount > 0) tr("{0} EPISODES", result.episodeCount) else null,
+            action = tr("Not interested"),
+            icon = Icons.Outlined.VisibilityOff,
+            onConfirm = { onNotInterested(result) },
+            onDismiss = { pendingHide = null }
         )
     }
 }

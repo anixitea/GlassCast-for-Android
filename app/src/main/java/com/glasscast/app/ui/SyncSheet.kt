@@ -44,9 +44,8 @@ fun SyncSheet(sync: GPodderSync, onDismiss: () -> Unit) {
     val status by sync.status.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
 
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+    GlassSheet(
+        onDismiss = onDismiss,
         containerColor = MaterialTheme.colorScheme.surfaceContainer,
         contentColor = MaterialTheme.colorScheme.onSurface
     ) {

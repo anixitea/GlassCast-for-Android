@@ -10,7 +10,8 @@ import androidx.work.WorkManager
 import java.util.concurrent.TimeUnit
 
 /**
- * Schedules the background check for new episodes.
+ * Schedules the background check for new episodes (for notifications and
+ * auto-download; see Settings.backgroundRefreshWanted).
  *
  * Every three hours, give or take — podcasts publish daily at most, and a
  * tighter interval only spends battery to notify you a little sooner about

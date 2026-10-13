@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The widget's card: dark purple in the picker's preview, then the
+     cover's color (NowPlayingWidget sets a color filter on it). -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="#FF2E2238" />
+    <corners android:radius="24dp" />
+</shape>

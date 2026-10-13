@@ -4,6 +4,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.material.icons.outlined.LibraryAddCheck
 import com.glasscast.app.data.EpisodeSort
+import com.glasscast.app.data.CrashLog
 import androidx.compose.material.icons.outlined.DownloadForOffline
 import androidx.compose.material.icons.outlined.ThumbDown
 import androidx.compose.animation.core.Spring
@@ -43,7 +44,6 @@ import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
-import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
@@ -55,6 +55,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.outlined.GridView
 import androidx.compose.material.icons.outlined.Inbox
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
@@ -80,11 +85,12 @@ import com.glasscast.app.player.PlayerConnection
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeSource
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.first
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.compose.material.icons.filled.FastForward
 import androidx.compose.foundation.layout.widthIn
 
-private enum class Tab { LIBRARY, LATEST, DOWNLOADS, DISCOVER, SEARCH }
+private enum class Tab { LIBRARY, LATEST, DOWNLOADS, DISCOVER, SEARCH, SETTINGS }
 
 /**
  * Where the content area is. [tab] orders the horizontal slide between tabs;
@@ -103,11 +109,18 @@ private sealed interface Dest {
     data object Downloads : Dest { override val tab = 2; override val depth = 0; override val key = "downloads" }
     data object Discover : Dest { override val tab = 3; override val depth = 0; override val key = "discover" }
     data object Search : Dest { override val tab = 4; override val depth = 0; override val key = "search" }
+    data object Settings : Dest { override val tab = 5; override val depth = 0; override val key = "settings" }
     /** A show you don't follow yet, opened from [tab] — Discover or Search. */
     data class Preview(val fetch: com.glasscast.app.data.FeedFetch, override val tab: Int) : Dest {
         override val depth = 1; override val key = "preview:${fetch.feed.url}"
     }
 }
+
+/** The mini player card's box (MiniPlayer). */
+private val MiniPlayerHeight = 76.dp
+
+/** The bar's strip above the navigation bar: the 60dp pill, 8dp under it, 8dp of air over it. */
+private val TabBarStripHeight = 76.dp
 
 /** Near-critically damped: pages should arrive firmly, not bounce like the tab pill. */
 private fun <T> pageSpring() = androidx.compose.animation.core.spring<T>(
@@ -137,7 +150,10 @@ fun GlassCastRoot(
     onOpmlHandled: () -> Unit = {},
     /** A show to open from a new-episode notification. */
     pendingOpenFeed: String? = null,
-    onOpenFeedHandled: () -> Unit = {}
+    onOpenFeedHandled: () -> Unit = {},
+    /** A launcher shortcut or the widget's card (see Shortcuts). */
+    pendingShortcut: String? = null,
+    onShortcutHandled: () -> Unit = {}
 ) {
     val feeds by feedStore.feeds.collectAsStateWithLifecycle()
     val episodeMap by feedStore.episodes.collectAsStateWithLifecycle()
@@ -157,6 +173,12 @@ fun GlassCastRoot(
     )
     val voiceBoost by settings.voiceBoost.collectAsStateWithLifecycle()
     val skipAds by settings.skipAds.collectAsStateWithLifecycle()
+    val skipSeconds by settings.skipSeconds.collectAsStateWithLifecycle()
+    val glassCastApp = androidx.compose.ui.platform.LocalContext.current.applicationContext as com.glasscast.app.GlassCastApp
+    val bookmarkStore = glassCastApp.bookmarks
+    val allBookmarks by bookmarkStore.all.collectAsStateWithLifecycle()
+    val autoDownloadShows by settings.autoDownload.collectAsStateWithLifecycle()
+    val adaptiveTabBar by settings.adaptiveTabBar.collectAsStateWithLifecycle()
 
     // The service reads this off SleepTimer rather than taking a dependency on
     // Settings, so it has to be mirrored across whenever it changes.
@@ -177,15 +199,21 @@ fun GlassCastRoot(
     val speed by player.speed.collectAsStateWithLifecycle()
     val upNext by player.upNext.collectAsStateWithLifecycle()
 
-    var showSplash by remember { mutableStateOf(true) }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val app = context.applicationContext as com.glasscast.app.GlassCastApp
+
+    // The launch mark: drawn over the app until it has faded, once per
+    // process (see GlassCastApp.splashPlayed). "Opened" is when it starts to
+    // fade; anything that waits for the app to be showing keys off that.
+    var splashDone by remember { mutableStateOf(app.splashPlayed) }
+    var opened by remember { mutableStateOf(app.splashPlayed) }
 
     /*
      * Android 13+ needs permission to post notifications. Asked once, after the
      * splash rather than over it, and only while new-episode notifications are
      * on. Denying leaves the setting on and simply silent; Settings says so.
      */
-    val context = androidx.compose.ui.platform.LocalContext.current
-    val updater = (context.applicationContext as com.glasscast.app.GlassCastApp).updates
+    val updater = app.updates
     val downloadStore = (context.applicationContext as com.glasscast.app.GlassCastApp).downloads
     val gpodder = (context.applicationContext as com.glasscast.app.GlassCastApp).gpodder
     val syncStatus by gpodder.status.collectAsStateWithLifecycle()
@@ -193,15 +221,15 @@ fun GlassCastRoot(
     val downloads by downloadStore.entries.collectAsStateWithLifecycle()
     val updateBanner by updater.banner.collectAsStateWithLifecycle()
     var updateSheetOpen by remember { mutableStateOf(false) }
-    // A quiet check once the splash is gone — at most twice a day.
-    LaunchedEffect(showSplash) {
-        if (!showSplash) updater.checkIfDue()
+    // A quiet check once the app has opened — at most twice a day.
+    LaunchedEffect(opened) {
+        if (opened) updater.checkIfDue()
     }
     val notificationPermission = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
     ) { }
-    LaunchedEffect(showSplash) {
-        if (showSplash) return@LaunchedEffect
+    LaunchedEffect(opened) {
+        if (!opened) return@LaunchedEffect
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU &&
             settings.newEpisodeNotifications.value &&
             !settings.notificationPromptShown &&
@@ -223,12 +251,39 @@ fun GlassCastRoot(
         selectedFeedUrl = url
         onOpenFeedHandled()
     }
+    // Launcher shortcuts and the widget: a tab, or the player.
+    LaunchedEffect(pendingShortcut) {
+        val action = pendingShortcut ?: return@LaunchedEffect
+        when (action) {
+            com.glasscast.app.Shortcuts.RESUME, com.glasscast.app.Shortcuts.OPEN_PLAYER -> {
+                if (action == com.glasscast.app.Shortcuts.RESUME) player.resume()
+                // From a cold start the episode appears once the library has
+                // loaded; nothing saved, and the app just opens.
+                val episode = kotlinx.coroutines.withTimeoutOrNull(3_000) {
+                    player.currentEpisode.first { it != null }
+                }
+                if (episode != null) playerOpen = true
+            }
+            else -> {
+                playerOpen = false
+                tab = when (action) {
+                    com.glasscast.app.Shortcuts.LATEST -> Tab.LATEST
+                    com.glasscast.app.Shortcuts.SEARCH -> Tab.SEARCH
+                    else -> Tab.DOWNLOADS
+                }
+            }
+        }
+        onShortcutHandled()
+    }
 
     // The chrome takes the playing cover's hue. Animated, so moving to an
     // episode with different art re-tints the bar rather than snapping it.
     val nowArt = currentEpisode?.imageUrl?.ifBlank { currentFeed?.imageUrl.orEmpty() }.orEmpty()
     val (nowColors, _) = rememberArtworkColors(nowArt)
-    val chromeTint by animateColorAsState(nowColors.chromeBar, tween(600), label = "chromeBar")
+    // States, read only where they're drawn: a cover change or a page change
+    // fades the bar without recomposing the whole app every frame.
+    val chromeTint = animateColorAsState(nowColors.chromeBar, tween(600), label = "chromeBar")
+    val chromeTintPale = animateColorAsState(nowColors.chromeBarPale, tween(600), label = "chromeBarPale")
 
     // One confirmation pill for the whole app; every queueing path goes
     // through queueEpisode so none of them can forget to answer.
@@ -315,7 +370,6 @@ fun GlassCastRoot(
     )
     var barBounds by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
 
-    var settingsOpen by remember { mutableStateOf(false) }
     var actionEpisode by remember { mutableStateOf<Episode?>(null) }
 
     // A show being browsed from search, held outside the library until added.
@@ -337,6 +391,27 @@ fun GlassCastRoot(
     val selectedFeed = feeds.firstOrNull { it.url == selectedFeedUrl }
     val bottomInset = glassBottomInset(miniPlayerVisible = currentEpisode != null)
 
+    /*
+     * The mini player contrasts with the page under it, as Cider's does: dark
+     * over a light page, pale over a dark one. The page is the one actually
+     * showing: a show (or a preview) has its own ground from its cover, every
+     * other tab the app's. [chromeMix] crossfades between the two versions when
+     * the page changes. The tab bar stays dark unless Adaptive tab bar is on
+     * (Settings > Appearance); then it moves with the card.
+     */
+    val pageArt = when {
+        tab == Tab.LIBRARY && selectedFeed != null -> selectedFeed.imageUrl
+        preview != null && tab == previewTab -> preview?.feed?.imageUrl
+        else -> null
+    }
+    val (pageColors, _) = rememberArtworkColors(pageArt.orEmpty())
+    val pageGround = if (pageArt != null) pageColors.background else MaterialTheme.colorScheme.background
+    val chromeMix = animateFloatAsState(
+        targetValue = if (pageGround.luminance() < 0.4f) 1f else 0f,
+        animationSpec = tween(450),
+        label = "chromeMix"
+    )
+
     val orderedFeeds = remember(feeds, episodeMap, showSort) {
         when (showSort) {
             ShowSort.RECENTLY_UPDATED -> feeds.sortedByDescending { feedStore.latestEpisodeAt(it) }
@@ -344,13 +419,27 @@ fun GlassCastRoot(
         }
     }
 
+    // Which screen is up, for a crash report (CrashLog.noteState): a hang
+    // report then says where it happened.
+    val inPreviewNow = preview != null && tab == previewTab
+    LaunchedEffect(tab, selectedFeedUrl != null, inPreviewNow, playerOpen, isPlaying, splashDone) {
+        CrashLog.noteState(
+            context,
+            buildString {
+                append("phone ").append(tab.name.lowercase())
+                if (selectedFeedUrl != null && tab == Tab.LIBRARY) append(" show")
+                if (inPreviewNow) append(" preview")
+                if (playerOpen) append(" player")
+                if (isPlaying) append(" playing")
+                if (!splashDone) append(" splash")
+            }
+        )
+    }
+
     // Also provided above the theme in MainActivity, for show-colors mode.
     // Providing it again here keeps this composable usable on its own.
     CompositionLocalProvider(LocalImageStore provides imageStore, LocalToast provides toast) {
-        Crossfade(targetState = showSplash, animationSpec = tween(420), label = "splash") { splash ->
-            if (splash) {
-                SplashScreen(onFinished = { showSplash = false })
-            } else {
+        Box(Modifier.fillMaxSize()) {
                 Surface(
                     color = MaterialTheme.colorScheme.background,
                     contentColor = MaterialTheme.colorScheme.onBackground,
@@ -376,6 +465,7 @@ fun GlassCastRoot(
                                 Dest.Preview(preview!!, previewTab.ordinal)
                             tab == Tab.DOWNLOADS -> Dest.Downloads
                             tab == Tab.DISCOVER -> Dest.Discover
+                            tab == Tab.SETTINGS -> Dest.Settings
                             else -> Dest.Search
                         }
 
@@ -453,7 +543,13 @@ fun GlassCastRoot(
                                 playingGuid = currentEpisode?.guid,
                                 isPlaying = isPlaying,
                                 hazeState = hazeState,
-                                downloads = downloads
+                                downloads = downloads,
+                                autoDownload = shown.url in autoDownloadShows,
+                                onAutoDownloadChange = { on ->
+                                    settings.setAutoDownload(shown.url, on)
+                                    // An episode from the last half day starts now (on Wi-Fi).
+                                    if (on) scope.launch { glassCastApp.autoDownload.run() }
+                                }
                             ) }
 
                             Dest.Library -> SubscriptionsScreen(
@@ -462,7 +558,6 @@ fun GlassCastRoot(
                                 refreshing = refreshing,
                                 bottomInset = bottomInset,
                                 onOpenFeed = { selectedFeedUrl = it.url },
-                                onOpenSettings = { settingsOpen = true },
                                 onSearch = { librarySearchOpen = true },
                                 hazeState = hazeState
                             )
@@ -569,6 +664,22 @@ fun GlassCastRoot(
                                 }
                             )
 
+                            Dest.Settings -> SettingsScreen(
+                                settings = settings,
+                                appVersion = updater.currentVersion,
+                                onCheckUpdates = {
+                                    if (updater.state.value !is com.glasscast.app.update.UpdateState.Available) {
+                                        updater.check(manual = true)
+                                    }
+                                    updateSheetOpen = true
+                                },
+                                onOpenOpml = { opmlOpen = true },
+                                onOpenSync = { syncOpen = true },
+                                syncConnected = syncStatus.connected,
+                                bottomInset = bottomInset,
+                                hazeState = hazeState
+                            )
+
                             Dest.Search -> SearchScreen(
                                 store = feedStore,
                                 subscribed = feeds,
@@ -606,10 +717,20 @@ fun GlassCastRoot(
                         }
 
                         // Chrome floats over the page, outside the haze source.
+                        // The blur reaches exactly as high as the chrome: the
+                        // bar's strip always, the card only while it's a card,
+                        // shrinking with the collapse. It used to stay card-tall
+                        // once the card had become the bubble, leaving a band of
+                        // frosted page above the bar with nothing in front of it.
+                        val navInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+                        val miniVisible = currentEpisode != null && !playerOpen
                         BottomGlassFade(
                             hazeState = hazeState,
                             pageColor = MaterialTheme.colorScheme.background,
-                            height = bottomInset + 20.dp,
+                            height = {
+                                val card = if (miniVisible) MiniPlayerHeight * (1f - collapseAnim.value.coerceIn(0f, 1f)) else 0.dp
+                                navInset + TabBarStripHeight + card
+                            },
                             modifier = Modifier.align(Alignment.BottomCenter)
                         )
 
@@ -644,19 +765,32 @@ fun GlassCastRoot(
                                         durationMs = durationMs,
                                         collapse = collapseAnim,
                                         collapsed = collapsed,
+                                        pale = chromeMix,
                                         barBounds = { barBounds },
                                         onPlayPause = player::togglePlayPause,
                                         onOpen = { playerOpen = true },
-                                        modifier = Modifier.fillMaxWidth()
+                                        // The card takes every touch that lands on
+                                        // it, gaps included, so nothing behind it
+                                        // opens. As the bubble it takes none: the
+                                        // page above the bar is there to be touched.
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .then(if (!collapsed) Modifier.pointerInput(Unit) {} else Modifier)
                                     )
                                     }
                                     }
                                 }
                             }
 
+                            // The bar's whole strip takes its own touches, the
+                            // gutters and the gesture area below it included: a
+                            // tap just beside the pill used to open whatever tile
+                            // was behind it. A node with pointer input stops the
+                            // siblings under it from being hit at all.
                             Row(
                                 Modifier
                                     .fillMaxWidth()
+                                    .pointerInput(Unit) {}
                                     .navigationBarsPadding(),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
@@ -679,10 +813,21 @@ fun GlassCastRoot(
                                     GlassTab(tr("Latest"), Icons.Outlined.Inbox),
                                     GlassTab(tr("Downloads"), Icons.Outlined.DownloadForOffline),
                                     GlassTab(tr("Discover"), Icons.Outlined.Explore),
-                                    GlassTab(tr("Search"), Icons.Filled.Search)
+                                    GlassTab(tr("Search"), Icons.Filled.Search),
+                                    GlassTab(tr("Settings"), Icons.Outlined.Settings)
                                 ),
                                 selectedIndex = tab.ordinal,
-                                tint = chromeTint,
+                                // Dark, as Cider's. With Adaptive tab bar on
+                                // (Settings > Appearance) it follows the mini
+                                // player to its pale version over a dark page.
+                                tint = {
+                                    if (adaptiveTabBar) androidx.compose.ui.graphics.lerp(chromeTint.value, chromeTintPale.value, chromeMix.value)
+                                    else chromeTint.value
+                                },
+                                content = {
+                                    if (adaptiveTabBar) androidx.compose.ui.graphics.lerp(BarContentLight, ChromeInk, chromeMix.value)
+                                    else BarContentLight
+                                },
                                 hazeState = hazeState,
                                 onTabSelected = { index ->
                                     when (index) {
@@ -698,10 +843,11 @@ fun GlassCastRoot(
                                             if (tab == Tab.DISCOVER && previewTab == Tab.DISCOVER) preview = null
                                             tab = Tab.DISCOVER
                                         }
-                                        else -> {
+                                        4 -> {
                                             if (tab == Tab.SEARCH && previewTab == Tab.SEARCH) preview = null
                                             tab = Tab.SEARCH
                                         }
+                                        else -> tab = Tab.SETTINGS
                                     }
                                 }
                             )
@@ -793,6 +939,7 @@ fun GlassCastRoot(
                                 onPlayPause = player::togglePlayPause,
                                 onSeekTo = player::seekTo,
                                 onSeekBy = player::seekBy,
+                                skipSeconds = skipSeconds,
                                 onSpeedChange = player::setSpeed,
                                 upNextCount = upNext.size,
                                 upNext = upNext,
@@ -811,6 +958,20 @@ fun GlassCastRoot(
                                 onSkipAdsChange = settings::setSkipAds,
                                 onShakeToggle = settings::setShakeToRestart,
                                 onCollapse = { playerOpen = false },
+                                bookmarks = remember(allBookmarks, episode.guid) {
+                                    allBookmarks.filter { it.guid == episode.guid }.sortedBy { it.positionMs }
+                                },
+                                onAddBookmark = { bookmarkStore.add(episode.guid, player.positionMs.value).id },
+                                onBookmarkMemo = bookmarkStore::setMemo,
+                                onRemoveBookmark = bookmarkStore::remove,
+                                onOpenShow = {
+                                    // Its show's page, under the closing player.
+                                    feedStore.feedFor(episode)?.let { show ->
+                                        tab = Tab.LIBRARY
+                                        selectedFeedUrl = show.url
+                                        playerOpen = false
+                                    }
+                                },
                                 download = downloads[episode.guid],
                                 onDownload = {
                                     downloadStore.start(episode, feedStore.feedFor(episode))
@@ -829,34 +990,15 @@ fun GlassCastRoot(
                                     }
                     }
                 }
-            }
-        }
 
-        if (settingsOpen) {
-            SettingsSheet(
-                settings = settings,
-                theme = theme,
-                sort = sort,
-                showSort = showSort,
-                appVersion = updater.currentVersion,
-                onCheckUpdates = {
-                    settingsOpen = false
-                    if (updater.state.value !is com.glasscast.app.update.UpdateState.Available) {
-                        updater.check(manual = true)
-                    }
-                    updateSheetOpen = true
-                },
-                onOpenOpml = {
-                    settingsOpen = false
-                    opmlOpen = true
-                },
-                onOpenSync = {
-                    settingsOpen = false
-                    syncOpen = true
-                },
-                syncConnected = syncStatus.connected,
-                onDismiss = { settingsOpen = false }
-            )
+            // Last, so it's drawn over the app that's already composed under it.
+            if (!splashDone) {
+                SplashScreen(
+                    onOpening = { opened = true },
+                    onFinished = { splashDone = true }
+                )
+                LaunchedEffect(Unit) { app.splashPlayed = true }
+            }
         }
 
         if (syncOpen) {
@@ -869,7 +1011,7 @@ fun GlassCastRoot(
 
         // A shared OPML opens this by itself — arriving from AntennaPod's share
         // sheet should land on the import, not on the library.
-        if (opmlOpen || pendingOpml != null) {
+        if (opmlOpen || (pendingOpml != null && opened)) {
             OpmlSheet(
                 store = feedStore,
                 pendingUri = pendingOpml,

@@ -1,0 +1,17 @@
+<resources>
+    <!--
+      Android 12 and later draw their own launch screen until the app's first
+      frame. Without this it showed the launcher icon on the system's color.
+      It's now the plain ground the in-app mark appears on, with no icon (a
+      transparent one), so the handover has nothing to jump. It also tells the
+      two stages apart: a blank field is Android waiting for the first frame,
+      the mark means the app is drawing.
+    -->
+    <style name="Theme.GlassCast" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/ground_light</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:windowSplashScreenBackground">@color/ground_light</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@android:color/transparent</item>
+    </style>
+</resources>

@@ -43,6 +43,8 @@ import dev.chrisbanes.haze.HazeInputScale
 import dev.chrisbanes.haze.hazeEffect
 import dev.chrisbanes.haze.materials.ExperimentalHazeMaterialsApi
 import dev.chrisbanes.haze.materials.HazeMaterials
+import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.layout.layout
 
 /** Side inset for floating chrome, so the page shows past it on both edges. */
 val GlassGutter = 14.dp
@@ -140,7 +142,8 @@ fun TopGlassFade(
 fun BottomGlassFade(
     hazeState: HazeState,
     pageColor: Color,
-    height: Dp,
+    /** Read while measuring, so a height that animates re-lays this out without recomposing. */
+    height: () -> Dp,
     modifier: Modifier = Modifier
 ) {
     /*
@@ -152,7 +155,11 @@ fun BottomGlassFade(
     Box(
         modifier
             .fillMaxWidth()
-            .height(height)
+            .layout { measurable, constraints ->
+                val h = height().roundToPx().coerceAtLeast(0)
+                val placeable = measurable.measure(Constraints.fixed(constraints.maxWidth, h))
+                layout(placeable.width, h) { placeable.place(0, 0) }
+            }
             .hazeEffect(state = hazeState, style = HazeMaterials.ultraThin(pageColor)) {
                 progressive = HazeProgressive.verticalGradient(
                     startIntensity = 0f,

@@ -35,8 +35,12 @@ internal fun softened(source: Bitmap, width: Int = 32, radius: Int = 2, passes: 
  * [aspect] = height ÷ width), with its own vertical reflection underneath —
  * the pair the player's backdrop is made of — softened as one image, so the
  * blur runs across the seam instead of stopping at it.
+ *
+ * [reach] is the whole image's length over the cover's: 2 is the cover and
+ * its reflection at the same size. More stretches the reflection to fill a
+ * screen longer than twice the cover, so the backdrop has no end to show.
  */
-internal fun softenedMirror(source: Bitmap, aspect: Float, width: Int = 48, radius: Int = 2, passes: Int = 3): Bitmap {
+internal fun softenedMirror(source: Bitmap, aspect: Float, reach: Float = 2f, width: Int = 48, radius: Int = 2, passes: Int = 3): Bitmap {
     val cropW: Int
     val cropH: Int
     if (source.height.toFloat() / source.width >= aspect) {
@@ -50,15 +54,18 @@ internal fun softenedMirror(source: Bitmap, aspect: Float, width: Int = 48, radi
     val top = (source.height - cropH) / 2
 
     val half = (width * aspect).toInt().coerceAtLeast(8)
-    val pair = Bitmap.createBitmap(width, half * 2, Bitmap.Config.ARGB_8888)
+    val total = (half * reach).toInt().coerceAtLeast(half * 2)
+    val pair = Bitmap.createBitmap(width, total, Bitmap.Config.ARGB_8888)
     val canvas = Canvas(pair)
     val paint = Paint(Paint.FILTER_BITMAP_FLAG)
     val src = Rect(left, top, left + cropW, top + cropH)
     canvas.drawBitmap(source, src, Rect(0, 0, width, half), paint)
     // The reflection: the same crop, flipped about the seam (y = half), so the
-    // crop's bottom row lands at the seam and its top row at the foot.
+    // crop's bottom row lands at the seam and its top row at the foot, which
+    // is the image's bottom edge however far that is.
+    val stretch = (total - half).toFloat() / half
     canvas.save()
-    canvas.concat(Matrix().apply { setScale(1f, -1f, 0f, half.toFloat()) })
+    canvas.concat(Matrix().apply { setScale(1f, -stretch, 0f, half.toFloat()) })
     canvas.drawBitmap(source, src, Rect(0, 0, width, half), paint)
     canvas.restore()
     return blurred(pair, radius, passes)
@@ -68,9 +75,9 @@ internal fun softenedMirror(source: Bitmap, aspect: Float, width: Int = 48, radi
  * [softenedMirror] turned on its side, for the landscape player: the cover
  * with its reflection to the right — flipped about the right edge — softened
  * as one image, so the blur runs across the seam toward the controls.
- * [aspect] is the cover band's height over its width.
+ * [aspect] is the cover band's height over its width; [reach] as there.
  */
-internal fun softenedMirrorSideways(source: Bitmap, aspect: Float, height: Int = 48, radius: Int = 2, passes: Int = 3): Bitmap {
+internal fun softenedMirrorSideways(source: Bitmap, aspect: Float, reach: Float = 2f, height: Int = 48, radius: Int = 2, passes: Int = 3): Bitmap {
     val cropW: Int
     val cropH: Int
     if (source.height.toFloat() / source.width >= aspect) {
@@ -84,13 +91,15 @@ internal fun softenedMirrorSideways(source: Bitmap, aspect: Float, height: Int =
     val top = (source.height - cropH) / 2
 
     val half = (height / aspect).toInt().coerceAtLeast(8)
-    val pair = Bitmap.createBitmap(half * 2, height, Bitmap.Config.ARGB_8888)
+    val total = (half * reach).toInt().coerceAtLeast(half * 2)
+    val pair = Bitmap.createBitmap(total, height, Bitmap.Config.ARGB_8888)
     val canvas = Canvas(pair)
     val paint = Paint(Paint.FILTER_BITMAP_FLAG)
     val src = Rect(left, top, left + cropW, top + cropH)
     canvas.drawBitmap(source, src, Rect(0, 0, half, height), paint)
+    val stretch = (total - half).toFloat() / half
     canvas.save()
-    canvas.concat(Matrix().apply { setScale(-1f, 1f, half.toFloat(), 0f) })
+    canvas.concat(Matrix().apply { setScale(-stretch, 1f, half.toFloat(), 0f) })
     canvas.drawBitmap(source, src, Rect(0, 0, half, height), paint)
     canvas.restore()
     return blurred(pair, radius, passes)

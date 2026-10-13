@@ -815,12 +815,15 @@ fun TvShowScreen(
 }
 
 /**
- * Scroll only when the focused item leaves a comfortable band (10%–85% of the
- * list), and not at all while [holding] — replaces the TV's default of pinning
- * every focused item at 30%.
+ * The show page's own: scroll only when the focused item leaves a comfortable
+ * band (10%–85% of the list), and not at all while [holding] (the header has
+ * focus). Same scroll motion as everywhere else (TvScrollSpring); before, this
+ * one set only the distance and scrolled with the default animation.
  */
 @OptIn(ExperimentalFoundationApi::class)
 private class TvHoldStillSpec(private val holding: () -> Boolean) : BringIntoViewSpec {
+    override val scrollAnimationSpec: androidx.compose.animation.core.AnimationSpec<Float> = TvScrollSpring
+
     override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float {
         if (holding()) return 0f
         val top = containerSize * 0.10f
@@ -1127,6 +1130,21 @@ fun TvSettingsScreen(
             }
         }
 
+        item {
+            val skipSeconds by settings.skipSeconds.collectAsStateWithLifecycle()
+            TvSettingGroup(tr("SKIP BUTTONS"), colors) {
+                listOf(15, 30).forEach { seconds ->
+                    TvPillButton(
+                        label = tr("{0} seconds", seconds),
+                        icon = null,
+                        colors = colors,
+                        filled = skipSeconds == seconds,
+                        onClick = { settings.setSkipSeconds(seconds) }
+                    )
+                }
+            }
+        }
+
         item { TvSyncSettings(colors) }
         item {
             // In-app updates: the TV is where sideloading hurts most, so the
@@ -1217,16 +1235,6 @@ fun TvSettingsScreen(
                     onClick = { settings.setVoiceBoost(!voiceBoost) }
                 )
             }
-        }
-
-        item {
-            Text(
-                text = "Appearance follows the artwork here. Add shows from Search " +
-                    "— by name, or by pasting a feed URL. This box keeps its own " +
-                    "library; it does not sync with the phone.",
-                style = MaterialTheme.typography.bodySmall,
-                color = colors.contentVariant
-            )
         }
     }
 }

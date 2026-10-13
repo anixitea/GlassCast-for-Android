@@ -30,6 +30,9 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.DownloadForOffline
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
@@ -105,6 +108,9 @@ fun FeedScreen(
     playingGuid: String? = null,
     isPlaying: Boolean = false,
     downloads: Map<String, com.glasscast.app.data.DownloadEntry> = emptyMap(),
+    /** Whether this show downloads new episodes on Wi-Fi; null hides the switch (a preview). */
+    autoDownload: Boolean = false,
+    onAutoDownloadChange: ((Boolean) -> Unit)? = null,
     hazeState: HazeState
 ) {
     val scope = rememberCoroutineScope()
@@ -437,8 +443,10 @@ fun FeedScreen(
             )
         }
 
-        // Show info, the back button's twin on the right.
-        if (feed.description.isNotBlank() || feed.categories.isNotEmpty()) {
+        // Show info, the back button's twin on the right. Also where the
+        // show's own setting lives, so it's always there for a followed show.
+        val showSettings = subscribed && onAutoDownloadChange != null
+        if (feed.description.isNotBlank() || feed.categories.isNotEmpty() || showSettings) {
             Box(
                 Modifier
                     .align(Alignment.TopEnd)
@@ -458,23 +466,39 @@ fun FeedScreen(
                 )
             }
         }
-        if (showInfo) ShowInfoSheet(feed, episodes.size, washColors) { showInfo = false }
+        if (showInfo) {
+            ShowInfoSheet(
+                feed = feed,
+                episodeCount = episodes.size,
+                colors = washColors,
+                autoDownload = autoDownload,
+                onAutoDownloadChange = onAutoDownloadChange.takeIf { showSettings },
+                onDismiss = { showInfo = false }
+            )
+        }
     }
 }
 
 /**
  * Show info, from the (i) on the show page: cover, name and publisher, the
- * episode count and categories, and the feed's description in full — the
- * header has room for a few lines of it at most. In the show's own colors.
+ * episode count, the show's own setting (auto-download), the categories, and
+ * the feed's description in full — the header has room for a few lines of it
+ * at most. In the show's own colors.
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
-private fun ShowInfoSheet(feed: Feed, episodeCount: Int, colors: ArtworkColors, onDismiss: () -> Unit) {
+private fun ShowInfoSheet(
+    feed: Feed,
+    episodeCount: Int,
+    colors: ArtworkColors,
+    autoDownload: Boolean,
+    onAutoDownloadChange: ((Boolean) -> Unit)?,
+    onDismiss: () -> Unit
+) {
     val ink = if (colors.background.luminance() > 0.5f) Color(0xFF16141A) else Color.White
     val description = remember(feed.description) { stripHtml(feed.description) }
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+    GlassSheet(
+        onDismiss = onDismiss,
         containerColor = colors.background,
         contentColor = ink
     ) {
@@ -515,6 +539,15 @@ private fun ShowInfoSheet(feed: Feed, episodeCount: Int, colors: ArtworkColors, 
                 style = MaterialTheme.typography.labelMedium,
                 color = ink.copy(alpha = 0.6f)
             )
+            if (onAutoDownloadChange != null) {
+                Spacer(Modifier.height(16.dp))
+                AutoDownloadCard(
+                    checked = autoDownload,
+                    ink = ink,
+                    accent = colors.accent,
+                    onChange = onAutoDownloadChange
+                )
+            }
             if (feed.categories.isNotEmpty()) {
                 Spacer(Modifier.height(12.dp))
                 FlowRow(
@@ -539,6 +572,61 @@ private fun ShowInfoSheet(feed: Feed, episodeCount: Int, colors: ArtworkColors, 
                 Text(description, style = MaterialTheme.typography.bodyLarge, color = ink.copy(alpha = 0.86f))
             }
         }
+    }
+}
+
+/**
+ * The show's auto-download switch, as a Settings row (badge, label, switch)
+ * on a card in the sheet's ink, since the sheet takes the show's colors.
+ */
+@Composable
+private fun AutoDownloadCard(checked: Boolean, ink: Color, accent: Color, onChange: (Boolean) -> Unit) {
+    val haptics = rememberHaptics()
+    fun flip(to: Boolean) {
+        haptics.play(if (to) Haptic.ToggleOn else Haptic.ToggleOff)
+        onChange(to)
+    }
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(22.dp))
+            .background(ink.copy(alpha = 0.08f))
+            .clickable { flip(!checked) }
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        IconBadge(Icons.Filled.DownloadForOffline, Badge.Green)
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                tr("Download new episodes"),
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Medium,
+                color = ink,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                tr("Wi-Fi only"),
+                style = MaterialTheme.typography.bodySmall,
+                color = ink.copy(alpha = 0.6f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        Spacer(Modifier.width(10.dp))
+        Switch(
+            checked = checked,
+            onCheckedChange = { flip(it) },
+            colors = SwitchDefaults.colors(
+                checkedTrackColor = accent,
+                checkedThumbColor = if (accent.luminance() > 0.6f) Color(0xFF16141A) else Color.White,
+                checkedBorderColor = accent,
+                uncheckedTrackColor = ink.copy(alpha = 0.12f),
+                uncheckedThumbColor = ink.copy(alpha = 0.6f),
+                uncheckedBorderColor = ink.copy(alpha = 0.3f)
+            )
+        )
     }
 }
 

@@ -1,13 +1,19 @@
 package com.glasscast.app.player
 
 import android.content.Context
+import android.content.Intent
 import android.os.Bundle
+import android.view.KeyEvent
+import androidx.core.content.IntentCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.session.LibraryResult
 import androidx.media3.session.MediaLibraryService.LibraryParams
 import androidx.media3.session.MediaLibraryService.MediaLibrarySession
 import androidx.media3.session.MediaSession
+import androidx.media3.session.SessionCommand
+import androidx.media3.session.SessionError
+import androidx.media3.session.SessionResult
 import com.glasscast.app.GlassCastApp
 import com.glasscast.app.data.DownloadState
 import com.glasscast.app.data.Episode
@@ -43,10 +49,14 @@ import kotlinx.coroutines.launch
  *
  * Every answer waits for the library to load from disk first: Auto can
  * connect in a car before the app has been opened since the phone started.
+ *
+ * It's also the session's callback for two things outside the library: the
+ * car's back and forward buttons ([CarButtons]), and headset buttons.
  */
 internal class AutoLibrary(
     private val context: Context,
-    private val scope: CoroutineScope
+    private val scope: CoroutineScope,
+    private val carButtons: CarButtons
 ) : MediaLibrarySession.Callback {
 
     private val app get() = context.applicationContext as GlassCastApp
@@ -61,6 +71,75 @@ internal class AutoLibrary(
             }.onSuccess { future.set(it) }.onFailure { future.setException(it) }
         }
         return future
+    }
+
+    // --------------------------------------------------------------- connect
+
+    override fun onConnect(
+        session: MediaSession,
+        controller: MediaSession.ControllerInfo
+    ): MediaSession.ConnectionResult {
+        if (session.isAutoCompanionController(controller) || session.isAutomotiveController(controller)) {
+            carButtons.carConnected()
+        }
+        // Every controller may use the skip buttons, the media notification's
+        // included: the system's copy of the session only lists buttons that
+        // controller is allowed.
+        val commands = MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS.buildUpon()
+            .add(CarButtons.SKIP_BACK)
+            .add(CarButtons.SKIP_FORWARD)
+            .build()
+        return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
+            .setAvailableSessionCommands(commands)
+            .build()
+    }
+
+    override fun onCustomCommand(
+        session: MediaSession,
+        controller: MediaSession.ControllerInfo,
+        customCommand: SessionCommand,
+        args: Bundle
+    ): ListenableFuture<SessionResult> {
+        when (customCommand.customAction) {
+            CarButtons.SKIP_BACK.customAction -> session.player.seekBack()
+            CarButtons.SKIP_FORWARD.customAction -> session.player.seekForward()
+            else -> return Futures.immediateFuture(SessionResult(SessionError.ERROR_NOT_SUPPORTED))
+        }
+        return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+    }
+
+    /**
+     * Headset buttons. Most headphones send next and previous (a double and
+     * triple tap, or a long press), which in a podcast jump to another
+     * episode. With the setting on (the default) they skip back and forward
+     * instead, by the skip setting (see SkipPlayer). A one-button wired
+     * headset's double click is still next: Media3 turns that into next
+     * after this callback.
+     *
+     * The notification's own buttons arrive here too on older Android, as the
+     * media notification controller; those keep their meaning.
+     */
+    override fun onMediaButtonEvent(
+        session: MediaSession,
+        controllerInfo: MediaSession.ControllerInfo,
+        intent: Intent
+    ): Boolean {
+        if (!app.settings.headphoneSkip.value) return false
+        if (session.isMediaNotificationController(controllerInfo)) return false
+        val event = IntentCompat.getParcelableExtra(intent, Intent.EXTRA_KEY_EVENT, KeyEvent::class.java)
+            ?: return false
+        if (event.action != KeyEvent.ACTION_DOWN) return false
+        return when (event.keyCode) {
+            KeyEvent.KEYCODE_MEDIA_NEXT, KeyEvent.KEYCODE_MEDIA_SKIP_FORWARD -> {
+                session.player.seekForward()
+                true
+            }
+            KeyEvent.KEYCODE_MEDIA_PREVIOUS, KeyEvent.KEYCODE_MEDIA_SKIP_BACKWARD -> {
+                session.player.seekBack()
+                true
+            }
+            else -> false
+        }
     }
 
     // ---------------------------------------------------------------- browse

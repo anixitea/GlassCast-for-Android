@@ -108,12 +108,11 @@ fun OpmlSheet(
         }
     }
 
-    ModalBottomSheet(
-        onDismissRequest = {
+    GlassSheet(
+        onDismiss = {
             store.clearImportProgress()
             onDismiss()
         },
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = MaterialTheme.colorScheme.surfaceContainer,
         contentColor = MaterialTheme.colorScheme.onSurface
     ) {

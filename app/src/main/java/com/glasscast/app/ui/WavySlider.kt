@@ -69,7 +69,9 @@ fun WavySlider(
     voice: (() -> Float)? = null,
     /** Stretches drawn in [markColor] — ad breaks — as fractions of the whole. */
     marks: List<ClosedFloatingPointRange<Float>> = emptyList(),
-    markColor: Color = color
+    markColor: Color = color,
+    /** Points marked with a small dot under the line (bookmarks), as fractions of the whole. */
+    ticks: List<Float> = emptyList()
 ) {
     var dragging by remember { mutableStateOf(false) }
     var local by remember { mutableStateOf(0f) }
@@ -184,6 +186,15 @@ fun WavySlider(
                         cap = StrokeCap.Round
                     )
                 }
+            }
+        }
+
+        // Bookmarks: a dot under the line at each.
+        if (ticks.isNotEmpty()) {
+            val r = 2.dp.toPx()
+            val y = (size.height - r).coerceAtLeast(cy)
+            ticks.forEach { t ->
+                if (t in 0f..1f) drawCircle(color.copy(alpha = 0.75f), radius = r, center = Offset(t * w, y))
             }
         }
 

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A launcher shortcut's icon: the app icon's purple behind a white glyph,
+     so the launcher can mask it to its own shape like the app icon. -->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@drawable/ic_launcher_background" />
+    <foreground android:drawable="@drawable/ic_shortcut_downloads_fg" />
+</adaptive-icon>

@@ -26,6 +26,7 @@ import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
@@ -80,7 +81,6 @@ fun SubscriptionsScreen(
     refreshing: Boolean,
     bottomInset: androidx.compose.ui.unit.Dp,
     onOpenFeed: (Feed) -> Unit,
-    onOpenSettings: () -> Unit,
     /** Opens the library filter — the Search tab is where the internet lives. */
     onSearch: () -> Unit,
     hazeState: HazeState
@@ -114,15 +114,13 @@ fun SubscriptionsScreen(
         }
     }
 
-    // Large title collapses into the bar. Fully faded by ~72dp of scroll.
-    // Kept as a State and read in layers, not in composition: read directly,
-    // it rebuilt this whole screen on every frame of the first 190px of scroll.
-    val collapse = remember {
-        androidx.compose.runtime.derivedStateOf {
-            if (gridState.firstVisibleItemIndex > 0) 1f
-            else (gridState.firstVisibleItemScrollOffset / 190f).coerceIn(0f, 1f)
-        }
-    }
+    // Large title collapses into the bar over 100dp of scroll. Kept as a
+    // State and read in layers, not in composition: read directly, it rebuilt
+    // this whole screen on every frame of the scroll.
+    val collapse = rememberTitleCollapse(
+        { gridState.firstVisibleItemIndex },
+        { gridState.firstVisibleItemScrollOffset }
+    )
     // The search field has scrolled away: its icon joins the pill. A boolean,
     // so this recomposes once at the crossing, not per frame.
     val searchInBar by remember { androidx.compose.runtime.derivedStateOf { collapse.value > 0.6f } }
@@ -164,7 +162,10 @@ fun SubscriptionsScreen(
                     Text(
                         text = tr("Podcasts"),
                         style = MaterialTheme.typography.displaySmall,
-                        color = MaterialTheme.colorScheme.onBackground
+                        color = MaterialTheme.colorScheme.onBackground,
+                        // Gone before the bar's title arrives, so the two
+                        // never show at once.
+                        modifier = Modifier.bigTitleFade { collapse.value }
                     )
                     Spacer(Modifier.height(14.dp))
                     // Below the title, not above it: the page should still say
@@ -254,7 +255,6 @@ fun SubscriptionsScreen(
                     scope.launch { store.refreshAll() }
                 }
                 BarButton(Icons.Filled.Add, tr("Add by RSS")) { showAdd = true }
-                BarButton(Icons.Filled.Tune, tr("Settings"), onClick = onOpenSettings)
             }
         }
     }
@@ -267,31 +267,15 @@ fun SubscriptionsScreen(
     }
 
     pendingDelete?.let { feed ->
-        AlertDialog(
-            onDismissRequest = { pendingDelete = null },
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-            titleContentColor = MaterialTheme.colorScheme.onSurface,
-            textContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-            title = { Text(tr("Unsubscribe?"), style = MaterialTheme.typography.titleMedium) },
-            text = {
-                Text(
-                    tr("{0} and its downloaded episode list will be removed.", feed.title),
-                    style = MaterialTheme.typography.bodyMedium
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    scope.launch { store.unsubscribe(feed) }
-                    pendingDelete = null
-                }) {
-                    Text(tr("Unsubscribe"), color = MaterialTheme.colorScheme.error)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { pendingDelete = null }) {
-                    Text(tr("Cancel"), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
+        ConfirmSheet(
+            artUrl = feed.imageUrl,
+            title = feed.title,
+            subtitle = feed.author,
+            meta = store.episodesFor(feed.url).size.takeIf { it > 0 }?.let { tr("{0} EPISODES", it) },
+            action = tr("Unsubscribe"),
+            icon = Icons.Outlined.DeleteOutline,
+            onConfirm = { scope.launch { store.unsubscribe(feed) } },
+            onDismiss = { pendingDelete = null }
         )
     }
 }

@@ -1,5 +1,14 @@
 package com.glasscast.app.ui
 
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
 import android.os.Build
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.spring
@@ -168,9 +177,8 @@ fun UpdateSheet(updater: AppUpdater, onDismiss: () -> Unit) {
         else -> null
     }
 
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    GlassSheet(
+        onDismiss = onDismiss,
     ) {
         Column(
             Modifier
@@ -195,21 +203,31 @@ fun UpdateSheet(updater: AppUpdater, onDismiss: () -> Unit) {
             )
 
             if (release != null) {
-                val notes = remember(release.notes) { plainNotes(release.notes) }
-                if (notes.isNotBlank()) {
+                val blocks = remember(release.notes) { noteBlocks(release.notes) }
+                if (blocks.isNotEmpty()) {
                     Spacer(Modifier.height(16.dp))
-                    Text(
-                        text = notes,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier
+                    val pictures = blocks.any { it is NoteBlock.Picture }
+                    Column(
+                        Modifier
                             .fillMaxWidth()
-                            .heightIn(max = 260.dp)
+                            .heightIn(max = if (pictures) 420.dp else 260.dp)
                             .clip(RoundedCornerShape(16.dp))
                             .background(MaterialTheme.colorScheme.surfaceContainerHigh)
                             .verticalScroll(rememberScrollState())
-                            .padding(16.dp)
-                    )
+                            .padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        blocks.forEach { block ->
+                            when (block) {
+                                is NoteBlock.Words -> Text(
+                                    text = block.text,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                is NoteBlock.Picture -> NotePicture(block)
+                            }
+                        }
+                    }
                 }
             }
 
@@ -302,7 +320,86 @@ private fun ActionButton(label: String, onClick: () -> Unit) {
 private fun formatSize(bytes: Long): String =
     if (bytes >= 1_000_000) String.format("%.1f MB", bytes / 1_000_000.0) else "${bytes / 1000} KB"
 
-/** Release notes are Markdown; this is enough to read them as text. */
+/**
+ * An image attached to the release, at its own shape, rounded like the box.
+ * Loaded through the artwork pipeline (so it's cached and downsampled to the
+ * sheet's width); a placeholder holds its place meanwhile, and one that won't
+ * load leaves nothing behind.
+ */
+@Composable
+private fun NotePicture(picture: NoteBlock.Picture) {
+    val store = LocalImageStore.current
+    val widthPx = with(LocalDensity.current) { LocalConfiguration.current.screenWidthDp.dp.roundToPx() }
+        .coerceIn(320, 1080)
+    var bitmap by remember(picture.url) { mutableStateOf(store.peek(picture.url, widthPx)) }
+    var failed by remember(picture.url) { mutableStateOf(false) }
+    LaunchedEffect(picture.url) {
+        if (bitmap == null) {
+            bitmap = store.load(picture.url, widthPx)
+            failed = bitmap == null
+        }
+    }
+    val image = bitmap
+    when {
+        image != null -> Image(
+            bitmap = image.asImageBitmap(),
+            contentDescription = picture.alt.ifBlank { null },
+            contentScale = ContentScale.FillWidth,
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio((image.width.toFloat() / image.height).coerceIn(0.3f, 4f))
+                .clip(RoundedCornerShape(12.dp))
+        )
+        !failed -> Box(
+            Modifier
+                .fillMaxWidth()
+                .height(160.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f))
+        )
+    }
+}
+
+/** The release notes, as text and the images between it. */
+internal sealed interface NoteBlock {
+    data class Words(val text: String) : NoteBlock
+    data class Picture(val url: String, val alt: String) : NoteBlock
+}
+
+/*
+ * How GitHub puts an image in a release: dragging one into the editor writes
+ * an HTML tag (<img width=… alt=… src="https://github.com/user-attachments/
+ * assets/…">), older ones Markdown (![alt](https://…)), sometimes wrapped in
+ * a link. These used to show up in the notes as code. Only https addresses
+ * are loaded.
+ */
+private val LinkedImage = Regex("""\[\s*!\[([^\]]*)]\(\s*<?(https://[^)\s>]+)>?[^)]*\)\s*]\([^)]*\)""")
+private val MarkdownImage = Regex("""!\[([^\]]*)]\(\s*<?(https://[^)\s>]+)>?[^)]*\)""")
+private val HtmlImage = Regex("""<img\b[^>]*?\bsrc\s*=\s*["'](https://[^"']+)["'][^>]*>""", RegexOption.IGNORE_CASE)
+private val HtmlAlt = Regex("""\balt\s*=\s*["']([^"']*)["']""", RegexOption.IGNORE_CASE)
+
+internal fun noteBlocks(markdown: String): List<NoteBlock> {
+    data class Found(val range: IntRange, val url: String, val alt: String)
+    val found = (
+        LinkedImage.findAll(markdown).map { Found(it.range, it.groupValues[2], it.groupValues[1]) } +
+            MarkdownImage.findAll(markdown).map { Found(it.range, it.groupValues[2], it.groupValues[1]) } +
+            HtmlImage.findAll(markdown).map {
+                Found(it.range, it.groupValues[1], HtmlAlt.find(it.value)?.groupValues?.get(1).orEmpty())
+            }
+        ).sortedWith(compareBy<Found> { it.range.first }.thenByDescending { it.range.last })
+    val out = mutableListOf<NoteBlock>()
+    var at = 0
+    for (f in found) {
+        if (f.range.first < at) continue // inside one already taken (a linked image's inner image)
+        plainNotes(markdown.substring(at, f.range.first)).takeIf { it.isNotBlank() }?.let { out += NoteBlock.Words(it) }
+        out += NoteBlock.Picture(f.url, f.alt)
+        at = f.range.last + 1
+    }
+    plainNotes(markdown.substring(at)).takeIf { it.isNotBlank() }?.let { out += NoteBlock.Words(it) }
+    return out
+}
+
+/** Release notes are Markdown, with some HTML; this is enough to read them as text. */
 internal fun plainNotes(markdown: String): String =
     markdown.lines().joinToString("\n") { line ->
         line.trim()
@@ -310,4 +407,9 @@ internal fun plainNotes(markdown: String): String =
             .replace(Regex("^[-*] "), "• ")
             .replace("**", "")
             .replace("`", "")
-    }.trim()
+            // [text](address) reads as its text; leftover tags (<p>, <br>) go.
+            .replace(Regex("""\[([^\]]+)]\([^)]*\)"""), "$1")
+            .replace(Regex("""</?[a-zA-Z][^>]*>"""), "")
+            .replace("&nbsp;", " ").replace("&amp;", "&").replace("&lt;", "<")
+            .replace("&gt;", ">").replace("&quot;", "\"").replace("&#39;", "'")
+    }.replace(Regex("""\n{3,}"""), "\n\n").trim()

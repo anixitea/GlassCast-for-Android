@@ -33,7 +33,6 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material.icons.outlined.DeleteOutline
@@ -91,9 +90,8 @@ fun SpeedSheet(
     onSpeedChange: (Float) -> Unit,
     onDismiss: () -> Unit
 ) {
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+    GlassSheet(
+        onDismiss = onDismiss,
         containerColor = MaterialTheme.colorScheme.surfaceContainer,
         contentColor = MaterialTheme.colorScheme.onSurface
     ) {
@@ -167,9 +165,8 @@ fun SleepSheet(
     onShakeToggle: (Boolean) -> Unit,
     onDismiss: () -> Unit
 ) {
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+    GlassSheet(
+        onDismiss = onDismiss,
         containerColor = MaterialTheme.colorScheme.surfaceContainer,
         contentColor = MaterialTheme.colorScheme.onSurface
     ) {
@@ -265,10 +262,7 @@ fun SleepSheet(
                 Switch(
                     checked = shakeToRestart,
                     onCheckedChange = onShakeToggle,
-                    colors = SwitchDefaults.colors(
-                        checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
-                        checkedTrackColor = accent
-                    )
+                    colors = glassSwitchColors(accent)
                 )
             }
         }
@@ -289,9 +283,8 @@ fun AddFeedSheet(store: FeedStore, onDismiss: () -> Unit) {
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
 
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+    GlassSheet(
+        onDismiss = onDismiss,
         containerColor = MaterialTheme.colorScheme.surfaceContainer,
         contentColor = MaterialTheme.colorScheme.onSurface
     ) {
@@ -416,9 +409,8 @@ fun EpisodeActionsSheet(
 ) {
     val played = episode.effectivelyPlayed
 
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+    GlassSheet(
+        onDismiss = onDismiss,
         containerColor = MaterialTheme.colorScheme.surfaceContainer,
         contentColor = MaterialTheme.colorScheme.onSurface
     ) {
@@ -489,264 +481,5 @@ private fun ActionRow(
             style = MaterialTheme.typography.titleSmall,
             color = MaterialTheme.colorScheme.onSurface
         )
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun SettingsSheet(
-    settings: Settings,
-    theme: ThemeMode,
-    sort: EpisodeSort,
-    showSort: ShowSort,
-    appVersion: String = "",
-    onCheckUpdates: () -> Unit = {},
-    onOpenOpml: () -> Unit,
-    onOpenSync: () -> Unit = {},
-    syncConnected: Boolean = false,
-    onDismiss: () -> Unit
-) {
-
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = MaterialTheme.colorScheme.surfaceContainer,
-        contentColor = MaterialTheme.colorScheme.onSurface
-    ) {
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .navigationBarsPadding()
-                .padding(horizontal = 24.dp)
-                .padding(bottom = 32.dp)
-        ) {
-            SheetLabel(tr("APPEARANCE"))
-            Spacer(Modifier.height(10.dp))
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                ThemeMode.entries.forEach { mode ->
-                    Pill(
-                        label = when (mode) {
-                            ThemeMode.SYSTEM -> tr("System")
-                            ThemeMode.LIGHT -> tr("Light")
-                            ThemeMode.DARK -> tr("Dark")
-                        },
-                        active = mode == theme,
-                        onClick = { settings.setTheme(mode) }
-                    )
-                }
-            }
-
-            Spacer(Modifier.height(14.dp))
-
-            // Separate from brightness, so dynamic color works in light and
-            // dark alike — which the old five-way list made impossible.
-            val dynamicColor by settings.dynamicColor.collectAsStateWithLifecycle()
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .clickable { settings.setDynamicColor(!dynamicColor) }
-                    .padding(vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        text = tr("Dynamic color"),
-                        style = MaterialTheme.typography.titleSmall,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                }
-                Spacer(Modifier.width(12.dp))
-                Switch(
-                    checked = dynamicColor,
-                    onCheckedChange = { settings.setDynamicColor(it) }
-                )
-            }
-
-            Spacer(Modifier.height(24.dp))
-            SheetLabel(tr("SUBSCRIPTIONS"))
-            Spacer(Modifier.height(10.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Pill(label = tr("Import / export OPML"), onClick = onOpenOpml)
-                Pill(label = tr("gPodder sync"), active = syncConnected, onClick = onOpenSync)
-            }
-
-            Spacer(Modifier.height(24.dp))
-            SheetLabel(tr("NOTIFICATIONS"))
-            Spacer(Modifier.height(6.dp))
-            val newEpisodes by settings.newEpisodeNotifications.collectAsStateWithLifecycle()
-            val notifContext = androidx.compose.ui.platform.LocalContext.current
-            var allowed by remember {
-                mutableStateOf(com.glasscast.app.background.NewEpisodeNotifier.canPost(notifContext))
-            }
-            val askPermission = androidx.activity.compose.rememberLauncherForActivityResult(
-                androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
-            ) { granted -> allowed = granted }
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .clickable { settings.setNewEpisodeNotifications(!newEpisodes) }
-                    .padding(vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        text = tr("New episodes"),
-                        style = MaterialTheme.typography.titleSmall,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    if (newEpisodes && !allowed) Text(
-                        text = tr("Notifications are blocked — tap to allow"),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = if (newEpisodes && !allowed) MaterialTheme.colorScheme.error
-                        else MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = if (newEpisodes && !allowed) Modifier.clickable {
-                            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
-                                askPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
-                            }
-                        } else Modifier
-                    )
-                }
-                Spacer(Modifier.width(12.dp))
-                Switch(
-                    checked = newEpisodes,
-                    onCheckedChange = { on ->
-                        settings.setNewEpisodeNotifications(on)
-                        if (on && !allowed &&
-                            android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU
-                        ) {
-                            askPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
-                        }
-                    }
-                )
-            }
-
-            Spacer(Modifier.height(24.dp))
-            SheetLabel(tr("SHOW ORDER"))
-            Spacer(Modifier.height(10.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Pill(
-                    label = tr("Recently updated"),
-                    active = showSort == ShowSort.RECENTLY_UPDATED,
-                    onClick = { settings.setShowSort(ShowSort.RECENTLY_UPDATED) }
-                )
-                Pill(
-                    label = tr("Recently played"),
-                    active = showSort == ShowSort.RECENTLY_PLAYED,
-                    onClick = { settings.setShowSort(ShowSort.RECENTLY_PLAYED) }
-                )
-            }
-
-            val hiddenFromDiscover by settings.discoverHidden.collectAsStateWithLifecycle()
-            val hiddenInfo by settings.discoverHiddenInfo.collectAsStateWithLifecycle()
-            var hiddenOpen by remember { mutableStateOf(false) }
-            if (hiddenFromDiscover.isNotEmpty()) {
-                Spacer(Modifier.height(24.dp))
-                SheetLabel(tr("DISCOVER"))
-                Spacer(Modifier.height(6.dp))
-                // Tap to list them; each can come back on its own. Nothing is
-                // unhidden by tapping the summary any more.
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .clickable { hiddenOpen = !hiddenOpen }
-                        .padding(vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = tr(if (hiddenFromDiscover.size == 1) tr("{0} show marked not interested") else tr("{0} shows marked not interested"), hiddenFromDiscover.size),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.weight(1f)
-                    )
-                    Icon(
-                        imageVector = if (hiddenOpen) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                AnimatedVisibility(visible = hiddenOpen) {
-                    Column {
-                        hiddenFromDiscover.sortedBy { (hiddenInfo[it]?.title ?: it).lowercase() }.forEach { url ->
-                            val info = hiddenInfo[url]
-                            Row(
-                                Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                if (info != null && info.artworkUrl.isNotBlank()) {
-                                    Artwork(url = info.artworkUrl, sizeDp = 40.dp, corner = 10.dp)
-                                    Spacer(Modifier.width(12.dp))
-                                }
-                                Text(
-                                    text = info?.title?.takeIf { it.isNotBlank() }
-                                        ?: (android.net.Uri.parse(url).host ?: url),
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.weight(1f)
-                                )
-                                Spacer(Modifier.width(12.dp))
-                                Text(
-                                    text = tr("Show again"),
-                                    style = MaterialTheme.typography.labelLarge,
-                                    color = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(12.dp))
-                                        .clickable { settings.unhideFromDiscover(url) }
-                                        .padding(horizontal = 8.dp, vertical = 6.dp)
-                                )
-                            }
-                        }
-                        if (hiddenFromDiscover.size > 1) {
-                            Text(
-                                text = tr("Show all again"),
-                                style = MaterialTheme.typography.labelLarge,
-                                color = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier
-                                    .padding(top = 4.dp)
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .clickable {
-                                        settings.clearDiscoverHidden()
-                                        hiddenOpen = false
-                                    }
-                                    .padding(vertical = 8.dp)
-                            )
-                        }
-                    }
-                }
-            }
-
-            Spacer(Modifier.height(24.dp))
-            SheetLabel(tr("ABOUT"))
-            Spacer(Modifier.height(6.dp))
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .clickable(onClick = onCheckUpdates)
-                    .padding(vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        text = "GlassCast $appVersion",
-                        style = MaterialTheme.typography.titleSmall,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                }
-                Spacer(Modifier.width(12.dp))
-                Text(
-                    text = tr("Check for updates"),
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.primary
-                )
-            }
-        }
     }
 }

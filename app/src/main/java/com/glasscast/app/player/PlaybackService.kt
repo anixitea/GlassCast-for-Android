@@ -58,6 +58,10 @@ class PlaybackService : MediaLibraryService() {
     private var shakeDetector: ShakeDetector? = null
     private var shakeWindowOpen = false
 
+    private val carButtons = CarButtons {
+        (application as GlassCastApp).settings.skipSeconds.value
+    }
+
     private companion object {
         const val FADE_MS = 15_000L
         /**
@@ -154,7 +158,12 @@ class PlaybackService : MediaLibraryService() {
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 lastAdCheckMs = -1L
                 if ((application as GlassCastApp).settings.skipAds.value) loadAdBreaks(mediaItem?.mediaId)
+                updateWidget()
             }
+
+            // Play/pause as asked, not as heard: a buffering stall shouldn't
+            // flip the widget's button back and forth.
+            override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) = updateWidget()
 
             override fun onPlaybackStateChanged(state: Int) {
                 if (state == Player.STATE_READY) reconcileDuration()
@@ -190,9 +199,16 @@ class PlaybackService : MediaLibraryService() {
 
         // A library session: the same session, plus a browsable library for
         // Android Auto and other media browsers (see AutoLibrary).
-        session = MediaLibraryService.MediaLibrarySession.Builder(this, exo, AutoLibrary(this, effectsScope))
+        session = MediaLibraryService.MediaLibrarySession.Builder(this, skipping(exo), AutoLibrary(this, effectsScope, carButtons))
             .setSessionActivity(activityIntent)
             .build()
+            .also { carButtons.attach(it) }
+        effectsScope.launch {
+            settings.skipSeconds.collect {
+                carButtons.refresh()
+                com.glasscast.app.widget.NowPlayingWidget.refresh(this@PlaybackService)
+            }
+        }
 
         player = exo
         localPlayer = exo
@@ -214,11 +230,18 @@ class PlaybackService : MediaLibraryService() {
      * knowing the audio left the phone. When casting ends the same thing runs
      * in reverse, and the phone picks up where the TV stopped.
      *
-     * No Play Services, no Cast: the set-up is guarded, and the phone player
-     * simply stays in charge.
+     * No Play Services, no Cast: CastSupport never calls back, and the phone
+     * player simply stays in charge. It calls back on the main thread once the
+     * SDK has loaded off it, so the service's start doesn't wait on Cast.
      */
     private fun setUpCast(listener: Player.Listener) {
-        val context = runCatching { CastContext.getSharedInstance(this) }.getOrNull() ?: return
+        CastSupport.whenReady(this) { context ->
+            // The service may have ended while Cast was loading.
+            if (session != null && castPlayer == null) attachCast(context, listener)
+        }
+    }
+
+    private fun attachCast(context: CastContext, listener: Player.Listener) {
         val cast = CastPlayer(context, DefaultMediaItemConverter(), 30_000, 30_000)
         cast.addListener(listener)
         cast.setSessionAvailabilityListener(object : SessionAvailabilityListener {
@@ -262,10 +285,38 @@ class PlaybackService : MediaLibraryService() {
             target.prepare()
         }
         player = target
-        session?.player = target
+        session?.player = skipping(target)
+    }
+
+    /** [target] as the session sees it: back and forward follow the skip setting (see SkipPlayer). */
+    private fun skipping(target: Player): Player {
+        val settings = (application as GlassCastApp).settings
+        return SkipPlayer(target) { settings.skipSeconds.value * 1_000L }
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibraryService.MediaLibrarySession? = session
+
+    /** The home-screen widget follows the episode and play/pause (see NowPlayingWidget). */
+    private fun updateWidget() {
+        val p = player ?: return
+        com.glasscast.app.widget.NowPlayingWidget.onPlayer(this, p.currentMediaItem?.mediaId, p.playWhenReady)
+    }
+
+    /*
+     * The last media browser has gone: the car's media app (Android Auto,
+     * or a car running Android) has disconnected, so its skip buttons come
+     * off the session (CarButtons). Returning true asks for onRebind next
+     * time one connects, so this runs again after the next drive; Media3
+     * hands out the same browser binder either way.
+     */
+    override fun onUnbind(intent: Intent?): Boolean {
+        if (intent?.action == android.service.media.MediaBrowserService.SERVICE_INTERFACE) {
+            carButtons.carGone()
+            super.onUnbind(intent)
+            return true
+        }
+        return super.onUnbind(intent)
+    }
 
     /*
      * No custom notification buttons.
@@ -278,8 +329,13 @@ class PlaybackService : MediaLibraryService() {
      *
      * So the session now declares only what it can *do*, and every surface —
      * stock Android, HyperOS, a car, a watch — renders those abilities in its
-     * own native way. The seek increments below (30s) are what the system's
-     * rewind and fast-forward use when it chooses to show them.
+     * own native way. When it chooses to show rewind and fast-forward, they
+     * skip by the skip setting (15 or 30 seconds, through SkipPlayer).
+     *
+     * The one exception is a car: Android Auto only shows back and forward
+     * as buttons of the app's own, and draws them from the same copy of the
+     * session as the phone's notification. They're added for as long as the
+     * car is connected (CarButtons).
      */
     override fun onTaskRemoved(rootIntent: Intent?) {
         val p = player
@@ -292,6 +348,7 @@ class PlaybackService : MediaLibraryService() {
     }
 
     override fun onDestroy() {
+        player?.let { com.glasscast.app.widget.NowPlayingWidget.onPlayer(this, it.currentMediaItem?.mediaId, false) }
         effectsScope.cancel()
         runCatching { voiceBoost?.release() }
         voiceBoost = null
@@ -308,6 +365,7 @@ class PlaybackService : MediaLibraryService() {
         castPlayer?.setSessionAvailabilityListener(null)
         castPlayer?.release()
         localPlayer?.release()
+        carButtons.detach()
         session?.release()
         session = null
         player = null

@@ -39,10 +39,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Forward30
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Replay30
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.outlined.Close
@@ -165,6 +163,8 @@ fun TvPlayerScreen(
     onSeekTo: (Long) -> Unit,
     onSkipNext: () -> Unit,
     onRestart: () -> Unit,
+    /** How far back and forward skip (Settings.skipSeconds). */
+    skipSeconds: Int = 30,
     onSpeedChange: (Float) -> Unit,
     onPlayFromUpNext: (Int) -> Unit,
     onRemoveFromUpNext: (Episode) -> Unit,
@@ -284,9 +284,9 @@ fun TvPlayerScreen(
                     }
                     TvGroupButton(
                         corners = TvCorners.all(10.dp), height = 76.dp,
-                        accent = accent, glyph = glyph, modifier = Modifier.weight(1f), onClick = { onSeekBy(-30_000) }
+                        accent = accent, glyph = glyph, modifier = Modifier.weight(1f), onClick = { onSeekBy(-skipSeconds * 1_000L) }
                     ) {
-                        Icon(Icons.Filled.Replay30, tr("Back 30 seconds"), tint = it, modifier = Modifier.size(32.dp))
+                        Icon(com.glasscast.app.ui.skipBackIcon(skipSeconds), tr("Back {0} seconds", skipSeconds), tint = it, modifier = Modifier.size(32.dp))
                     }
                     TvPlayPauseButton(
                         isPlaying = isPlaying, accent = accent, glyph = glyph,
@@ -294,9 +294,9 @@ fun TvPlayerScreen(
                     )
                     TvGroupButton(
                         corners = TvCorners.all(10.dp), height = 76.dp,
-                        accent = accent, glyph = glyph, modifier = Modifier.weight(1f), onClick = { onSeekBy(30_000) }
+                        accent = accent, glyph = glyph, modifier = Modifier.weight(1f), onClick = { onSeekBy(skipSeconds * 1_000L) }
                     ) {
-                        Icon(Icons.Filled.Forward30, tr("Forward 30 seconds"), tint = it, modifier = Modifier.size(32.dp))
+                        Icon(com.glasscast.app.ui.skipForwardIcon(skipSeconds), tr("Forward {0} seconds", skipSeconds), tint = it, modifier = Modifier.size(32.dp))
                     }
                     TvGroupButton(
                         corners = TvCorners(10.dp, 30.dp, 30.dp, 10.dp), height = 76.dp,

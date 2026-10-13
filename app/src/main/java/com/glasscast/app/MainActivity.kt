@@ -16,6 +16,10 @@ import androidx.compose.runtime.getValue
 import androidx.core.content.ContextCompat
 import androidx.core.content.IntentCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import com.glasscast.app.data.GOOGLE_SIGN_IN
 import com.glasscast.app.data.ThemeMode
 import com.glasscast.app.ui.GlassCastRoot
 import com.glasscast.app.ui.LocalImageStore
@@ -34,12 +38,16 @@ class MainActivity : ComponentActivity() {
 
         app.player.connect()
         handleIncoming(intent)
+        lifecycleScope.launch(Dispatchers.IO) { Shortcuts.publish(this@MainActivity) }
 
         setContent {
             val themeMode by app.settings.theme.collectAsStateWithLifecycle()
             val dynamicColor by app.settings.dynamicColor.collectAsStateWithLifecycle()
+            val customColorOn by app.settings.customColorOn.collectAsStateWithLifecycle()
+            val customColor by app.settings.customColor.collectAsStateWithLifecycle()
             val pendingOpml by app.pendingOpml.collectAsStateWithLifecycle()
             val pendingOpenFeed by app.pendingOpenFeed.collectAsStateWithLifecycle()
+            val pendingShortcut by app.pendingShortcut.collectAsStateWithLifecycle()
             val nowPlaying by app.player.currentEpisode.collectAsStateWithLifecycle()
             val nowPlayingFeed by app.player.currentFeed.collectAsStateWithLifecycle()
 
@@ -65,8 +73,10 @@ class MainActivity : ComponentActivity() {
                     brand = AccentPurple
                 ).first
 
-                val showAccent = playingColors.accent
-                    .takeIf { dynamicColor && artUrl.isNotBlank() }
+                // The cover's accent, or the one picked in Settings (the two
+                // are never on together); the theme clamps either for legibility.
+                val showAccent = playingColors.accent.takeIf { dynamicColor && artUrl.isNotBlank() }
+                    ?: androidx.compose.ui.graphics.Color(customColor).takeIf { customColorOn }
 
             GlassCastTheme(themeMode, showAccent) {
                 GlassCastRoot(
@@ -77,7 +87,9 @@ class MainActivity : ComponentActivity() {
                     pendingOpml = pendingOpml,
                     onOpmlHandled = { app.pendingOpml.value = null },
                     pendingOpenFeed = pendingOpenFeed,
-                    onOpenFeedHandled = { app.pendingOpenFeed.value = null }
+                    onOpenFeedHandled = { app.pendingOpenFeed.value = null },
+                    pendingShortcut = pendingShortcut,
+                    onShortcutHandled = { app.pendingShortcut.value = null }
                 )
             }
             }
@@ -96,6 +108,14 @@ class MainActivity : ComponentActivity() {
      * the parser is what decides whether the file is really OPML.
      */
     private fun handleIncoming(intent: Intent?) {
+        // A launcher shortcut, or the widget's card. Consumed like the
+        // notification's extra below, so recreating the activity doesn't
+        // repeat it.
+        intent?.action?.takeIf { it in Shortcuts.actions }?.let {
+            app.pendingShortcut.value = it
+            intent.action = Intent.ACTION_MAIN
+            return
+        }
         intent?.getStringExtra(com.glasscast.app.background.NewEpisodeNotifier.EXTRA_OPEN_FEED)?.let {
             app.pendingOpenFeed.value = it
             // Consumed, so recreating the activity doesn't open the show again.
@@ -110,6 +130,19 @@ class MainActivity : ComponentActivity() {
             else -> null
         } ?: return
         app.pendingOpml.value = uri
+    }
+
+    // Signed in with Google: the library syncs as the app opens and as it's
+    // left (GoogleAccount.syncSoon, at most every two minutes).
+    // Off the main thread: the first use reads the account's preferences.
+    override fun onStart() {
+        super.onStart()
+        if (GOOGLE_SIGN_IN) lifecycleScope.launch(Dispatchers.IO) { app.account.syncSoon() }
+    }
+
+    override fun onStop() {
+        if (GOOGLE_SIGN_IN) lifecycleScope.launch(Dispatchers.IO) { app.account.syncSoon() }
+        super.onStop()
     }
 
     override fun onResume() {

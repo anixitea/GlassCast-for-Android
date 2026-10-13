@@ -76,10 +76,13 @@ import com.glasscast.app.ui.artworkGround
 import com.glasscast.app.ui.requestWhenReady
 import com.glasscast.app.ui.rememberArtworkColors
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.compose.foundation.focusable
 import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.key
@@ -111,6 +114,7 @@ private enum class TvTab(val label: String, val icon: ImageVector) {
  * A bottom bar would need a long run of Down presses through whatever list
  * happens to be open.
  */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun TvRoot(
     feedStore: FeedStore,
@@ -133,6 +137,7 @@ fun TvRoot(
     val durationMs by player.durationMs.collectAsStateWithLifecycle()
     val upNext by player.upNext.collectAsStateWithLifecycle()
     val speed by player.speed.collectAsStateWithLifecycle()
+    val skipSeconds by settings.skipSeconds.collectAsStateWithLifecycle()
     val discoverHidden by settings.discoverHidden.collectAsStateWithLifecycle()
     val episodeOrder by settings.episodeOrder.collectAsStateWithLifecycle()
     val skipSilence by settings.skipSilence.collectAsStateWithLifecycle()
@@ -248,16 +253,54 @@ fun TvRoot(
     val dim by animateFloatAsState(if (railFocused) 1f else 0f, tween(220), label = "railDim")
 
     val showPage = previewUrl != null || (tab == TvTab.LIBRARY && selectedFeed != null)
+
+    // Which screen is up, for a crash report (CrashLog.noteState).
+    val stateContext = androidx.compose.ui.platform.LocalContext.current
+    LaunchedEffect(tab, showPage, playerOpen, isPlaying) {
+        com.glasscast.app.data.CrashLog.noteState(
+            stateContext,
+            buildString {
+                append("tv ").append(tab.name.lowercase())
+                if (showPage) append(" show")
+                if (playerOpen) append(" player")
+                if (isPlaying) append(" playing")
+            }
+        )
+    }
+
+    // The living blur holds still while the D-pad is in use, and moves again
+    // a moment after the last press: redrawing a full-screen blur every frame
+    // while pages scroll left the Streamer too little to scroll with.
+    var navigating by remember { mutableStateOf(false) }
+    val navScope = rememberCoroutineScope()
+    val navReset = remember { arrayOfNulls<Job>(1) }
+
+    // Every list scrolls the same way (TvBringIntoView); the show page
+    // provides its own variant inside.
+    CompositionLocalProvider(LocalBringIntoViewSpec provides rememberTvBringIntoView()) {
     Box(
         Modifier
             .fillMaxSize()
             .background(ground)
+            .onPreviewKeyEvent { e ->
+                if (e.type == KeyEventType.KeyDown) {
+                    // Set only when it changes, so holding a key recomposes
+                    // nothing; the reset moves with each press.
+                    if (!navigating) navigating = true
+                    navReset[0]?.cancel()
+                    navReset[0] = navScope.launch {
+                        delay(TV_NAVIGATING_MS)
+                        navigating = false
+                    }
+                }
+                false
+            }
     ) {
         // The browse pages move too: the now-playing cover's living blur,
         // darkened evenly (see TvCoverBackdrop). A show page draws its own, so
         // this one steps aside for it; nothing playing leaves the still ground.
         // Under the open player every backdrop holds still.
-        CompositionLocalProvider(LocalTvBackdropMoving provides !playerOpen) {
+        CompositionLocalProvider(LocalTvBackdropMoving provides (!playerOpen && !navigating)) {
         if (!showPage && art.isNotBlank()) {
             TvCoverBackdrop(url = art, colors = colors, even = true)
         }
@@ -518,6 +561,7 @@ fun TvRoot(
                         onSeekTo = player::seekTo,
                         onSkipNext = player::skipToNext,
                         onRestart = player::restartEpisode,
+                        skipSeconds = skipSeconds,
                         onSpeedChange = player::setSpeed,
                         onPlayFromUpNext = player::playFromUpNext,
                         onRemoveFromUpNext = { player.removeFromQueue(it.guid) },
@@ -604,6 +648,7 @@ fun TvRoot(
             )
         }
         TvToastHost(toast, accent = colors.chromeButton)
+    }
     }
 
     BackHandler(enabled = playerOpen) { playerOpen = false }
@@ -777,3 +822,6 @@ private fun TvWithPosition(
     val position by player.positionMs.collectAsStateWithLifecycle()
     content(position)
 }
+
+/** How long after the last press the D-pad still counts as in use (see `navigating` in TvRoot). */
+private const val TV_NAVIGATING_MS = 900L

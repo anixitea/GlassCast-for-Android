@@ -1,7 +1,23 @@
 # tools
 
-Two static checks, run before packaging. Neither is a compiler; each catches a
-class of mistake that has actually shipped from this project.
+Before packaging, run the six static checks: `syntaxcheck.sh` (needs
+kotlinc 2.0.21 at /tmp/kotlinc), then `importcheck.py`, `argcheck.py`,
+`identcheck.py`, `extcheck.py` and `owncheck.py`, each with `python3 -I` from
+the project root. None of them is a compiler; each catches a class of mistake
+that has actually shipped from this project (extcheck and owncheck are
+described in DEVELOPMENT.md, under 1.1).
+
+When the library jars are staged, also run the real type-check,
+`typecheck/typecheck.sh` (see typecheck/README.md). It's a compiler, and
+catches what the six can't.
+
+Also here:
+
+- `l10n.py` regenerates the language tables in ui/L10n.kt from
+  docs/translations.txt, which is the one place translations live. After
+  adding a `tr("...")`, add its line to translations.txt and run
+  `python3 -I tools/l10n.py`. `--check` lists tr() text with no
+  translation, and says when L10n.kt and translations.txt disagree.
 
 ## importcheck.py
 

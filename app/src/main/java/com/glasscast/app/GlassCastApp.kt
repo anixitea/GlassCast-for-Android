@@ -3,11 +3,21 @@ package com.glasscast.app
 import kotlinx.coroutines.launch
 
 import android.app.Application
+import android.content.Context
+import android.content.pm.ApplicationInfo
+import android.os.Build
+import android.os.StrictMode
+import android.util.Log
+import com.glasscast.app.data.CrashLog
 import com.glasscast.app.data.FeedStore
+import com.glasscast.app.data.GOOGLE_SIGN_IN
 import com.glasscast.app.data.ImageStore
 import com.glasscast.app.data.QueueStore
 import com.glasscast.app.data.Settings
 import com.glasscast.app.player.PlayerConnection
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 
 /**
@@ -32,12 +42,46 @@ class GlassCastApp : Application() {
         private set
     lateinit var gpodder: com.glasscast.app.data.GPodderSync
         private set
+    lateinit var bookmarks: com.glasscast.app.data.BookmarkStore
+        private set
+    lateinit var autoDownload: com.glasscast.app.data.AutoDownload
+        private set
+
+    /** Backups: the document, files, restoring (data/Backup.kt). */
+    val backup by lazy { com.glasscast.app.data.BackupManager(this) }
+
+    /** Sign in with Google, and the library sync that comes with it (data/GoogleAccount.kt). */
+    val account by lazy { com.glasscast.app.data.GoogleAccount(this) }
 
     /** Set when the app is opened by a shared or opened OPML file. */
     val pendingOpml = MutableStateFlow<android.net.Uri?>(null)
 
     /** A show to open, from tapping a new-episode notification. */
     val pendingOpenFeed = MutableStateFlow<String?>(null)
+
+    /** A launcher shortcut or the widget's card, to act on (see Shortcuts). */
+    val pendingShortcut = MutableStateFlow<String?>(null)
+
+    /**
+     * The launch animation plays once per process. Without this it lived in
+     * the activity's composition, so every recreation (a split-screen resize,
+     * a display-size change) played it again from the start.
+     */
+    var splashPlayed = false
+
+    private val background = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    /*
+     * The crash log goes in here rather than in onCreate: the app's content
+     * providers (WorkManager's start-up, the profile installer, the artwork
+     * provider) are created between the two, and a failure there would
+     * otherwise go unrecorded.
+     */
+    override fun attachBaseContext(base: Context) {
+        super.attachBaseContext(base)
+        CrashLog.install(this)
+        if ((applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0) watchMainThread()
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -49,14 +93,26 @@ class GlassCastApp : Application() {
         player = PlayerConnection(this, feedStore, queueStore, downloads)
         updates = com.glasscast.app.update.AppUpdater(this)
         gpodder = com.glasscast.app.data.GPodderSync(this, feedStore)
+        bookmarks = com.glasscast.app.data.BookmarkStore(this)
+        autoDownload = com.glasscast.app.data.AutoDownload(this, feedStore, downloads, settings)
+        settings.alsoWantsBackground = { GOOGLE_SIGN_IN && account.state.value.signedIn }
+        feedStore.onRefreshed = { background.launch { autoDownload.run() } }
         wireSync()
-        initCast()
 
         // The channel exists from the start so it appears in system settings
-        // even before the first notification; the job is (re)scheduled on
-        // every launch, which is idempotent and survives app updates.
+        // even before the first notification.
         com.glasscast.app.background.NewEpisodeNotifier.ensureChannel(this)
-        com.glasscast.app.background.BackgroundRefresh.apply(this, settings.newEpisodeNotifications.value)
+
+        background.launch {
+            CrashLog.load(this@GlassCastApp)
+            // (Re)scheduled on every launch, which is idempotent and survives
+            // app updates. Off the main thread: WorkManager opens its database.
+            com.glasscast.app.background.BackgroundRefresh.apply(
+                this@GlassCastApp, settings.backgroundRefreshWanted
+            )
+        }
+        // Cast starts with the playback service, off the main thread
+        // (player/CastSupport).
     }
 
     /**
@@ -66,37 +122,49 @@ class GlassCastApp : Application() {
      */
     private fun wireSync() {
         val sync = gpodder
-        feedStore.onSubscriptionChanged = { url, added -> sync.recordSubscription(url, added) }
+        feedStore.onSubscriptionChanged = { url, added ->
+            sync.recordSubscription(url, added)
+            // An unfollowed show stops downloading; following it again starts fresh.
+            if (!added) settings.setAutoDownload(url, false)
+            // When, for the Google account's sync: the latest of following and
+            // unfollowing wins across phones.
+            account.recordFollow(url, added)
+        }
+        bookmarks.onRemoved = { id -> account.recordBookmarkDeleted(id) }
         feedStore.onMarkedPlayed = { ep, played ->
             val total = ep.durationMs.coerceAtLeast(1_000L)
             sync.recordPlay(ep, 0L, if (played) total else 0L, total)
         }
         player.onPaused = { ep, started, position, duration -> sync.recordPlay(ep, started, position, duration) }
         sync.playingGuid = { player.currentEpisode.value?.guid }
-        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO).launch {
+        background.launch {
             sync.sync()
         }
     }
 
     /**
-     * Start the Cast SDK early, so its device discovery is running before the
-     * device list is ever opened — Cast routes only appear once the SDK has
-     * registered its provider with the media router.
-     *
-     * Guarded: phones without Google Play Services (or with it disabled) simply
-     * never show Cast devices, instead of crashing on launch.
+     * Debug builds only: log every disk read, disk write, network call and
+     * custom slow call made on the main thread, under "GlassCastStrict".
+     * `adb logcat -s GlassCastStrict` during a cold start lists exactly what
+     * the main thread did before the first frame.
      */
-    private fun initCast() {
-        runCatching {
-            com.google.android.gms.cast.framework.CastContext.getSharedInstance(this)
-            androidx.mediarouter.media.MediaRouter.getInstance(this).setRouterParams(
-                androidx.mediarouter.media.MediaRouterParams.Builder()
-                    // Let the system's own output picker show Cast devices too,
-                    // and hand playback back to the phone when casting ends.
-                    .setOutputSwitcherEnabled(true)
-                    .setTransferToLocalEnabled(true)
-                    .build()
-            )
+    private fun watchMainThread() {
+        val policy = StrictMode.ThreadPolicy.Builder()
+            .detectDiskReads()
+            .detectDiskWrites()
+            .detectNetwork()
+            .detectCustomSlowCalls()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            policy.penaltyListener(java.util.concurrent.Executors.newSingleThreadExecutor()) { violation ->
+                Log.w(STRICT_TAG, violation.javaClass.simpleName, violation)
+            }
+        } else {
+            policy.penaltyLog()
         }
+        StrictMode.setThreadPolicy(policy.build())
+    }
+
+    private companion object {
+        const val STRICT_TAG = "GlassCastStrict"
     }
 }

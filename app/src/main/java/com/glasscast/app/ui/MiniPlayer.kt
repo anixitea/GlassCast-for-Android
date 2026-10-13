@@ -32,6 +32,7 @@ import androidx.compose.animation.core.spring
 import androidx.compose.runtime.getValue
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.background
@@ -94,6 +95,8 @@ fun MiniPlayer(
     durationMs: Long,
     collapse: State<Float>,
     collapsed: Boolean,
+    /** 0 = the dark card (over a light page), 1 = the pale one (over a dark page). */
+    pale: State<Float>,
     barBounds: () -> Rect?,
     onPlayPause: () -> Unit,
     onOpen: () -> Unit,
@@ -107,15 +110,17 @@ fun MiniPlayer(
     val surface by animateColorAsState(colors.chromeSurface, tween(600), label = "miniSurface")
     val button by animateColorAsState(colors.chromeButton, tween(600), label = "miniButton")
 
-    // The card's own pair. In light mode, Cider's: the dark surface, with the
-    // cover's pale tone on the play button and the progress line. In dark
-    // mode that dark card sank into the dark page, so the card swaps them — a
-    // pale card, the dark tone on the button. The bubble's ring keeps the
-    // original pair (surface, button) in both themes.
-    val dark = com.glasscast.app.ui.theme.LocalIsDark.current
-    val cardAccent = if (dark) surface else button
-    val cardInk = if (dark) Color(0xFF16141A) else Color.White
-    val cardGlyph = if (dark) button else Color(0xFF16141A)
+    // The card's own pair. Over a light page, Cider's: the dark surface, with
+    // the cover's pale tone on the play button and the progress line. Over a
+    // dark page that dark card sank into it, so the card swaps them: a pale
+    // card, the dark tone on the button. [pale] says how far it has swapped
+    // (it crossfades when the page changes; see GlassCastRoot, chromeMix).
+    // The bubble's ring keeps the original pair (surface, button) either way.
+    val mix = pale.value.coerceIn(0f, 1f)
+    val cardBg = lerp(surface, button, mix)
+    val cardAccent = lerp(button, surface, mix)
+    val cardInk = lerp(Color.White, ChromeInk, mix)
+    val cardGlyph = lerp(ChromeInk, button, mix)
     val progress = if (durationMs > 0) (positionMs.toFloat() / durationMs).coerceIn(0f, 1f) else 0f
     val progressState = rememberUpdatedState(progress)
 
@@ -130,6 +135,7 @@ fun MiniPlayer(
     // The card's text and controls exist only while the card does: invisible
     // buttons above the bar would otherwise swallow taps meant for the page.
     val showContent by remember { derivedStateOf { collapse.value.coerceIn(0f, 1f) < 0.35f } }
+    val cardClip = remember { Path() }
 
     Box(
         modifier
@@ -140,7 +146,7 @@ fun MiniPlayer(
                 val f = m.frame(collapse.value.coerceIn(0f, 1f), size.width, barBounds(), selfBounds)
                 // The container: card → pill → circle, fading as it becomes the bubble.
                 if (f.bgAlpha > 0f) {
-                    val bg = if (dark) button else surface
+                    val bg = cardBg
                     drawRoundRect(
                         color = bg.copy(alpha = bg.alpha * f.bgAlpha),
                         topLeft = f.rect.topLeft,
@@ -148,7 +154,14 @@ fun MiniPlayer(
                         cornerRadius = CornerRadius(f.radius)
                     )
                 }
-                drawContent()
+                // Everything inside stays inside the shape as it changes. The
+                // title and subtitle fade on their own timing, and growing back
+                // out of the bubble they showed past the card's left edge, over
+                // the covers behind it. In the bubble phase the rect is the
+                // bubble, and the cover sits inside it.
+                cardClip.reset()
+                cardClip.addRoundRect(RoundRect(f.rect, CornerRadius(f.radius)))
+                clipPath(cardClip) { this@drawWithContent.drawContent() }
                 // The progress ring, tracing the bubble's scalloped edge.
                 if (f.ringAlpha > 0f) {
                     val stroke = m.ringStroke

@@ -1,5 +1,8 @@
 package com.glasscast.app.ui
 
+import androidx.compose.foundation.layout.displayCutout
+import androidx.compose.foundation.layout.union
+import androidx.compose.ui.unit.LayoutDirection
 import android.app.Activity
 import androidx.compose.material.icons.outlined.DownloadForOffline
 import androidx.compose.material.icons.filled.DownloadForOffline
@@ -54,10 +57,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.VolumeDown
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Bedtime
-import androidx.compose.material.icons.filled.Forward30
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Replay30
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.outlined.Info
@@ -145,6 +146,8 @@ fun PlayerScreen(
     onPlayPause: () -> Unit,
     onSeekTo: (Long) -> Unit,
     onSeekBy: (Long) -> Unit,
+    /** How far back and forward skip (Settings.skipSeconds). */
+    skipSeconds: Int = 30,
     onSpeedChange: (Float) -> Unit,
     upNextCount: Int,
     upNext: List<Episode>,
@@ -163,6 +166,14 @@ fun PlayerScreen(
     onSkipAdsChange: (Boolean) -> Unit = {},
     onShakeToggle: (Boolean) -> Unit,
     onCollapse: () -> Unit,
+    /** The title or show name was tapped: close the player onto the show's page. */
+    onOpenShow: () -> Unit = {},
+    /** This episode's bookmarks, in order. */
+    bookmarks: List<com.glasscast.app.data.Bookmark> = emptyList(),
+    /** Adds a bookmark where playback is and returns its id. */
+    onAddBookmark: () -> Long = { 0L },
+    onBookmarkMemo: (Long, String) -> Unit = { _, _ -> },
+    onRemoveBookmark: (Long) -> Unit = {},
     download: com.glasscast.app.data.DownloadEntry? = null,
     onDownload: () -> Unit = {},
     onRemoveDownload: () -> Unit = {}
@@ -246,9 +257,7 @@ fun PlayerScreen(
     val scope = rememberCoroutineScope()
 
     // Landscape closes as one sheet sliding away (see settle).
-    val landscapeScreen = LocalConfiguration.current.let {
-        it.screenWidthDp > it.screenHeightDp && it.screenHeightDp >= 480
-    }
+    val landscapeScreen = LocalConfiguration.current.let { it.screenWidthDp > it.screenHeightDp }
     var closing by remember { mutableStateOf(false) }
 
     fun settle(velocity: Float) {
@@ -376,9 +385,8 @@ fun PlayerScreen(
             // their titles sat over the sharp middle of the cover.
             val titleTopPortrait = maxHeight - PanelHeaderHeight -
                 WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() - 292.dp
-            // (Floored, for a phone turned sideways: too short for the
-            // landscape layout, it keeps this one, and the cap alone would
-            // leave it a sliver of cover.)
+            // (Floored, so a squat window, a split screen, still gets a
+            // real piece of cover.)
             val artHeight = minOf(maxWidth * 1.2f, titleTopPortrait / 0.86f)
                 .coerceAtLeast(minOf(maxWidth, maxHeight) * 0.6f)
             // Landscape on a tablet: the portrait player turned on its side.
@@ -387,12 +395,20 @@ fun PlayerScreen(
             // it, and the panel rises inside that column. (The portrait cover,
             // maxWidth × 1.2 tall, was taller than a landscape screen: it hid
             // every control, so they seemed to load late while it flew in.)
-            val landscape = maxWidth > maxHeight && maxHeight >= 480.dp
+            //
+            // A phone turned sideways gets the same layout, packed for its
+            // height (see shortLandscape below). It used to keep the portrait
+            // one, which needs about 400dp above the panel strip: on a phone's
+            // ~390dp the title went up under the status bar and the cover was
+            // only the blur behind the controls.
+            val landscape = maxWidth > maxHeight
+            val shortLandscape = landscape && maxHeight < 480.dp
             val artWidth = if (landscape) minOf(maxHeight, maxWidth * 0.55f) else maxWidth
 
             PlayerBackdrop(
                 url = art,
                 band = if (landscape) artWidth else artHeight,
+                length = if (landscape) maxWidth else maxHeight,
                 sideways = landscape,
                 aspect = if (landscape) maxHeight / artWidth else artHeight / maxWidth,
                 modifier = Modifier.fillMaxSize()
@@ -430,10 +446,16 @@ fun PlayerScreen(
 
             // The handle is the dismiss affordance now, in place of a chevron:
             // the gesture is drag-down, so the hint should look draggable.
+            // A phone on its side lends its place to the open panel's header
+            // (see compactTop): it fades as the panel rises, while a drag down
+            // would close the panel first anyway.
             Box(
                 Modifier
                     .align(Alignment.TopCenter)
                     .aboveFlyingArtwork(LocalPlayerScope.current)
+                    .graphicsLayer {
+                        if (shortLandscape) alpha = (1f - expand.value * 2.5f).coerceIn(0f, 1f)
+                    }
                     .statusBarsPadding()
                     .padding(top = 10.dp)
                     .size(width = 40.dp, height = 5.dp)
@@ -445,8 +467,16 @@ fun PlayerScreen(
             val statusInset = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
             val w = maxWidth
             val collapsedTop = maxHeight - PanelHeaderHeight - navInset
-            val compactTop = statusInset + 40.dp
-            val expandedTop = compactTop + 104.dp
+            // The header over the open panel: the title and the three buttons
+            // in a row, the wave under them. A phone on its side has about
+            // 400dp of height, and the usual header left the open panel half
+            // of it, so the sleep timer's chips and the switch below them were
+            // cut off. There the header moves up under the status bar (the
+            // handle gives way) and the wave tucks in closer, which gives the
+            // panel about 60dp more.
+            val compactTop = statusInset + if (shortLandscape) 4.dp else 40.dp
+            val compactWaveTop = compactTop + if (shortLandscape) 52.dp else 60.dp
+            val expandedTop = compactTop + if (shortLandscape) 80.dp else 104.dp
             val density = LocalDensity.current
             SideEffect {
                 panelTravel = with(density) { (collapsedTop - expandedTop).toPx() }.coerceAtLeast(1f)
@@ -484,27 +514,41 @@ fun PlayerScreen(
              * panel's collapsed top, so it holds its shape on any screen height.
              */
             val side = 26.dp
+            // Sideways, the camera cutout or the three-button bar can be on
+            // the right: the column keeps clear of them.
+            val endInset = if (landscape) {
+                WindowInsets.displayCutout.union(WindowInsets.navigationBars).asPaddingValues()
+                    .calculateRightPadding(LayoutDirection.Ltr)
+            } else {
+                0.dp
+            }
             // The controls' column: the full width in portrait (the same
             // numbers as ever); beside the cover in landscape, starting just
             // inside its dissolve. The compact header above an open panel
             // follows the column too.
             val colLeft = if (landscape) artWidth - 24.dp else side
-            val colW = if (landscape) w - colLeft - side else w - side * 2
+            val colW = if (landscape) w - colLeft - side - endInset else w - side * 2
             val cLeft = if (landscape) colLeft else 24.dp
             val cW = if (landscape) colW else w - 48.dp
             // Landscape: the stack (title to volume, 274dp) centers in the
             // height above the strip, beside a cover that fills it, instead
             // of sitting on the strip as it does under a portrait cover.
-            val lift = if (landscape) {
-                ((collapsedTop - 18.dp - (statusInset + 32.dp) - 274.dp) / 2).coerceAtLeast(0.dp)
-            } else {
-                0.dp
+            //
+            // A phone sideways has no room for that: the volume row goes (the
+            // phone's own buttons are right there), the transport is 64dp
+            // rather than 76, and the gaps tighten, so title to transport is
+            // 196dp and still centers between the status bar and the strip.
+            val groupH = if (shortLandscape) 64.dp else 76.dp
+            val lift = when {
+                shortLandscape -> ((collapsedTop - 14.dp - (statusInset + 12.dp) - 196.dp) / 2).coerceAtLeast(0.dp)
+                landscape -> ((collapsedTop - 18.dp - (statusInset + 32.dp) - 274.dp) / 2).coerceAtLeast(0.dp)
+                else -> 0.dp
             }
             val volumeTop = collapsedTop - 18.dp - 32.dp - lift
-            val groupTop = volumeTop - 22.dp - 76.dp
-            val timesTop = groupTop - 16.dp - 18.dp
-            val sliderTop = timesTop - 6.dp - 30.dp
-            val titleTop = sliderTop - 14.dp - 60.dp
+            val groupTop = if (shortLandscape) collapsedTop - 14.dp - groupH - lift else volumeTop - 22.dp - groupH
+            val timesTop = groupTop - (if (shortLandscape) 10.dp else 16.dp) - 18.dp
+            val sliderTop = timesTop - (if (shortLandscape) 4.dp else 6.dp) - 30.dp
+            val titleTop = sliderTop - (if (shortLandscape) 10.dp else 14.dp) - 60.dp
 
             // Title and show name, scaled down into the header.
             // The icons beside the title: download and cast. (A moon joined
@@ -522,6 +566,14 @@ fun PlayerScreen(
                         scaleX = titleScale
                         scaleY = titleScale
                         transformOrigin = TransformOrigin(0f, 0f)
+                    }
+                    // The title and show name lead to the show's page.
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) {
+                        haptics.play(Haptic.Tap)
+                        onOpenShow()
                     }
             ) {
                 /*
@@ -597,7 +649,7 @@ fun PlayerScreen(
             // The wave, thinning into the header's.
             val sliderRect = mix(
                 DpRect(colLeft, sliderTop, colW, 30.dp),
-                DpRect(cLeft, compactTop + 60.dp, cW, 18.dp),
+                DpRect(cLeft, compactWaveTop, cW, 18.dp),
                 e
             )
             WavySlider(
@@ -613,6 +665,8 @@ fun PlayerScreen(
                 voice = { com.glasscast.app.player.VoiceLevel.current() },
                 marks = adMarks,
                 markColor = colors.adMark,
+                // Where the bookmarks are, as small dots under the line.
+                ticks = if (durationMs > 0) bookmarks.map { it.positionMs.toFloat() / durationMs } else emptyList(),
                 onScrubStart = {
                     scrubbing = true
                     scrubValue = progress
@@ -652,7 +706,7 @@ fun PlayerScreen(
             // The transport: five buttons at rest, three in the header. Back
             // and forward 30 and play travel to their compact slots; restart
             // and next narrow away into the group's ends as they fade.
-            val fullSlots = DpRect(colLeft, groupTop, colW, 76.dp)
+            val fullSlots = DpRect(colLeft, groupTop, colW, groupH)
                 .split(listOf(0.78f, 1f, 1.7f, 1f, 0.78f), 4.dp)
             val compactSlots = DpRect(cLeft + cW - 178.dp, compactTop, 178.dp, 48.dp)
                 .split(listOf(1f, 1.3f, 1f), 4.dp)
@@ -686,11 +740,11 @@ fun PlayerScreen(
                 rect = mix(fullSlots[1], compactSlots[0], e),
                 corners = mix(Corners(10.dp, 10.dp, 10.dp, 10.dp), Corners(20.dp, 8.dp, 8.dp, 20.dp), e),
                 container = quiet, content = OnPlayer,
-                icon = Icons.Filled.Replay30, description = tr("Back 30 seconds"),
+                icon = skipBackIcon(skipSeconds), description = tr("Back {0} seconds", skipSeconds),
                 iconSize = mix(28.dp, 20.dp, e)
             ) {
                 haptics.play(Haptic.SkipBack)
-                onSeekBy(-30_000)
+                onSeekBy(-skipSeconds * 1_000L)
             }
             Box(
                 Modifier
@@ -723,11 +777,11 @@ fun PlayerScreen(
                 rect = mix(fullSlots[3], compactSlots[2], e),
                 corners = mix(Corners(10.dp, 10.dp, 10.dp, 10.dp), Corners(8.dp, 20.dp, 20.dp, 8.dp), e),
                 container = quiet, content = OnPlayer,
-                icon = Icons.Filled.Forward30, description = tr("Forward 30 seconds"),
+                icon = skipForwardIcon(skipSeconds), description = tr("Forward {0} seconds", skipSeconds),
                 iconSize = mix(28.dp, 20.dp, e)
             ) {
                 haptics.play(Haptic.SkipForward)
-                onSeekBy(30_000)
+                onSeekBy(skipSeconds * 1_000L)
             }
             if (fade > 0f) {
                 MorphButton(
@@ -743,7 +797,7 @@ fun PlayerScreen(
                 }
             }
 
-            if (fade > 0f) {
+            if (fade > 0f && !shortLandscape) {
                 Box(
                     Modifier
                         .offset(colLeft, volumeTop)
@@ -760,6 +814,7 @@ fun PlayerScreen(
                 tab = panelTab,
                 art = art,
                 upNextCount = upNextCount,
+                bookmarkCount = bookmarks.size,
                 speed = speed,
                 timerArmed = timerArmed,
                 surface = panelColor,
@@ -769,7 +824,7 @@ fun PlayerScreen(
                 onDragEnd = { settlePanel(it) },
                 modifier = Modifier
                     .then(
-                        if (landscape) Modifier.offset(x = colLeft - 10.dp).width(colW + side + 10.dp)
+                        if (landscape) Modifier.offset(x = colLeft - 10.dp).width(colW + side + endInset + 10.dp)
                         else Modifier.fillMaxWidth()
                     )
                     .height(maxHeight - expandedTop)
@@ -795,6 +850,17 @@ fun PlayerScreen(
                         listModifier = Modifier
                             .fillMaxSize()
                             .padding(bottom = navInset)
+                    )
+                    PanelTab.BOOKMARKS -> PanelBookmarks(
+                        bookmarks = bookmarks,
+                        positionMs = positionMs,
+                        surface = panelColor,
+                        accent = panelAccent,
+                        onAdd = onAddBookmark,
+                        onSeekTo = onSeekTo,
+                        onMemo = onBookmarkMemo,
+                        onRemove = onRemoveBookmark,
+                        bottomInset = navInset
                     )
                     PanelTab.SPEED -> SpeedPanel(
                         speed = speed,
@@ -927,22 +993,29 @@ private fun MorphButton(
  * the seam instead of stopping at it, and the sharp cover laid on top dissolves
  * into its own blurred self before the reflection begins.
  *
- * Underneath, a tiny full-screen blur fills anything below the reflection on
- * very tall screens, and a scrim deepens toward the controls so white type
- * always reads.
+ * The reflection runs to the far edge of the screen ([length]). It used to be
+ * exactly as long as the cover, which covers a portrait phone, but a phone on
+ * its side is more than twice as wide as it is tall: the reflection stopped
+ * short and left a strip of the plain blur below as a block of another color
+ * down the right side. Where the screen is longer than twice the cover, the
+ * reflection is stretched to fill it.
+ *
+ * Underneath, a tiny full-screen blur shows before the pair is ready, and a
+ * scrim deepens toward the controls so white type always reads.
  */
 @Composable
-private fun PlayerBackdrop(url: String, band: Dp, sideways: Boolean, aspect: Float, modifier: Modifier = Modifier) {
+private fun PlayerBackdrop(url: String, band: Dp, length: Dp, sideways: Boolean, aspect: Float, modifier: Modifier = Modifier) {
     // Rounded, so the mirror is made once per layout, not on every tiny change.
     val aspectKey = (aspect * 100f).roundToInt() / 100f
+    val reach = if (band > 0.dp) ((length / band).coerceIn(2f, 4f) * 20f).roundToInt() / 20f else 2f
     val store = LocalImageStore.current
     // Both layers are made once per cover, off the main thread, as tiny
     // pre-blurred bitmaps (see SoftBitmaps.kt). They used to be live
     // Modifier.blur layers — two full-screen GPU blurs recomputed on every
     // frame, and the player redraws every frame while the wave moves.
     var field by remember(url) { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
-    var mirror by remember(url, sideways, aspectKey) { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
-    LaunchedEffect(url, sideways, aspectKey) {
+    var mirror by remember(url, sideways, aspectKey, reach) { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
+    LaunchedEffect(url, sideways, aspectKey, reach) {
         if (url.isBlank()) return@LaunchedEffect
         val source = store.peek(url, 160) ?: store.load(url, 160) ?: return@LaunchedEffect
         withContext(Dispatchers.Default) {
@@ -950,7 +1023,7 @@ private fun PlayerBackdrop(url: String, band: Dp, sideways: Boolean, aspect: Flo
             // Portrait: the reflection below. Landscape: to the right, flipped
             // sideways — stretching the portrait one sideways smeared the
             // cover's right edge across the controls.
-            val pair = (if (sideways) softenedMirrorSideways(source, aspectKey) else softenedMirror(source, aspectKey)).asImageBitmap()
+            val pair = (if (sideways) softenedMirrorSideways(source, aspectKey, reach) else softenedMirror(source, aspectKey, reach)).asImageBitmap()
             withContext(Dispatchers.Main) {
                 field = soft
                 mirror = pair
@@ -976,7 +1049,7 @@ private fun PlayerBackdrop(url: String, band: Dp, sideways: Boolean, aspect: Flo
 
         // Cover over its own reflection, softened as one image — so the blur
         // runs across the seam — and stretched to the cover band plus its
-        // mirror below.
+        // mirror below, to the screen's far edge.
         mirror?.let { image ->
             Image(
                 bitmap = image,
@@ -984,9 +1057,9 @@ private fun PlayerBackdrop(url: String, band: Dp, sideways: Boolean, aspect: Flo
                 contentScale = ContentScale.FillBounds,
                 filterQuality = FilterQuality.Low,
                 modifier = if (sideways) {
-                    Modifier.width(band * 2).fillMaxHeight()
+                    Modifier.width(band * reach).fillMaxHeight()
                 } else {
-                    Modifier.fillMaxWidth().height(band * 2)
+                    Modifier.fillMaxWidth().height(band * reach)
                 }
             )
         }

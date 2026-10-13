@@ -6,7 +6,9 @@ import androidx.work.WorkerParameters
 import com.glasscast.app.GlassCastApp
 
 /**
- * Refresh every show, and notify about episodes that are genuinely new.
+ * Refresh every show, start any auto-downloads that are due (on Wi-Fi; see
+ * AutoDownload), notify about episodes that are genuinely new, and sync with the
+ * Google account once a day when signed in.
  *
  * "New" is decided carefully, because a careless rule spams:
  *
@@ -26,7 +28,14 @@ class RefreshWorker(context: Context, params: WorkerParameters) : CoroutineWorke
 
     override suspend fun doWork(): Result {
         val app = applicationContext as GlassCastApp
-        if (!app.settings.newEpisodeNotifications.value) return Result.success()
+        val notify = app.settings.newEpisodeNotifications.value
+        val refresh = notify || app.settings.autoDownload.value.isNotEmpty()
+        // The day's sync with the Google account rides along
+        // (GoogleAccount.syncIfDue): after the refresh when there is one.
+        if (!refresh) {
+            runCatching { app.account.syncIfDue() }
+            return Result.success()
+        }
 
         val store = app.feedStore
         store.awaitLoaded()
@@ -46,14 +55,18 @@ class RefreshWorker(context: Context, params: WorkerParameters) : CoroutineWorke
                 .map { feed to it }
         }.sortedByDescending { it.second.pubDate }
 
+        // Queued before this returns: the process can go once it does.
+        runCatching { app.autoDownload.run() }
+
         // Pick up progress and follows from other devices while we're here.
         runCatching { app.gpodder.sync() }
 
         store.flushNow()
 
-        if (fresh.isNotEmpty()) {
+        if (notify && fresh.isNotEmpty()) {
             NewEpisodeNotifier.post(applicationContext, fresh, app.imageStore)
         }
+        runCatching { app.account.syncIfDue() }
         return Result.success()
     }
 }

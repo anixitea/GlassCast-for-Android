@@ -9,6 +9,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SwitchColors
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -16,7 +18,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import kotlinx.coroutines.delay
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import java.text.SimpleDateFormat
@@ -165,3 +169,46 @@ fun Modifier.readableWidth(max: Dp = 720.dp): Modifier = this
     .wrapContentWidth(Alignment.CenterHorizontally)
     .widthIn(max = max)
     .fillMaxWidth()
+
+/**
+ * How far a page's big title has gone up under the top bar: 0 at rest, 1
+ * after 100dp of scroll (or once the first item is gone). It used to be raw
+ * pixels over 190, which on a dense phone is only about 70dp.
+ */
+@androidx.compose.runtime.Composable
+fun rememberTitleCollapse(index: () -> Int, offset: () -> Int): androidx.compose.runtime.State<Float> {
+    val travel = with(androidx.compose.ui.platform.LocalDensity.current) { 100.dp.toPx() }
+    return androidx.compose.runtime.remember(travel) {
+        androidx.compose.runtime.derivedStateOf {
+            if (index() > 0) 1f else (offset() / travel).coerceIn(0f, 1f)
+        }
+    }
+}
+
+/**
+ * The big title fades as it goes up, and is gone by 0.5, before the top bar's
+ * small title starts arriving at 0.55, so the two never show at once. Read in
+ * the layer, so scrolling doesn't recompose the page.
+ */
+fun Modifier.bigTitleFade(collapse: () -> Float): Modifier =
+    this.graphicsLayer { alpha = (1f - collapse() / 0.5f).coerceIn(0f, 1f) }
+
+/**
+ * The app's switch colors. Material's defaults draw an off switch's thumb and
+ * rim in the theme's outline color, and the light theme's outline is the same
+ * gray as the switch's track, so an off switch was an empty oval. Off is now
+ * a gray thumb inside a rimmed track, in light and dark alike; on is the
+ * accent with a white thumb (dark on a pale custom accent).
+ */
+@Composable
+internal fun glassSwitchColors(accent: Color = MaterialTheme.colorScheme.primary): SwitchColors {
+    val ink = MaterialTheme.colorScheme.onSurface
+    return SwitchDefaults.colors(
+        checkedTrackColor = accent,
+        checkedThumbColor = if (accent.luminance() > 0.6f) Color(0xFF16141A) else Color.White,
+        checkedBorderColor = accent,
+        uncheckedTrackColor = ink.copy(alpha = 0.06f),
+        uncheckedThumbColor = ink.copy(alpha = 0.42f),
+        uncheckedBorderColor = ink.copy(alpha = 0.26f)
+    )
+}

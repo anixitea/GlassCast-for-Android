@@ -24,7 +24,6 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -91,6 +90,36 @@ class PlayerConnection(
             ep?.let { store.feedFor(it) }
         }.stateIn(scope, SharingStarted.Eagerly, null)
 
+    /*
+     * What was playing last time, shown straight away. The saved queue is read
+     * once, here, before anything can write to it, and becomes the current
+     * episode and Up Next immediately: the mini player is back as soon as the
+     * library has loaded, without waiting for the player service to start.
+     * The service gets the queue itself when it connects (restorePersistedQueue).
+     */
+    private val savedQueue: List<String> = queueStore.load().first
+
+    /** True from connecting to an empty player until the saved queue is back in it. */
+    private var restoring = false
+
+    /** Asked to play before the player had anything (see [resume]). */
+    private var playWhenRestored = false
+
+    init {
+        if (savedQueue.isNotEmpty()) {
+            _currentMediaId.value = savedQueue.first()
+            _queueIds.value = savedQueue
+            scope.launch {
+                store.awaitLoaded()
+                // Until the player has it, the progress shown is the saved one.
+                if ((controller?.mediaItemCount ?: 0) > 0) return@launch
+                val ep = store.episodeByGuid(savedQueue.first()) ?: return@launch
+                _positionMs.value = if (ep.effectivelyPlayed) 0L else ep.positionMs
+                _durationMs.value = ep.durationMs.coerceAtLeast(0L)
+            }
+        }
+    }
+
     /** Where the current listening session began, for gPodder's "started". */
     private var sessionStartMs = 0L
 
@@ -128,20 +157,48 @@ class PlayerConnection(
     }
 
     fun connect() {
-        if (controller != null) return
+        // A controller whose service has gone (the app was swiped away while
+        // paused, and the process lived on) is dead: start again.
+        controller?.let { if (it.isConnected || connecting) return else release() }
+        if (connecting) return
+        connecting = true
         val token = SessionToken(context, ComponentName(context, PlaybackService::class.java))
-        val future = MediaController.Builder(context, token).buildAsync()
+        val future = MediaController.Builder(context, token)
+            .setListener(object : MediaController.Listener {
+                override fun onDisconnected(controller: MediaController) {
+                    if (this@PlayerConnection.controller !== controller) return
+                    release()
+                    _isPlaying.value = false
+                }
+            })
+            .buildAsync()
         future.addListener({
+            connecting = false
             val c = runCatching { future.get() }.getOrNull() ?: return@addListener
             controller = c
             c.addListener(listener)
-            _currentMediaId.value = c.currentMediaItem?.mediaId
-            syncQueue()
-            pullState()
+            /*
+             * An empty player means the service is new: bring the saved queue
+             * back. This used to sync first, which saved the empty playlist
+             * over the saved queue and then restored nothing, so GlassCast
+             * never remembered what was playing once the app was closed.
+             */
+            if (c.mediaItemCount == 0) {
+                restorePersistedQueue(c)
+            } else {
+                _currentMediaId.value = c.currentMediaItem?.mediaId
+                syncQueue()
+                pullState()
+                if (playWhenRestored) {
+                    playWhenRestored = false
+                    c.play()
+                }
+            }
             startTicker()
-            if (c.mediaItemCount == 0) restorePersistedQueue()
         }, ContextCompat.getMainExecutor(context))
     }
+
+    private var connecting = false
 
     fun release() {
         controller?.removeListener(listener)
@@ -161,6 +218,8 @@ class PlayerConnection(
 
     private fun syncQueue() {
         val c = controller ?: return
+        // The player is still empty while the saved queue is on its way back.
+        if (restoring && c.mediaItemCount == 0) return
         val ids = (0 until c.mediaItemCount).map { c.getMediaItemAt(it).mediaId }
         _queueIds.value = ids
         _queueIndex.value = 0
@@ -180,25 +239,43 @@ class PlayerConnection(
     }
 
     /**
-     * Waits for the store to finish loading before rebuilding, because the
-     * controller can connect well before the episode JSON has been read off
-     * disk — restoring against an empty store silently drops the queue.
+     * Puts the saved queue back into a new, empty player. Waits for the store
+     * to finish loading, because the controller can connect well before the
+     * episode JSON has been read off disk. The queue is the one read at
+     * start-up, or what's been queued since, whichever is current.
      */
-    private fun restorePersistedQueue() {
-        val (guids, _) = queueStore.load()
-        if (guids.isEmpty()) return
+    private fun restorePersistedQueue(c: MediaController) {
+        val guids = _queueIds.value.ifEmpty { savedQueue }
+        if (guids.isEmpty()) {
+            playWhenRestored = false
+            return
+        }
+        restoring = true
         scope.launch {
-            store.episodes.first { it.isNotEmpty() }
-            val c = controller ?: return@launch
-            if (c.mediaItemCount > 0) return@launch
-            val episodes = guids.mapNotNull { store.episodeByGuid(it) }
-            if (episodes.isEmpty()) return@launch
-            val startAt = episodes[0].let { if (it.effectivelyPlayed) 0L else it.positionMs }
-            c.setMediaItems(episodes.map { mediaItemFor(it, store.feedFor(it)) }, 0, startAt)
-            c.prepare()
-            // Restored, not resumed. Nobody wants audio when they open the app.
-            syncQueue()
-            _currentMediaId.value = c.currentMediaItem?.mediaId
+            try {
+                store.awaitLoaded()
+                // Something was played meanwhile, or this controller is gone.
+                if (controller !== c || c.mediaItemCount > 0) return@launch
+                val episodes = guids.mapNotNull { store.episodeByGuid(it) }
+                if (episodes.isEmpty()) {
+                    _currentMediaId.value = null
+                    return@launch
+                }
+                val startAt = episodes[0].let { if (it.effectivelyPlayed) 0L else it.positionMs }
+                c.setMediaItems(episodes.map { mediaItemFor(it, store.feedFor(it)) }, 0, startAt)
+                c.prepare()
+                // Restored, not resumed: nobody wants audio when they open the
+                // app. Unless they asked for it (the Resume shortcut).
+                if (playWhenRestored) c.play()
+                _currentMediaId.value = c.currentMediaItem?.mediaId
+            } finally {
+                restoring = false
+                playWhenRestored = false
+                if (controller === c) {
+                    syncQueue()
+                    pullState()
+                }
+            }
         }
     }
 
@@ -310,6 +387,8 @@ class PlayerConnection(
         val c = controller ?: return
         _isPlaying.value = c.isPlaying
         _speed.value = c.playbackParameters.speed
+        // An empty player has no progress to report; keep the remembered one.
+        if (c.mediaItemCount == 0) return
         val d = c.duration
         _durationMs.value = if (d > 0 && d != C.TIME_UNSET) d else 0L
         _positionMs.value = c.currentPosition.coerceAtLeast(0L)
@@ -322,7 +401,7 @@ class PlayerConnection(
         scope.launch {
             while (true) {
                 val c = controller
-                if (c != null) {
+                if (c != null && c.mediaItemCount > 0) {
                     _positionMs.value = c.currentPosition.coerceAtLeast(0L)
                     val d = c.duration
                     if (d > 0 && d != C.TIME_UNSET) _durationMs.value = d
@@ -356,6 +435,47 @@ class PlayerConnection(
             c.seekTo(index, pos)
             if (wasPlaying) c.play()
         }
+    }
+
+    /**
+     * Puts a restored queue (from a backup) in place, paused, when nothing is
+     * loaded. Anything already playing or queued is left alone.
+     */
+    fun loadQueue(episodes: List<Episode>) {
+        if (episodes.isEmpty() || _currentMediaId.value != null) return
+        val c = controller
+        val ids = episodes.map { it.guid }
+        if (c != null && c.isConnected && !restoring) {
+            if (c.mediaItemCount > 0) return
+            val first = episodes[0]
+            c.setMediaItems(episodes.map { mediaItemFor(it, store.feedFor(it)) }, 0, if (first.effectivelyPlayed) 0L else first.positionMs)
+            c.prepare()
+            _currentMediaId.value = first.guid
+            syncQueue()
+            pullState()
+        } else {
+            // Not connected yet: it becomes the saved queue, restored on connect.
+            _queueIds.value = ids
+            _currentMediaId.value = ids.first()
+            queueStore.save(ids, 0)
+        }
+    }
+
+    /**
+     * Plays what's loaded: the Resume shortcut. At once if the player has it;
+     * otherwise as soon as the saved queue is back in it, since the app has
+     * usually only just started.
+     */
+    fun resume() {
+        val c = controller
+        if (c != null && c.isConnected && !restoring) {
+            // Connected and settled: play what's there, if anything. Nothing
+            // is left pending, or a later connection would start by itself.
+            if (c.mediaItemCount > 0) c.play()
+            return
+        }
+        playWhenRestored = true
+        connect()
     }
 
     fun togglePlayPause() {

@@ -82,6 +82,34 @@ class Settings(context: Context) {
     private val _shakeToRestart = MutableStateFlow(prefs.getBoolean(KEY_SHAKE, false))
     val shakeToRestart: StateFlow<Boolean> = _shakeToRestart.asStateFlow()
 
+    /**
+     * How far the back and forward buttons skip: 15 or 30 seconds. The app's
+     * buttons follow it, and so does anything that skips through the session
+     * (the notification, Android Auto, a headset's rewind and fast-forward).
+     */
+    private val _skipSeconds = MutableStateFlow(if (prefs.getInt(KEY_SKIP_SECONDS, 30) == 15) 15 else 30)
+    val skipSeconds: StateFlow<Int> = _skipSeconds.asStateFlow()
+
+    fun setSkipSeconds(seconds: Int) {
+        val s = if (seconds == 15) 15 else 30
+        _skipSeconds.value = s
+        prefs.edit().putInt(KEY_SKIP_SECONDS, s).apply()
+    }
+
+    /**
+     * What a headset's next and previous buttons do: skip forward and back
+     * (on), or change episode (off). On by default: earbuds mostly send next
+     * and previous, and a double-tap that drops the episode you're in the
+     * middle of is rarely what anyone listening to a podcast meant.
+     */
+    private val _headphoneSkip = MutableStateFlow(prefs.getBoolean(KEY_HEADPHONE_SKIP, true))
+    val headphoneSkip: StateFlow<Boolean> = _headphoneSkip.asStateFlow()
+
+    fun setHeadphoneSkip(on: Boolean) {
+        _headphoneSkip.value = on
+        prefs.edit().putBoolean(KEY_HEADPHONE_SKIP, on).apply()
+    }
+
     /** On by default: it's what most people expect a podcast app to do. */
     private val _newEpisodeNotifications = MutableStateFlow(prefs.getBoolean(KEY_NEW_EPISODES, true))
     val newEpisodeNotifications: StateFlow<Boolean> = _newEpisodeNotifications.asStateFlow()
@@ -90,9 +118,40 @@ class Settings(context: Context) {
         _newEpisodeNotifications.value = enabled
         prefs.edit().putBoolean(KEY_NEW_EPISODES, enabled).apply()
         // Turning it off cancels the background job outright rather than
-        // leaving it running to do nothing.
-        com.glasscast.app.background.BackgroundRefresh.apply(appContext, enabled)
+        // leaving it running to do nothing (unless a show still downloads).
+        com.glasscast.app.background.BackgroundRefresh.apply(appContext, backgroundRefreshWanted)
     }
+
+    /**
+     * Shows that download new episodes on their own, by feed URL, with when
+     * that was turned on. Only episodes published since then are downloaded
+     * (see AutoDownload), so turning it on never pulls in a back catalog.
+     */
+    private val _autoDownload = MutableStateFlow(loadAutoDownload())
+    val autoDownload: StateFlow<Map<String, Long>> = _autoDownload.asStateFlow()
+
+    fun setAutoDownload(feedUrl: String, on: Boolean) {
+        val current = _autoDownload.value
+        if (on == (feedUrl in current)) return
+        val next = if (on) current + (feedUrl to System.currentTimeMillis()) else current - feedUrl
+        _autoDownload.value = next
+        val json = org.json.JSONObject()
+        next.forEach { (url, since) -> json.put(url, since) }
+        prefs.edit().putString(KEY_AUTO_DOWNLOAD, json.toString()).apply()
+        com.glasscast.app.background.BackgroundRefresh.apply(appContext, backgroundRefreshWanted)
+    }
+
+    private fun loadAutoDownload(): Map<String, Long> = runCatching {
+        val json = org.json.JSONObject(prefs.getString(KEY_AUTO_DOWNLOAD, "{}") ?: "{}")
+        json.keys().asSequence().associateWith { json.getLong(it) }
+    }.getOrDefault(emptyMap())
+
+    /** Other reasons for the background job, outside Settings (the Drive backup). Set by the app. */
+    var alsoWantsBackground: () -> Boolean = { false }
+
+    /** The background job runs for new-episode notifications, auto-download or the Drive backup. */
+    val backgroundRefreshWanted: Boolean
+        get() = _newEpisodeNotifications.value || _autoDownload.value.isNotEmpty() || alsoWantsBackground()
 
     /** Skip the silences between sentences — ExoPlayer does this natively. */
     private val _skipSilence = MutableStateFlow(prefs.getBoolean(KEY_SKIP_SILENCE, false))
@@ -203,6 +262,41 @@ class Settings(context: Context) {
     fun setDynamicColor(enabled: Boolean) {
         _dynamicColor.value = enabled
         prefs.edit().putBoolean(KEY_DYNAMIC, enabled).apply()
+        // One accent at a time: the cover's, or the one picked.
+        if (enabled && _customColorOn.value) setCustomColorOn(false)
+    }
+
+    /**
+     * A color of the person's own for the accent (Settings > Appearance >
+     * Custom color), as ARGB. Off by default; turning it on turns dynamic
+     * color off, and the other way round.
+     */
+    private val _customColorOn = MutableStateFlow(prefs.getBoolean(KEY_CUSTOM_ON, false))
+    val customColorOn: StateFlow<Boolean> = _customColorOn.asStateFlow()
+    private val _customColor = MutableStateFlow(prefs.getInt(KEY_CUSTOM_COLOR, DEFAULT_CUSTOM))
+    val customColor: StateFlow<Int> = _customColor.asStateFlow()
+
+    fun setCustomColorOn(on: Boolean) {
+        _customColorOn.value = on
+        prefs.edit().putBoolean(KEY_CUSTOM_ON, on).apply()
+        if (on && _dynamicColor.value) setDynamicColor(false)
+    }
+
+    fun setCustomColor(argb: Int) {
+        _customColor.value = argb
+        prefs.edit().putInt(KEY_CUSTOM_COLOR, argb).apply()
+    }
+
+    /**
+     * The tab bar goes light over a dark page, as the mini player does. Off by
+     * default: the bar stays dark, and only the mini player changes.
+     */
+    private val _adaptiveTabBar = MutableStateFlow(prefs.getBoolean(KEY_ADAPTIVE_BAR, false))
+    val adaptiveTabBar: StateFlow<Boolean> = _adaptiveTabBar.asStateFlow()
+
+    fun setAdaptiveTabBar(on: Boolean) {
+        _adaptiveTabBar.value = on
+        prefs.edit().putBoolean(KEY_ADAPTIVE_BAR, on).apply()
     }
 
     fun setSort(sort: EpisodeSort) {
@@ -244,6 +338,14 @@ class Settings(context: Context) {
         const val KEY_SORT = "sort"
         const val KEY_SHOW_SORT = "show_sort"
         const val KEY_SHAKE = "shake_to_restart"
+        const val KEY_SKIP_SECONDS = "skip_seconds"
+        const val KEY_HEADPHONE_SKIP = "headphone_skip"
+        const val KEY_AUTO_DOWNLOAD = "auto_download"
+        const val KEY_CUSTOM_ON = "custom_color_on"
+        const val KEY_CUSTOM_COLOR = "custom_color"
+        const val KEY_ADAPTIVE_BAR = "adaptive_tab_bar"
+        /** The picker's starting point: GlassCast's purple. */
+        const val DEFAULT_CUSTOM = 0xFFAF52DE.toInt()
         const val KEY_HIDE_PLAYED = "hide_played_latest"
         const val KEY_HIDE_PLAYED_SHOWS = "hide_played_shows"
     }

@@ -103,23 +103,24 @@ fun DownloadsScreen(
     }
     BackHandler(enabled = selecting) { exitSelecting() }
     if (confirming) {
-        AlertDialog(
-            onDismissRequest = { confirming = false },
-            title = {
-                Text(if (selected.size == 1) tr("Delete this download?") else tr("Delete {0} downloads?", selected.size))
+        // The first chosen download stands for the set: its cover, and its
+        // title when it's the only one.
+        val chosen = selected.mapNotNull { downloads[it] }
+        val first = chosen.firstOrNull()
+        val firstEpisode = first?.let { episodesByGuid[it.guid] }
+        val firstFeed = first?.let { feedsByUrl[it.feedUrl] }
+        ConfirmSheet(
+            artUrl = firstEpisode?.imageUrl?.ifBlank { null } ?: firstFeed?.imageUrl.orEmpty(),
+            title = if (chosen.size == 1) first?.title.orEmpty() else tr("{0} downloads", chosen.size),
+            subtitle = if (chosen.size == 1) firstFeed?.title else null,
+            meta = formatBytes(chosen.sumOf { it.bytes }),
+            action = tr("Delete"),
+            icon = Icons.Outlined.DeleteOutline,
+            onConfirm = {
+                selected.forEach(onRemove)
+                exitSelecting()
             },
-            confirmButton = {
-                TextButton(onClick = {
-                    selected.forEach(onRemove)
-                    confirming = false
-                    exitSelecting()
-                }) { Text(tr("Delete"), color = MaterialTheme.colorScheme.error) }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirming = false }) {
-                    Text(tr("Cancel"), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
+            onDismiss = { confirming = false }
         )
     }
 

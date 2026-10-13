@@ -76,8 +76,16 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.BookmarkAdd
+import androidx.compose.material.icons.outlined.BookmarkBorder
+import androidx.compose.material.icons.filled.Bookmark
 
-enum class PanelTab { UP_NEXT, INFO, SPEED, TIMER }
+enum class PanelTab { UP_NEXT, INFO, BOOKMARKS, SPEED, TIMER }
 
 /** Height of the panel's header — also the collapsed strip, since they're one surface. */
 val PanelHeaderHeight: Dp = 80.dp
@@ -107,6 +115,7 @@ fun PlayerPanel(
     tab: PanelTab,
     art: String,
     upNextCount: Int,
+    bookmarkCount: Int,
     speed: Float,
     timerArmed: Boolean,
     surface: Color,
@@ -187,6 +196,7 @@ fun PlayerPanel(
                         Text(
                             text = when (shown) {
                                 PanelTab.INFO -> tr("Episode info")
+                                PanelTab.BOOKMARKS -> tr("Bookmarks")
                                 PanelTab.SPEED -> tr("Speed & sound")
                                 PanelTab.TIMER -> tr("Sleep timer")
                                 else -> tr("Playing Next")
@@ -198,6 +208,11 @@ fun PlayerPanel(
                         Text(
                             text = when {
                                 shown == PanelTab.INFO -> tr("Notes, chapters and transcript")
+                                shown == PanelTab.BOOKMARKS -> when (bookmarkCount) {
+                                    0 -> tr("No bookmarks")
+                                    1 -> tr("1 bookmark")
+                                    else -> tr("{0} bookmarks", bookmarkCount)
+                                }
                                 shown == PanelTab.SPEED -> formatSpeed(speed)
                                 shown == PanelTab.TIMER -> if (timerArmed) tr("Running") else tr("Off")
                                 upNextCount == 0 -> tr("Nothing queued")
@@ -227,6 +242,14 @@ fun PlayerPanel(
                     }
                     PanelTabButton(open && tab == PanelTab.INFO, { onTab(PanelTab.INFO) }) {
                         Icon(Icons.Outlined.Info, tr("Episode info"), Modifier.size(21.dp), tint = Ink)
+                    }
+                    PanelTabButton(open && tab == PanelTab.BOOKMARKS, { onTab(PanelTab.BOOKMARKS) }) {
+                        Icon(
+                            if (bookmarkCount > 0) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder,
+                            tr("Bookmarks"),
+                            Modifier.size(21.dp),
+                            tint = Ink
+                        )
                     }
                     PanelTabButton(open && tab == PanelTab.SPEED, { onTab(PanelTab.SPEED) }) {
                         Text(formatSpeed(speed), style = MaterialTheme.typography.titleSmall, color = Ink)
@@ -443,6 +466,242 @@ fun PanelQueue(
     }
 }
 
+// ------------------------------------------------------------------ bookmarks
+
+/**
+ * Bookmarks in this episode, as an audiobook player keeps them: a place to
+ * come back to, with a memo if you want one. Bookmark adds one where you are
+ * and opens its memo; tap a row to go there; swipe it left to delete it.
+ */
+@Composable
+fun PanelBookmarks(
+    bookmarks: List<com.glasscast.app.data.Bookmark>,
+    positionMs: Long,
+    surface: Color,
+    accent: Color,
+    onAdd: () -> Long,
+    onSeekTo: (Long) -> Unit,
+    onMemo: (Long, String) -> Unit,
+    onRemove: (Long) -> Unit,
+    bottomInset: Dp
+) {
+    val haptics = rememberHaptics()
+    // The bookmark whose memo is open for typing.
+    var editing by remember { mutableStateOf<Long?>(null) }
+
+    Column(Modifier.fillMaxSize()) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 22.dp)
+                .padding(top = 4.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Spacer(Modifier.weight(1f))
+            Row(
+                Modifier
+                    .clip(RoundedCornerShape(percent = 50))
+                    .background(accent.copy(alpha = 0.22f))
+                    .clickable {
+                        haptics.play(Haptic.Select)
+                        editing = onAdd()
+                    }
+                    .padding(start = 12.dp, end = 16.dp, top = 8.dp, bottom = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(Icons.Outlined.BookmarkAdd, contentDescription = null, tint = Ink, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    text = tr("Bookmark {0}", formatTime(positionMs)),
+                    style = MaterialTheme.typography.titleSmall,
+                    color = Ink
+                )
+            }
+        }
+
+        if (bookmarks.isEmpty()) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .padding(horizontal = 32.dp),
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Icon(
+                    Icons.Outlined.BookmarkBorder,
+                    contentDescription = null,
+                    tint = InkDim,
+                    modifier = Modifier.size(40.dp)
+                )
+                Spacer(Modifier.height(12.dp))
+                Text(tr("No bookmarks"), style = MaterialTheme.typography.titleMedium, color = Ink)
+                Spacer(Modifier.height(bottomInset + 60.dp))
+            }
+            return@Column
+        }
+
+        LazyColumn(
+            contentPadding = PaddingValues(bottom = bottomInset + 16.dp),
+            modifier = Modifier
+                .fillMaxSize()
+                .imePadding()
+        ) {
+            items(bookmarks, key = { it.id }) { bookmark ->
+                val latestRemove by rememberUpdatedState { onRemove(bookmark.id) }
+                val state = rememberSwipeToDismissBoxState(
+                    confirmValueChange = { value ->
+                        if (value == SwipeToDismissBoxValue.EndToStart) {
+                            latestRemove()
+                            true
+                        } else {
+                            false
+                        }
+                    },
+                    positionalThreshold = { it * 0.35f }
+                )
+                SwipeToDismissBox(
+                    state = state,
+                    enableDismissFromStartToEnd = false,
+                    modifier = Modifier.animateItem(),
+                    backgroundContent = {
+                        if (state.dismissDirection == SwipeToDismissBoxValue.EndToStart) {
+                            Box(
+                                Modifier
+                                    .fillMaxSize()
+                                    .background(Color(0xFFB3261E).copy(alpha = 0.55f))
+                                    .padding(end = 28.dp),
+                                contentAlignment = Alignment.CenterEnd
+                            ) {
+                                Icon(Icons.Filled.DeleteOutline, tr("Remove"), tint = Ink)
+                            }
+                        }
+                    }
+                ) {
+                    BookmarkRow(
+                        bookmark = bookmark,
+                        surface = surface,
+                        accent = accent,
+                        editing = editing == bookmark.id,
+                        onClick = {
+                            haptics.play(Haptic.Tap)
+                            onSeekTo(bookmark.positionMs)
+                        },
+                        onEdit = { editing = bookmark.id },
+                        onDone = { memo ->
+                            onMemo(bookmark.id, memo)
+                            editing = null
+                        }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BookmarkRow(
+    bookmark: com.glasscast.app.data.Bookmark,
+    surface: Color,
+    accent: Color,
+    editing: Boolean,
+    onClick: () -> Unit,
+    onEdit: () -> Unit,
+    onDone: (String) -> Unit
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .background(surface)
+            .clickable(enabled = !editing, onClick = onClick)
+            .padding(horizontal = 22.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            Modifier
+                .clip(RoundedCornerShape(10.dp))
+                .background(accent.copy(alpha = 0.18f))
+                .padding(horizontal = 10.dp, vertical = 6.dp)
+        ) {
+            Text(
+                text = formatTime(bookmark.positionMs),
+                style = MaterialTheme.typography.titleSmall,
+                color = accent
+            )
+        }
+        Spacer(Modifier.width(14.dp))
+        if (editing) {
+            var text by remember(bookmark.id) {
+                mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(bookmark.memo))
+            }
+            val focus = remember { androidx.compose.ui.focus.FocusRequester() }
+            androidx.compose.runtime.LaunchedEffect(Unit) { focus.requestFocus() }
+            Box(Modifier.weight(1f)) {
+                if (text.text.isEmpty()) {
+                    Text(tr("Memo"), style = MaterialTheme.typography.bodyMedium, color = InkDim)
+                }
+                androidx.compose.foundation.text.BasicTextField(
+                    value = text,
+                    onValueChange = { text = it },
+                    textStyle = MaterialTheme.typography.bodyMedium.copy(color = Ink),
+                    cursorBrush = androidx.compose.ui.graphics.SolidColor(accent),
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                        capitalization = androidx.compose.ui.text.input.KeyboardCapitalization.Sentences,
+                        imeAction = androidx.compose.ui.text.input.ImeAction.Done
+                    ),
+                    keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { onDone(text.text) }),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .focusRequester(focus)
+                )
+            }
+            Spacer(Modifier.width(8.dp))
+            Box(
+                Modifier
+                    .size(36.dp)
+                    .clip(CircleShape)
+                    .background(accent)
+                    .clickable { onDone(text.text) },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    Icons.Filled.Check,
+                    contentDescription = tr("Done"),
+                    tint = if (accent.luminance() > 0.62f) Color(0xFF101014) else Color.White,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+        } else {
+            Column(Modifier.weight(1f)) {
+                if (bookmark.memo.isNotBlank()) {
+                    Text(
+                        text = bookmark.memo,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Ink,
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                Text(
+                    text = formatDate(bookmark.createdAt),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = InkDim
+                )
+            }
+            Spacer(Modifier.width(8.dp))
+            Box(
+                Modifier
+                    .size(36.dp)
+                    .clip(CircleShape)
+                    .clickable(onClick = onEdit),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Outlined.Edit, contentDescription = tr("Memo"), tint = InkDim, modifier = Modifier.size(20.dp))
+            }
+        }
+    }
+}
+
 // ------------------------------------------------------------------ speed
 
 private val SpeedPresets = listOf(0.8f, 1f, 1.2f, 1.5f, 1.8f, 2f)
@@ -590,9 +849,12 @@ fun TimerPanel(
     onShakeToggle: (Boolean) -> Unit,
     bottomInset: Dp
 ) {
+    // Scrolls, for a short open panel (a phone on its side): the chips and
+    // the switch were cut off below the panel's edge with no way to reach them.
     Column(
         Modifier
             .fillMaxSize()
+            .verticalScroll(rememberScrollState())
             .padding(horizontal = 26.dp)
             .padding(top = 12.dp, bottom = bottomInset + 16.dp)
     ) {

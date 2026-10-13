@@ -246,6 +246,9 @@ class FeedStore(context: Context) {
         onSubscriptionChanged?.invoke(feed.url, false)
     }
 
+    /** Told after every refresh, one show or all: auto-download looks for new episodes then. */
+    var onRefreshed: (() -> Unit)? = null
+
     suspend fun refresh(feed: Feed) = withContext(Dispatchers.IO) {
         _refreshing.value = true
         try {
@@ -254,6 +257,7 @@ class FeedStore(context: Context) {
             merge(feed.url, result)
         } finally {
             _refreshing.value = false
+            onRefreshed?.invoke()
         }
     }
 
@@ -266,6 +270,7 @@ class FeedStore(context: Context) {
             }
         } finally {
             _refreshing.value = false
+            onRefreshed?.invoke()
         }
     }
 
@@ -307,6 +312,47 @@ class FeedStore(context: Context) {
         }
         markFeedsDirty()
         markEpisodesDirty(feedUrl)
+    }
+
+    /**
+     * Played marks and places from a backup, by episode guid. Whichever is
+     * further along wins: played beats unplayed, and a later place beats an
+     * earlier one, so restoring onto a phone that's been used loses nothing.
+     * One write per show touched.
+     */
+    fun applyProgress(saved: Map<String, SavedProgress>) {
+        if (saved.isEmpty()) return
+        val touched = mutableSetOf<String>()
+        _episodes.value = _episodes.value.mapValues { (url, list) ->
+            list.map { ep ->
+                val s = saved[ep.guid] ?: return@map ep
+                val played = ep.played || s.played
+                val position = if (played) 0L else maxOf(ep.positionMs, s.positionMs)
+                val duration = if (ep.durationMs > 0) ep.durationMs else s.durationMs
+                if (played == ep.played && position == ep.positionMs && duration == ep.durationMs) ep
+                else {
+                    touched += url
+                    ep.copy(played = played, positionMs = position, durationMs = duration)
+                }
+            }
+        }
+        touched.forEach { markEpisodesDirty(it) }
+    }
+
+    /** When each show was followed and last played, from a backup (keeps the library's order). */
+    fun restoreShowDates(dates: Map<String, Pair<Long, Long>>) {
+        if (dates.isEmpty()) return
+        var changed = false
+        _feeds.value = _feeds.value.map { feed ->
+            val (added, played) = dates[feed.url] ?: return@map feed
+            val next = feed.copy(
+                addedAt = if (added > 0) minOf(feed.addedAt, added) else feed.addedAt,
+                lastPlayedAt = maxOf(feed.lastPlayedAt, played)
+            )
+            if (next != feed) changed = true
+            next
+        }
+        if (changed) markFeedsDirty()
     }
 
     fun updateEpisode(updated: Episode) {

@@ -1,5 +1,6 @@
 package com.glasscast.app.ui
 
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -18,12 +19,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.scale
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import com.glasscast.app.R
 import com.glasscast.app.ui.theme.LocalBrandAccent
-import com.glasscast.app.ui.theme.LocalIsDark
 import kotlinx.coroutines.delay
 
 /**
@@ -31,11 +32,14 @@ import kotlinx.coroutines.delay
  * setting rather than the system's — otherwise someone running the app forced
  * to dark gets a white flash on every cold start.
  *
- * About a second, then a cross-fade. A launch screen you notice is too long.
+ * Drawn over the app, which is already composed underneath (GlassCastRoot),
+ * so the first real screen's work happens behind the mark instead of after
+ * it. About a second, then the whole thing fades away. It takes every touch
+ * until it's gone. [onOpening] is when it starts to fade: the app is usable
+ * from then on.
  */
 @Composable
-fun SplashScreen(onFinished: () -> Unit) {
-    val dark = LocalIsDark.current
+fun SplashScreen(onOpening: () -> Unit, onFinished: () -> Unit) {
     val accent = LocalBrandAccent.current
 
     var visible by remember { mutableStateOf(false) }
@@ -49,17 +53,27 @@ fun SplashScreen(onFinished: () -> Unit) {
         animationSpec = tween(560),
         label = "splashScale"
     )
+    val cover = remember { Animatable(1f) }
 
     LaunchedEffect(Unit) {
         visible = true
         delay(1_000)
+        onOpening()
+        cover.animateTo(0f, tween(420))
         onFinished()
     }
 
     Box(
         Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background),
+            .graphicsLayer { this.alpha = cover.value }
+            .background(MaterialTheme.colorScheme.background)
+            // Nothing underneath takes a touch until it's gone.
+            .pointerInput(Unit) {
+                awaitPointerEventScope {
+                    while (true) awaitPointerEvent().changes.forEach { it.consume() }
+                }
+            },
         contentAlignment = Alignment.Center
     ) {
         Icon(
