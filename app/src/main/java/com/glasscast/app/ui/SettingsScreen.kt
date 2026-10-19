@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
@@ -46,7 +47,6 @@ import androidx.compose.material.icons.outlined.SystemUpdate
 import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.derivedStateOf
@@ -77,6 +77,9 @@ import com.glasscast.app.data.GOOGLE_SIGN_IN
 import com.glasscast.app.data.Settings
 import com.glasscast.app.data.ShowSort
 import com.glasscast.app.data.ThemeMode
+import com.glasscast.app.data.Look
+import com.glasscast.app.ui.seaglass.seaGlass
+import com.glasscast.app.ui.seaglass.chromePill
 import dev.chrisbanes.haze.HazeState
 import kotlinx.coroutines.launch
 
@@ -108,6 +111,7 @@ fun SettingsScreen(
     val scrolled by remember { derivedStateOf { scroll.value > 0 } }
 
     val theme by settings.theme.collectAsStateWithLifecycle()
+    val look by settings.look.collectAsStateWithLifecycle()
     val dynamicColor by settings.dynamicColor.collectAsStateWithLifecycle()
     val customColorOn by settings.customColorOn.collectAsStateWithLifecycle()
     val customColor by settings.customColor.collectAsStateWithLifecycle()
@@ -157,6 +161,36 @@ fun SettingsScreen(
             if (GOOGLE_SIGN_IN) AccountCard()
 
             SettingsGroup(tr("APPEARANCE")) {
+                // The look first: Original or Sea Glass, each drawn as a
+                // little phone in that look (Sea Glass's with real glass on
+                // it), then the brightness in whichever was picked.
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(start = 12.dp, end = 12.dp, top = 12.dp, bottom = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Look.entries.forEach { option ->
+                        LookTile(
+                            look = option,
+                            label = when (option) {
+                                Look.ORIGINAL -> tr("Original")
+                                Look.SEA_GLASS -> tr("Sea Glass")
+                            },
+                            selected = option == look,
+                            modifier = Modifier.weight(1f),
+                            onClick = {
+                                if (option == Look.SEA_GLASS) {
+                                    clearScope.launch(kotlinx.coroutines.Dispatchers.Default) {
+                                        com.glasscast.app.ui.seaglass.GlassBody.warm()
+                                    }
+                                }
+                                settings.setLook(option)
+                            }
+                        )
+                    }
+                }
+                GroupDivider()
                 Row(
                     Modifier
                         .fillMaxWidth()
@@ -203,13 +237,12 @@ fun SettingsScreen(
                                 .border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f), CircleShape)
                         )
                         Spacer(Modifier.width(12.dp))
-                        Switch(
+                        AppSwitch(
                             checked = customColorOn,
                             onCheckedChange = { on ->
                                 haptics.play(if (on) Haptic.ToggleOn else Haptic.ToggleOff)
                                 settings.setCustomColorOn(on)
-                            },
-                            colors = glassSwitchColors()
+                            }
                         )
                     }
                 )
@@ -510,8 +543,7 @@ fun SettingsScreen(
                         alpha = shown
                         translationY = (1f - shown) * 8.dp.toPx()
                     }
-                    .clip(RoundedCornerShape(percent = 50))
-                    .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.94f))
+                    .chromePill(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.94f), seed = 12)
                     .padding(horizontal = 20.dp, vertical = 11.dp)
             ) {
                 Text(
@@ -544,6 +576,23 @@ internal object Badge {
 
 @Composable
 internal fun IconBadge(icon: ImageVector, color: Color, size: Dp = 32.dp, glyph: Color = Color.White) {
+    // Sea Glass: each badge is a small pebble of glass in its color, so a
+    // setting is still found by color first.
+    val tokens = com.glasscast.app.ui.seaglass.LocalSea.current
+    if (tokens != null) {
+        val pigment = com.glasscast.app.ui.seaglass.rememberPigment(color, tokens.dark)
+        com.glasscast.app.ui.seaglass.GlassSurface(
+            pigment = pigment,
+            dark = tokens.dark,
+            recipe = com.glasscast.app.ui.seaglass.GlassRecipe.Pebble,
+            seed = icon.name.hashCode(),
+            corner = 0.62f,
+            modifier = Modifier.size(size)
+        ) {
+            Icon(icon, contentDescription = null, tint = pigment.ink, modifier = Modifier.size(size * 0.56f))
+        }
+        return
+    }
     Box(
         Modifier
             .size(size)
@@ -568,11 +617,14 @@ internal fun SettingsGroup(title: String?, content: @Composable ColumnScope.() -
     } else {
         Spacer(Modifier.height(16.dp))
     }
+    val tokens = com.glasscast.app.ui.seaglass.LocalSea.current
     Column(
         Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(24.dp))
-            .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+            // Sea Glass: paper cards with a hairline edge.
+            .then(if (tokens != null) Modifier.border(0.75.dp, tokens.hairline, RoundedCornerShape(24.dp)) else Modifier),
         content = content
     )
 }
@@ -642,7 +694,7 @@ internal fun GroupSwitch(
         color = color,
         label = label,
         onClick = { flip(!checked) },
-        trailing = { Switch(checked = checked, onCheckedChange = { flip(it) }, colors = glassSwitchColors()) }
+        trailing = { AppSwitch(checked = checked, onCheckedChange = { flip(it) }) }
     )
 }
 
@@ -661,19 +713,43 @@ internal data class SegmentOption(val label: String, val icon: ImageVector? = nu
 @Composable
 internal fun Segmented(options: List<SegmentOption>, selected: Int, onSelect: (Int) -> Unit) {
     val haptics = rememberHaptics()
+    // Sea Glass: a groove in the page, the chosen option a capsule of the
+    // accent's glass resting in it.
+    val tokens = com.glasscast.app.ui.seaglass.LocalSea.current
     Row(
         Modifier
             .clip(CircleShape)
-            .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
+            .background(
+                if (tokens != null) com.glasscast.app.ui.seaglass.quietFill(tokens)
+                else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
+            )
+            .then(if (tokens != null) Modifier.border(0.75.dp, tokens.hairline, CircleShape) else Modifier)
             .padding(3.dp)
     ) {
         options.forEachIndexed { index, option ->
             val chosen = index == selected
-            val ink = if (chosen) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
+            val ink = when {
+                tokens != null && chosen -> tokens.brand.ink
+                chosen -> MaterialTheme.colorScheme.onPrimary
+                else -> MaterialTheme.colorScheme.onSurface
+            }
             Row(
                 Modifier
+                    .then(
+                        if (tokens != null && chosen) {
+                            Modifier.seaGlass(
+                                pigment = tokens.brand,
+                                recipe = com.glasscast.app.ui.seaglass.GlassRecipe.Quiet,
+                                seed = 3 + index,
+                                dark = tokens.dark,
+                                ground = false
+                            )
+                        } else {
+                            Modifier
+                        }
+                    )
                     .clip(CircleShape)
-                    .background(if (chosen) MaterialTheme.colorScheme.primary else Color.Transparent)
+                    .background(if (chosen && tokens == null) MaterialTheme.colorScheme.primary else Color.Transparent)
                     .clickable {
                         if (!chosen) {
                             haptics.play(Haptic.Select)
@@ -716,6 +792,7 @@ private fun ThemeTile(
 ) {
     val haptics = rememberHaptics()
     val ring = MaterialTheme.colorScheme.primary
+    val seaLook = com.glasscast.app.ui.seaglass.LocalSea.current != null
     Column(
         modifier
             .clip(RoundedCornerShape(18.dp))
@@ -739,12 +816,13 @@ private fun ThemeTile(
                     .padding(4.dp)
                     .clip(RoundedCornerShape(12.dp))
                     .drawBehind {
+                        val drawIt: DrawScope.(Boolean) -> Unit = { d -> if (seaLook) drawSeaMiniScreen(d) else drawMiniScreen(d) }
                         when (mode) {
-                            ThemeMode.LIGHT -> drawMiniScreen(dark = false)
-                            ThemeMode.DARK -> drawMiniScreen(dark = true)
+                            ThemeMode.LIGHT -> drawIt(false)
+                            ThemeMode.DARK -> drawIt(true)
                             ThemeMode.SYSTEM -> {
-                                drawMiniScreen(dark = false)
-                                clipRect(left = size.width / 2f) { drawMiniScreen(dark = true) }
+                                drawIt(false)
+                                clipRect(left = size.width / 2f) { drawIt(true) }
                             }
                         }
                     }
@@ -799,4 +877,154 @@ private fun DrawScope.drawMiniScreen(dark: Boolean) {
     drawRoundRect(ink, Offset(w * 0.2f, lineY), Size(w * 0.6f, h * 0.035f), CornerRadius(h))
     drawRoundRect(faint, Offset(w * 0.3f, lineY + h * 0.06f), Size(w * 0.4f, h * 0.03f), CornerRadius(h))
     drawRoundRect(chrome, Offset(w * 0.08f, h * 0.84f), Size(w * 0.84f, h * 0.1f), CornerRadius(h * 0.05f))
+}
+
+/** Where the mini screens' play pebble sits: its width and height as fractions of the width, its center of the height. */
+private const val SeaMiniPebbleWidth = 0.19f
+private const val SeaMiniPebbleHeight = 0.16f
+private const val SeaMiniPebbleCenter = 0.735f
+
+/** The Sea Glass page in miniature: paper (or tide), the wash, a cover, the title in a serif's weight. */
+private fun DrawScope.drawSeaMiniScreen(dark: Boolean) {
+    val ground = if (dark) com.glasscast.app.ui.seaglass.SeaTide else com.glasscast.app.ui.seaglass.SeaPaper
+    val ink = if (dark) Color(0xFFE8EEEA) else Color(0xFF233C37)
+    val wash = if (dark) Color(0xFF52405E) else Color(0xFFE1CDE8)
+    val w = size.width
+    val h = size.height
+    drawRect(ground)
+    drawRect(
+        Brush.radialGradient(
+            listOf(wash.copy(alpha = if (dark) 0.5f else 0.85f), wash.copy(alpha = 0f)),
+            center = Offset(w / 2f, h * 0.3f),
+            radius = w * 0.9f
+        )
+    )
+    // The cover, inset as the player sets it, then the title and the show.
+    val cover = minOf(w * 0.5f, h * 0.40f)
+    val top = h * 0.08f
+    drawRoundRect(
+        brush = Brush.linearGradient(IconGradient, Offset(0f, top), Offset(0f, top + cover)),
+        topLeft = Offset((w - cover) / 2f, top),
+        size = Size(cover, cover),
+        cornerRadius = CornerRadius(w * 0.06f)
+    )
+    val lineY = top + cover + h * 0.05f
+    drawRoundRect(ink.copy(alpha = 0.85f), Offset(w * 0.2f, lineY), Size(w * 0.6f, h * 0.035f), CornerRadius(h))
+    drawRoundRect(ink.copy(alpha = 0.3f), Offset(w * 0.3f, lineY + h * 0.06f), Size(w * 0.4f, h * 0.026f), CornerRadius(h))
+    // Play, as a flat pebble (the Look tile lays real glass over it).
+    val pebbleW = w * SeaMiniPebbleWidth
+    val pebbleH = w * SeaMiniPebbleHeight
+    drawOval(
+        if (dark) Color(0xFF52405E) else Color(0xFFE1CDE8),
+        Offset((w - pebbleW) / 2f, h * SeaMiniPebbleCenter - pebbleH / 2f),
+        Size(pebbleW, pebbleH)
+    )
+    // The tab bar: clear glass, drawn flat at this size.
+    drawRoundRect(
+        if (dark) Color(0xFF414B48) else Color(0xFFE9E9E2),
+        Offset(w * 0.1f, h * 0.85f),
+        Size(w * 0.8f, h * 0.085f),
+        CornerRadius(h)
+    )
+    drawRoundRect(
+        if (dark) Color(0xFF52405E) else Color(0xFFE1CDE8),
+        Offset(w * 0.13f, h * 0.86f),
+        Size(w * 0.2f, h * 0.065f),
+        CornerRadius(h)
+    )
+}
+
+/**
+ * A look as a little phone: the Original look as it always was, and Sea
+ * Glass with real glass on it (a play pebble and the tab bar), drawn by the
+ * same renderer as the app, so the tile is the look itself.
+ */
+@Composable
+private fun LookTile(
+    look: Look,
+    label: String,
+    selected: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    val haptics = rememberHaptics()
+    val ring = MaterialTheme.colorScheme.primary
+    val dark = com.glasscast.app.ui.theme.LocalIsDark.current
+    Column(
+        modifier
+            .clip(RoundedCornerShape(18.dp))
+            .clickable {
+                if (!selected) haptics.play(Haptic.Select)
+                onClick()
+            }
+            .padding(4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Box {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(0.86f)
+                    .border(
+                        width = if (selected) 2.5.dp else 1.dp,
+                        color = if (selected) ring else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f),
+                        shape = RoundedCornerShape(16.dp)
+                    )
+                    .padding(4.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .drawBehind {
+                        if (look == Look.SEA_GLASS) drawSeaMiniScreen(dark) else drawMiniScreen(dark)
+                    }
+            ) {
+                if (look == Look.SEA_GLASS) {
+                    // Real glass: the play pebble, in the icon's purple.
+                    val pigment = remember(dark) { com.glasscast.app.ui.seaglass.seaPigment(Color(0xFF9B37C3), dark) }
+                    androidx.compose.foundation.layout.BoxWithConstraints(Modifier.matchParentSize()) {
+                        val pw = maxWidth * SeaMiniPebbleWidth
+                        val ph = maxWidth * SeaMiniPebbleHeight
+                        Box(
+                            Modifier
+                                .offset(x = (maxWidth - pw) / 2, y = maxHeight * SeaMiniPebbleCenter - ph / 2)
+                                .size(width = pw, height = ph)
+                                .seaGlass(
+                                    pigment = pigment,
+                                    recipe = com.glasscast.app.ui.seaglass.GlassRecipe.Tumbled,
+                                    seed = 8,
+                                    dark = dark
+                                )
+                        )
+                    }
+                }
+            }
+            if (selected) {
+                Box(
+                    Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(6.dp)
+                        .size(18.dp)
+                        .clip(CircleShape)
+                        .background(ring),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        Icons.Filled.Check,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onPrimary,
+                        modifier = Modifier.size(12.dp)
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = label,
+            style = if (look == Look.SEA_GLASS) MaterialTheme.typography.labelLarge.copy(
+                fontFamily = com.glasscast.app.ui.theme.SeaSerif,
+                fontWeight = FontWeight.Normal,
+                fontSynthesis = androidx.compose.ui.text.font.FontSynthesis.None
+            ) else MaterialTheme.typography.labelLarge,
+            fontWeight = if (look == Look.SEA_GLASS) FontWeight.Normal else if (selected) FontWeight.SemiBold else FontWeight.Medium,
+            color = if (selected) ring else MaterialTheme.colorScheme.onSurface
+        )
+    }
 }

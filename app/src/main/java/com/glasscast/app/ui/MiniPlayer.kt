@@ -18,6 +18,8 @@ import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.drawscope.translate
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.layout.layout
@@ -63,6 +65,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.glasscast.app.data.Episode
+import kotlinx.coroutines.launch
 import com.glasscast.app.data.Feed
 import dev.chrisbanes.haze.HazeState
 
@@ -117,10 +120,29 @@ fun MiniPlayer(
     // (it crossfades when the page changes; see GlassCastRoot, chromeMix).
     // The bubble's ring keeps the original pair (surface, button) either way.
     val mix = pale.value.coerceIn(0f, 1f)
-    val cardBg = lerp(surface, button, mix)
-    val cardAccent = lerp(button, surface, mix)
-    val cardInk = lerp(Color.White, ChromeInk, mix)
-    val cardGlyph = lerp(ChromeInk, button, mix)
+    // Sea Glass: a paper card lying on the page in a pool of the cover's
+    // color, ink type, and play as a pebble of the cover's glass. The bubble
+    // is the cover set in a ring of that glass.
+    val tokens = com.glasscast.app.ui.seaglass.LocalSea.current
+    val pigment = if (tokens != null) {
+        com.glasscast.app.ui.seaglass.animatePigment(
+            androidx.compose.runtime.remember(colors, tokens.dark) { com.glasscast.app.ui.seaglass.seaPigment(colors.meshAccent, tokens.dark) }
+        )
+    } else {
+        null
+    }
+    // Sea Glass's bubble: the cover filled into a worn pebble, its progress
+    // traced round a line of the same shape just outside it. The outlines
+    // are rebuilt as the pebble breathes, into these.
+    val seaRing = remember { Path() }
+    val seaArc = remember { Path() }
+    val seaClip = remember { Path() }
+    val seaMeasure = remember { PathMeasure() }
+    // Sea Glass: paper with a little of the playing cover's color in it.
+    val cardBg = if (tokens != null && pigment != null) lerp(tokens.card, pigment.body, if (tokens.dark) 0.18f else 0.24f) else lerp(surface, button, mix)
+    val cardAccent = if (tokens != null) tokens.ink else lerp(button, surface, mix)
+    val cardInk = if (tokens != null) tokens.ink else lerp(Color.White, ChromeInk, mix)
+    val cardGlyph = if (pigment != null) pigment.ink else lerp(ChromeInk, button, mix)
     val progress = if (durationMs > 0) (positionMs.toFloat() / durationMs).coerceIn(0f, 1f) else 0f
     val progressState = rememberUpdatedState(progress)
 
@@ -143,7 +165,45 @@ fun MiniPlayer(
             .height(76.dp)
             .onGloballyPositioned { selfBounds = it.boundsInRoot() }
             .drawWithContent {
-                val f = m.frame(collapse.value.coerceIn(0f, 1f), size.width, barBounds(), selfBounds)
+                val p = collapse.value.coerceIn(0f, 1f)
+                val f = m.frame(p, size.width, barBounds(), selfBounds)
+                if (tokens != null && pigment != null) {
+                    // The card's ground: drawn at the card's resting size and
+                    // gone a third of the way into the collapse, so the
+                    // shrinking card never needs a new one.
+                    val rest = (1f - p * 6f).coerceIn(0f, 1f)
+                    if (rest > 0f) {
+                        translate(m.gutter, 0f) {
+                            with(com.glasscast.app.ui.seaglass.GlassGround) {
+                                drawCoverGround(
+                                    width = (size.width - m.gutter * 2f) / density.density,
+                                    height = m.cardH / density.density,
+                                    radius = m.cardCorner / density.density,
+                                    pigment = pigment,
+                                    dark = tokens.dark,
+                                    strength = rest * 0.55f
+                                )
+                            }
+                        }
+                    }
+                    // The bubble's shadow on the page, at its final size,
+                    // arriving with the ring.
+                    if (f.ringAlpha > 0f) {
+                        translate(f.rect.left, f.rect.top) {
+                            with(com.glasscast.app.ui.seaglass.GlassGround) {
+                                drawGround(
+                                    width = m.bubble / density.density,
+                                    height = m.bubble / density.density,
+                                    radius = m.bubble / 2f / density.density,
+                                    recipe = com.glasscast.app.ui.seaglass.GlassRecipe.Pebble,
+                                    pigment = pigment,
+                                    dark = tokens.dark,
+                                    strength = f.ringAlpha * 0.7f
+                                )
+                            }
+                        }
+                    }
+                }
                 // The container: card → pill → circle, fading as it becomes the bubble.
                 if (f.bgAlpha > 0f) {
                     val bg = cardBg
@@ -153,6 +213,16 @@ fun MiniPlayer(
                         size = f.rect.size,
                         cornerRadius = CornerRadius(f.radius)
                     )
+                    if (tokens != null) {
+                        val hairline = 0.75.dp.toPx()
+                        drawRoundRect(
+                            color = tokens.hairline.copy(alpha = f.bgAlpha),
+                            topLeft = f.rect.topLeft + Offset(hairline / 2f, hairline / 2f),
+                            size = Size(f.rect.width - hairline, f.rect.height - hairline),
+                            cornerRadius = CornerRadius(f.radius),
+                            style = Stroke(hairline)
+                        )
+                    }
                 }
                 // Everything inside stays inside the shape as it changes. The
                 // title and subtitle fade on their own timing, and growing back
@@ -162,18 +232,45 @@ fun MiniPlayer(
                 cardClip.reset()
                 cardClip.addRoundRect(RoundRect(f.rect, CornerRadius(f.radius)))
                 clipPath(cardClip) { this@drawWithContent.drawContent() }
+                // Sea Glass: the progress line round the pebble. It draws
+                // itself in round the shape as the cover settles, then the
+                // played part runs in the cover's ink, with a dot at its head.
+                if (f.ringAlpha > 0f && tokens != null && pigment != null) {
+                    val stroke = m.ringStroke * 0.86f
+                    seaBubbleOutline(
+                        seaRing, f.rect.width - stroke, f.rect.height - stroke, density.density,
+                        e = 1f, cornerDp = 0f, turn = spin.value / SeaBubbleBreath
+                    )
+                    translate(f.rect.left + stroke / 2f, f.rect.top + stroke / 2f) {
+                        seaMeasure.setPath(seaRing, true)
+                        val length = seaMeasure.length
+                        val shown = f.ringAlpha
+                        seaArc.reset()
+                        seaMeasure.getSegment(0f, length * shown, seaArc, true)
+                        drawPath(seaArc, tokens.ink.copy(alpha = 0.16f), style = Stroke(stroke, cap = StrokeCap.Round))
+                        val lit = if (tokens.dark) pigment.edge else pigment.ink
+                        val played = length * progressState.value * shown
+                        if (played > 0.5f) {
+                            seaArc.reset()
+                            seaMeasure.getSegment(0f, played, seaArc, true)
+                            drawPath(seaArc, lit, style = Stroke(stroke, cap = StrokeCap.Round))
+                            drawCircle(lit, radius = stroke * 0.95f, center = seaMeasure.getPosition(played))
+                        }
+                    }
+                } else if (f.ringAlpha > 0f) {
                 // The progress ring, tracing the bubble's scalloped edge.
-                if (f.ringAlpha > 0f) {
                     val stroke = m.ringStroke
                     val rotation = (spin.value / 2.4f) * (2 * PI / CookieLobes).toFloat()
                     val ring = cookiePath(f.rect.width, f.rect.height, rotation = rotation, inset = stroke / 2f, steps = 72)
                     ring.close()
                     translate(f.rect.left, f.rect.top) {
-                        drawPath(ring, surface.copy(alpha = f.ringAlpha), style = Stroke(stroke))
+                        val track = if (tokens != null) tokens.ink.copy(alpha = 0.14f) else surface
+                        val lit = pigment?.ink ?: button
+                        drawPath(ring, track.copy(alpha = track.alpha * f.ringAlpha), style = Stroke(stroke))
                         val measure = PathMeasure().apply { setPath(ring, true) }
                         val arc = Path()
                         measure.getSegment(0f, measure.length * progressState.value, arc, true)
-                        drawPath(arc, button.copy(alpha = f.ringAlpha), style = Stroke(stroke, cap = StrokeCap.Round))
+                        drawPath(arc, lit.copy(alpha = f.ringAlpha), style = Stroke(stroke, cap = StrokeCap.Round))
                     }
                 }
             }
@@ -203,7 +300,11 @@ fun MiniPlayer(
                 Column(Modifier.weight(1f)) {
                     Text(
                         text = episode.title,
-                        style = MaterialTheme.typography.titleSmall,
+                        style = if (tokens != null) MaterialTheme.typography.titleSmall.copy(
+                            fontFamily = com.glasscast.app.ui.theme.SeaSerif,
+                            fontWeight = androidx.compose.ui.text.font.FontWeight.Normal,
+                            fontSize = androidx.compose.ui.unit.TextUnit(16f, androidx.compose.ui.unit.TextUnitType.Sp)
+                        ) else MaterialTheme.typography.titleSmall,
                         color = cardInk,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
@@ -211,7 +312,7 @@ fun MiniPlayer(
                     Text(
                         text = feed?.title.orEmpty(),
                         style = MaterialTheme.typography.bodySmall,
-                        color = cardInk.copy(alpha = 0.70f),
+                        color = if (tokens != null) tokens.muted else cardInk.copy(alpha = 0.70f),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -231,15 +332,29 @@ fun MiniPlayer(
                     )
                 }
                 Spacer(Modifier.width(12.dp))
-                MiniPlayButton(
-                    isPlaying = isPlaying,
-                    fill = cardAccent,
-                    tint = cardGlyph,
-                    onClick = {
-                        haptics.play(if (isPlaying) Haptic.Pause else Haptic.Resume)
-                        onPlayPause()
-                    }
-                )
+                if (tokens != null && pigment != null) {
+                    SeaPlayPebble(
+                        isPlaying = isPlaying,
+                        pigment = pigment,
+                        dark = tokens.dark,
+                        size = 48.dp,
+                        iconSize = 24.dp,
+                        onClick = {
+                            haptics.play(if (isPlaying) Haptic.Pause else Haptic.Resume)
+                            onPlayPause()
+                        }
+                    )
+                } else {
+                    MiniPlayButton(
+                        isPlaying = isPlaying,
+                        fill = cardAccent,
+                        tint = cardGlyph,
+                        onClick = {
+                            haptics.play(if (isPlaying) Haptic.Pause else Haptic.Resume)
+                            onPlayPause()
+                        }
+                    )
+                }
             }
         }
 
@@ -268,6 +383,22 @@ fun MiniPlayer(
                 }
                 .drawWithContent {
                     val b = m.bubblePhase(collapse.value.coerceIn(0f, 1f))
+                    MiniArtShape.sea = tokens != null
+                    if (tokens != null) {
+                        // Sea Glass: one outline all the way, a rounded
+                        // square on the card becoming the pebble as it
+                        // drops into the bubble, then breathing while it plays.
+                        val turn = spin.value / SeaBubbleBreath
+                        MiniArtShape.roundness = 0.25f
+                        MiniArtShape.bubble = b
+                        MiniArtShape.seaTurn = turn
+                        seaBubbleOutline(
+                            seaClip, size.width, size.height, density.density,
+                            e = b * b * (3f - 2f * b), cornerDp = 12f, turn = turn
+                        )
+                        clipPath(seaClip) { this@drawWithContent.drawContent() }
+                        return@drawWithContent
+                    }
                     // Tell the flight what shape to land on (see FlightClip).
                     MiniArtShape.roundness = 0.25f + 0.25f * (b * 2f).coerceAtMost(1f)
                     MiniArtShape.bubble = b
@@ -396,3 +527,110 @@ private fun MiniPlayButton(
     }
 }
 
+
+/**
+ * Sea Glass's play button: a well-worn pebble of the cover's glass. Each
+ * press turns it over, so its outline shifts between play and pause the way
+ * the Original look's button changes shape.
+ */
+@Composable
+internal fun SeaPlayPebble(
+    isPlaying: Boolean,
+    pigment: com.glasscast.app.ui.seaglass.Pigment,
+    dark: Boolean,
+    size: androidx.compose.ui.unit.Dp,
+    iconSize: androidx.compose.ui.unit.Dp,
+    modifier: Modifier = Modifier,
+    width: androidx.compose.ui.unit.Dp = size,
+    onClick: () -> Unit
+) {
+    val turns = remember { androidx.compose.animation.core.Animatable(0f) }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val shown = rememberSteadyPlaying(isPlaying)
+    com.glasscast.app.ui.seaglass.GlassButton(
+        onClick = {
+            // The pebble turns over when it's pressed, and only then: a skip
+            // makes the player stop for a moment while it buffers, and that
+            // used to turn it too.
+            shown.pressed()
+            scope.launch {
+                turns.animateTo(turns.targetValue + 1f, tween(520, easing = androidx.compose.animation.core.FastOutSlowInEasing))
+            }
+            onClick()
+        },
+        pigment = pigment,
+        dark = dark,
+        recipe = com.glasscast.app.ui.seaglass.GlassRecipe.Tumbled,
+        seed = 8,
+        turn = { turns.value },
+        modifier = modifier.size(width = width, height = size)
+    ) {
+        val playing = shown.value
+        Icon(
+            imageVector = if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+            contentDescription = if (playing) "Pause" else tr("Play"),
+            tint = pigment.ink,
+            modifier = Modifier.size(iconSize)
+        )
+    }
+}
+
+/**
+ * Whether play should show as playing, held steady through the moment of
+ * buffering a seek causes (the player reports "not playing" for a beat, then
+ * playing again). A press shows its result at once; a stop from anywhere else
+ * shows after half a second, unless playing has resumed by then.
+ */
+internal class SteadyPlaying(initial: Boolean) {
+    var value by mutableStateOf(initial)
+        internal set
+    internal var pressedAt = 0L
+
+    /** The button was pressed: show the other state now. */
+    fun pressed() {
+        pressedAt = android.os.SystemClock.uptimeMillis()
+        value = !value
+    }
+}
+
+@Composable
+internal fun rememberSteadyPlaying(isPlaying: Boolean): SteadyPlaying {
+    val steady = remember { SteadyPlaying(isPlaying) }
+    androidx.compose.runtime.LaunchedEffect(isPlaying) {
+        val justPressed = android.os.SystemClock.uptimeMillis() - steady.pressedAt < 1_500
+        if (isPlaying || justPressed) {
+            steady.value = isPlaying
+        } else {
+            kotlinx.coroutines.delay(450)
+            steady.value = false
+        }
+    }
+    return steady
+}
+
+/** How wide the Sea Glass bubble's edge wanders, as a share of its size. */
+internal const val SeaBubbleTumble = 0.075f
+private const val SeaBubbleSeed = 31
+/** Seconds of playing per turn of the bubble's pebble: slow enough to read as breathing. */
+internal const val SeaBubbleBreath = 7f
+
+/**
+ * The Sea Glass bubble's pebble, [wPx] × [hPx], into [path]: [e] of the way
+ * from a square with [cornerDp] corners (0) to the full pebble (1). The cover's
+ * clip, the progress line and the player's flight all use it, with the same
+ * seed and turn, so the line runs parallel to the cover and the flight lands
+ * on exactly the shape it left.
+ */
+internal fun seaBubbleOutline(path: Path, wPx: Float, hPx: Float, density: Float, e: Float, cornerDp: Float, turn: Float) {
+    val w = wPx / density
+    val h = hPx / density
+    if (w < 1f || h < 1f) {
+        path.reset()
+        return
+    }
+    val half = (minOf(w, h) / 2f).coerceAtLeast(1f)
+    val from = (cornerDp / half).coerceIn(0f, 1f)
+    val k = e.coerceIn(0f, 1f)
+    com.glasscast.app.ui.seaglass.GlassContour(w, h, from + (1f - from) * k, SeaBubbleTumble * k, SeaBubbleSeed, turn)
+        .outline(density, path)
+}

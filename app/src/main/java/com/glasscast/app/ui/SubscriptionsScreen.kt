@@ -58,6 +58,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.border
+import com.glasscast.app.ui.seaglass.chromePill
+import com.glasscast.app.ui.seaglass.seaCoverPool
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
@@ -226,8 +229,7 @@ fun SubscriptionsScreen(
                         alpha = shown
                         translationY = (1f - shown) * 8.dp.toPx()
                     }
-                    .clip(RoundedCornerShape(percent = 50))
-                    .background(pillColor)
+                    .chromePill(pillColor, seed = 12)
                     .padding(horizontal = 20.dp, vertical = 11.dp)
             ) {
                 Text(
@@ -239,8 +241,7 @@ fun SubscriptionsScreen(
             Spacer(Modifier.weight(1f))
             Row(
                 Modifier
-                    .clip(RoundedCornerShape(percent = 50))
-                    .background(pillColor)
+                    .chromePill(pillColor, seed = 13)
                     .padding(horizontal = 4.dp, vertical = 2.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -323,16 +324,20 @@ private fun ShowTile(
             .fillMaxWidth()
             .combinedClickable(onClick = onClick, onLongClick = onLongClick)
     ) {
+        // Sea Glass: rounder covers, each lying in a pool of its own color,
+        // and the show's name in the serif.
+        val sea = com.glasscast.app.ui.seaglass.LocalSea.current != null
         Artwork(
             url = feed.imageUrl,
             sizeDp = 180.dp,
-            corner = 12.dp,
-            fill = true
+            corner = if (sea) 18.dp else 12.dp,
+            fill = true,
+            modifier = Modifier.seaCoverPool(feed.imageUrl, 18.dp, strength = 0.9f)
         )
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(if (sea) 12.dp else 8.dp))
         Text(
             text = feed.title,
-            style = MaterialTheme.typography.titleSmall,
+            style = com.glasscast.app.ui.seaglass.rowTitleStyle(),
             color = MaterialTheme.colorScheme.onBackground,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis
@@ -378,12 +383,15 @@ private fun EmptyLibrary(onAdd: () -> Unit) {
 
 @Composable
 private fun RestingSearchPill(onClick: () -> Unit) {
+    val tokens = com.glasscast.app.ui.seaglass.LocalSea.current
     Row(
         Modifier
             .fillMaxWidth()
             .height(50.dp)
             .clip(RoundedCornerShape(25.dp))
             .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+            // Sea Glass: a well in the paper, edged with a hairline.
+            .then(if (tokens != null) Modifier.border(0.75.dp, tokens.hairline, RoundedCornerShape(25.dp)) else Modifier)
             .clickable(onClick = onClick)
             .padding(horizontal = 18.dp),
         verticalAlignment = Alignment.CenterVertically

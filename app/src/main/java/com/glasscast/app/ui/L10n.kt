@@ -337,7 +337,20 @@ private object L10nTables {
             "Sign in again to keep syncing" to "계속 동기화하려면 다시 로그인하세요",
             "Use this color" to "이 색상 사용",
             "Custom color" to "사용자 지정 색상",
-            "Adaptive tab bar" to "적응형 탭 막대"
+            "Adaptive tab bar" to "적응형 탭 막대",
+            "Original" to "오리지널",
+            "Sea Glass" to "씨글라스",
+            "{0} hr" to "{0}시간",
+            "{0} hr {1} min" to "{0}시간 {1}분",
+            "Continue listening" to "이어 듣기",
+            "Speed {0}" to "속도 {0}",
+            "GOOGLE ACCOUNT" to "GOOGLE 계정",
+            "Go to {0} and enter this code" to "{0}에 접속해 이 코드를 입력하세요",
+            "That code has expired" to "코드가 만료되었습니다",
+            "Get a new code" to "새 코드 받기",
+            "Signed in" to "로그인됨",
+            "{0} left" to "{0} 남음",
+            "Move" to "이동"
         )
     }
 
@@ -649,7 +662,20 @@ private object L10nTables {
             "Sign in again to keep syncing" to "Erneut anmelden, um weiter zu synchronisieren",
             "Use this color" to "Diese Farbe verwenden",
             "Custom color" to "Eigene Farbe",
-            "Adaptive tab bar" to "Adaptive Tab-Leiste"
+            "Adaptive tab bar" to "Adaptive Tab-Leiste",
+            "Original" to "Original",
+            "Sea Glass" to "Meerglas",
+            "{0} hr" to "{0} Std.",
+            "{0} hr {1} min" to "{0} Std. {1} Min.",
+            "Continue listening" to "Weiterhören",
+            "Speed {0}" to "Tempo {0}",
+            "GOOGLE ACCOUNT" to "GOOGLE-KONTO",
+            "Go to {0} and enter this code" to "Öffne {0} und gib diesen Code ein",
+            "That code has expired" to "Der Code ist abgelaufen",
+            "Get a new code" to "Neuen Code anfordern",
+            "Signed in" to "Angemeldet",
+            "{0} left" to "noch {0}",
+            "Move" to "Verschieben"
         )
     }
 
@@ -961,7 +987,20 @@ private object L10nTables {
             "Sign in again to keep syncing" to "Vuelve a iniciar sesión para seguir sincronizando",
             "Use this color" to "Usar este color",
             "Custom color" to "Color personalizado",
-            "Adaptive tab bar" to "Barra de pestañas adaptable"
+            "Adaptive tab bar" to "Barra de pestañas adaptable",
+            "Original" to "Original",
+            "Sea Glass" to "Vidrio marino",
+            "{0} hr" to "{0} h",
+            "{0} hr {1} min" to "{0} h {1} min",
+            "Continue listening" to "Seguir escuchando",
+            "Speed {0}" to "Velocidad {0}",
+            "GOOGLE ACCOUNT" to "CUENTA DE GOOGLE",
+            "Go to {0} and enter this code" to "Ve a {0} e introduce este código",
+            "That code has expired" to "El código ha caducado",
+            "Get a new code" to "Obtener un código nuevo",
+            "Signed in" to "Sesión iniciada",
+            "{0} left" to "quedan {0}",
+            "Move" to "Mover"
         )
     }
 
@@ -1273,7 +1312,20 @@ private object L10nTables {
             "Sign in again to keep syncing" to "Log opnieuw in om te blijven synchroniseren",
             "Use this color" to "Deze kleur gebruiken",
             "Custom color" to "Eigen kleur",
-            "Adaptive tab bar" to "Adaptieve tabbalk"
+            "Adaptive tab bar" to "Adaptieve tabbalk",
+            "Original" to "Origineel",
+            "Sea Glass" to "Zeeglas",
+            "{0} hr" to "{0} u",
+            "{0} hr {1} min" to "{0} u {1} min",
+            "Continue listening" to "Verder luisteren",
+            "Speed {0}" to "Snelheid {0}",
+            "GOOGLE ACCOUNT" to "GOOGLE-ACCOUNT",
+            "Go to {0} and enter this code" to "Ga naar {0} en voer deze code in",
+            "That code has expired" to "De code is verlopen",
+            "Get a new code" to "Nieuwe code ophalen",
+            "Signed in" to "Ingelogd",
+            "{0} left" to "nog {0}",
+            "Move" to "Verplaatsen"
         )
     }
 }

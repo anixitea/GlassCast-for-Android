@@ -13,6 +13,13 @@ import kotlinx.coroutines.flow.asStateFlow
  * two combine freely.
  */
 enum class ThemeMode { SYSTEM, LIGHT, DARK }
+
+/**
+ * How the app is drawn, apart from brightness: GlassCast's own look, or Sea
+ * Glass (paper grounds, serif titles, controls made of frosted glass pebbles).
+ * Brightness and the accent sit on top of either.
+ */
+enum class Look { ORIGINAL, SEA_GLASS }
 enum class EpisodeSort { NEWEST_FIRST, OLDEST_FIRST }
 enum class ShowSort { RECENTLY_UPDATED, RECENTLY_PLAYED }
 
@@ -41,6 +48,16 @@ class Settings(context: Context) {
         }
     )
     val theme: StateFlow<ThemeMode> = _theme.asStateFlow()
+
+    private val _look = MutableStateFlow(
+        runCatching { Look.valueOf(prefs.getString(KEY_LOOK, null) ?: "ORIGINAL") }.getOrDefault(Look.ORIGINAL)
+    )
+    val look: StateFlow<Look> = _look.asStateFlow()
+
+    fun setLook(look: Look) {
+        _look.value = look
+        prefs.edit().putString(KEY_LOOK, look.name).apply()
+    }
 
     private val _dynamicColor = MutableStateFlow(
         if (prefs.contains(KEY_DYNAMIC)) prefs.getBoolean(KEY_DYNAMIC, false)
@@ -326,6 +343,7 @@ class Settings(context: Context) {
 
     private companion object {
         const val KEY_THEME = "theme"
+        const val KEY_LOOK = "look"
         const val KEY_DYNAMIC = "dynamic_color"
         const val KEY_NEW_EPISODES = "new_episode_notifications"
         const val KEY_SKIP_SILENCE = "skip_silence"

@@ -174,6 +174,36 @@ fun SheetPillButton(
     modifier: Modifier = Modifier,
     onClick: () -> Unit
 ) {
+    // Sea Glass: a long capsule of glass, colored for an action (red to
+    // remove, the accent to add), clear for Cancel.
+    val tokens = com.glasscast.app.ui.seaglass.LocalSea.current
+    if (tokens != null) {
+        val pigment = remember(fill, tokens) { com.glasscast.app.ui.seaglass.pigmentFor(fill, tokens) }
+        com.glasscast.app.ui.seaglass.GlassButton(
+            onClick = onClick,
+            pigment = pigment,
+            dark = tokens.dark,
+            recipe = com.glasscast.app.ui.seaglass.GlassRecipe.Quiet,
+            seed = label.hashCode(),
+            modifier = modifier
+                .fillMaxWidth()
+                .height(54.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (icon != null) {
+                    Icon(icon, contentDescription = null, tint = pigment.ink, modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.width(8.dp))
+                }
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = pigment.ink
+                )
+            }
+        }
+        return
+    }
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     val squash by animateFloatAsState(if (pressed) 0.97f else 1f, label = "pillSquash")

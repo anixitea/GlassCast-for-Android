@@ -1,5 +1,7 @@
 package com.glasscast.app.ui
 
+import com.glasscast.app.ui.seaglass.drawSeaWash
+import com.glasscast.app.ui.seaglass.clearGlass
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.background
@@ -31,7 +33,6 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.DownloadForOffline
-import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -82,6 +83,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.border
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import com.glasscast.app.ui.seaglass.coverPool
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -133,7 +138,31 @@ fun FeedScreen(
             .let { list -> if (downloadedOnly) list.filter { downloads[it.guid]?.state == com.glasscast.app.data.DownloadState.DONE } else list }
     }
 
-    val (washColors, _) = rememberArtworkColors(feed.imageUrl)
+    val (coverColors, _) = rememberArtworkColors(feed.imageUrl)
+    /*
+     * Sea Glass: the show's page is paper (or the tide), not its blurred
+     * cover. The cover's color stays, as glass: a wash of it at the top of
+     * the page, a pool under the cover, and the accent in its ink. Every part
+     * below reads these colors, so they're swapped here once.
+     */
+    val tokens = com.glasscast.app.ui.seaglass.LocalSea.current
+    val glass = tokens?.let { com.glasscast.app.ui.seaglass.animatePigment(remember(coverColors, it.dark) { com.glasscast.app.ui.seaglass.seaPigment(coverColors.meshAccent, it.dark) }) }
+    val seaWash = if (tokens != null && glass != null) com.glasscast.app.ui.seaglass.seaWash(coverColors, glass, tokens) else null
+    val washColors = if (tokens != null && glass != null && seaWash != null) {
+        coverColors.copy(
+            background = seaWash.ground,
+            wash = seaWash.ground,
+            elevated = com.glasscast.app.ui.seaglass.quietFill(tokens),
+            accent = if (tokens.dark) glass.edge else glass.ink,
+            content = tokens.ink,
+            contentVariant = tokens.muted,
+            divider = tokens.hairline,
+            // Paper with a little of the show's color in it.
+            card = androidx.compose.ui.graphics.lerp(tokens.card, glass.body, if (tokens.dark) 0.16f else 0.18f)
+        )
+    } else {
+        coverColors
+    }
     var showInfo by remember { mutableStateOf(false) }
     var coverBitmap by remember(feed.url) { mutableStateOf<android.graphics.Bitmap?>(null) }
 
@@ -159,7 +188,8 @@ fun FeedScreen(
                         url = feed.imageUrl,
                         sizeDp = if (compact) 220.dp else 268.dp,
                         corner = 22.dp,
-                        onBitmap = { coverBitmap = it }
+                        onBitmap = { coverBitmap = it },
+                        modifier = if (tokens != null && glass != null) Modifier.coverPool(glass, 22f, tokens.dark) else Modifier
                     )
                     Spacer(Modifier.height(18.dp))
 
@@ -207,6 +237,8 @@ fun FeedScreen(
     // The actions under the header: Cider's button group and the filters.
     @Composable
     fun ShowActions() {
+        // Sea Glass: the clear glass here picks up the show's color.
+        androidx.compose.runtime.CompositionLocalProvider(com.glasscast.app.ui.seaglass.LocalSeaTint provides glass) {
 
         /*
          * One connected group rather than three separate buttons —
@@ -302,6 +334,7 @@ fun FeedScreen(
                 SortPill(sort = sort, onToggle = onToggleSort)
             }
         }
+        }
     }
 
     fun LazyListScope.showEpisodes() {
@@ -339,10 +372,23 @@ fun FeedScreen(
         Modifier
             .fillMaxSize()
             .background(artworkGround(washColors))
+            .then(
+                if (tokens != null && seaWash != null) {
+                    // The cover's colors, washed across the page: its glass
+                    // color pooled behind the header, two more of its colors
+                    // coming in from the sides, and the paper tinted under it all.
+                    Modifier.drawBehind {
+                        val center = if (twoPane) Offset(size.width * 0.21f, size.height * 0.4f) else Offset(size.width / 2f, 240.dp.toPx())
+                        drawSeaWash(seaWash, tokens.dark, center, maxOf(size.width * 0.85f, 440.dp.toPx()))
+                    }
+                } else {
+                    Modifier
+                }
+            )
     ) {
 
         if (twoPane) {
-            ArtworkBackdrop(url = feed.imageUrl, colors = washColors, modifier = Modifier.fillMaxSize())
+            if (tokens == null) ArtworkBackdrop(url = feed.imageUrl, colors = washColors, modifier = Modifier.fillMaxSize())
             Row(Modifier.fillMaxSize()) {
                 Box(
                     Modifier
@@ -386,7 +432,7 @@ fun FeedScreen(
                  * actions all into the first screenful.
                  */
                 Box(Modifier.fillMaxWidth()) {
-                    ArtworkBackdrop(
+                    if (tokens == null) ArtworkBackdrop(
                         url = feed.imageUrl,
                         colors = washColors,
                         modifier = Modifier
@@ -409,7 +455,8 @@ fun FeedScreen(
         }
         TopGlassFade(
             hazeState = hazeState,
-            pageColor = washColors.wash,
+            // Sea Glass: the paper as the cover's wash tints it up there.
+            pageColor = if (seaWash != null) androidx.compose.ui.graphics.lerp(seaWash.ground, seaWash.main, 0.34f) else washColors.wash,
             active = feedScrolled,
             modifier = Modifier
                 .align(Alignment.TopCenter)
@@ -425,6 +472,21 @@ fun FeedScreen(
          * under the other. The header already names the show; the button
          * only needs to get you back.
          */
+        if (tokens != null) {
+            // Sea Glass: pebbles of clear glass.
+            com.glasscast.app.ui.seaglass.GlassButton(
+                onClick = onBack,
+                pigment = tokens.clearGlass(glass),
+                dark = tokens.dark,
+                seed = 51,
+                modifier = Modifier
+                    .statusBarsPadding()
+                    .padding(start = 14.dp, top = 6.dp)
+                    .size(44.dp)
+            ) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = tr("Back"), tint = tokens.ink, modifier = Modifier.size(22.dp))
+            }
+        } else
         Box(
             Modifier
                 .statusBarsPadding()
@@ -446,7 +508,21 @@ fun FeedScreen(
         // Show info, the back button's twin on the right. Also where the
         // show's own setting lives, so it's always there for a followed show.
         val showSettings = subscribed && onAutoDownloadChange != null
-        if (feed.description.isNotBlank() || feed.categories.isNotEmpty() || showSettings) {
+        if ((feed.description.isNotBlank() || feed.categories.isNotEmpty() || showSettings) && tokens != null) {
+            com.glasscast.app.ui.seaglass.GlassButton(
+                onClick = { showInfo = true },
+                pigment = tokens.clearGlass(glass),
+                dark = tokens.dark,
+                seed = 52,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .statusBarsPadding()
+                    .padding(end = 14.dp, top = 6.dp)
+                    .size(44.dp)
+            ) {
+                Icon(Icons.Outlined.Info, contentDescription = tr("Info"), tint = tokens.ink, modifier = Modifier.size(22.dp))
+            }
+        } else if (feed.description.isNotBlank() || feed.categories.isNotEmpty() || showSettings) {
             Box(
                 Modifier
                     .align(Alignment.TopEnd)
@@ -615,9 +691,10 @@ private fun AutoDownloadCard(checked: Boolean, ink: Color, accent: Color, onChan
             )
         }
         Spacer(Modifier.width(10.dp))
-        Switch(
+        AppSwitch(
             checked = checked,
             onCheckedChange = { flip(it) },
+            accent = accent,
             colors = SwitchDefaults.colors(
                 checkedTrackColor = accent,
                 checkedThumbColor = if (accent.luminance() > 0.6f) Color(0xFF16141A) else Color.White,
@@ -650,11 +727,13 @@ private fun EpisodeRow(
      * is applied to the contents only for the same reason — fading the card
      * itself would let the reveal show through every played row.
      */
+    val tokens = com.glasscast.app.ui.seaglass.LocalSea.current
     Column(
         Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(20.dp))
             .background(colors.card.takeOrElse { colors.elevated })
+            .then(if (tokens != null) Modifier.border(0.75.dp, tokens.hairline, RoundedCornerShape(20.dp)) else Modifier)
             .combinedClickable(onClick = onClick, onLongClick = onLongClick)
             .padding(horizontal = 18.dp, vertical = 14.dp)
     ) {
@@ -667,7 +746,8 @@ private fun EpisodeRow(
             Text(
                 text = formatDate(episode.pubDate).uppercase(),
                 style = MaterialTheme.typography.labelMedium,
-                color = colors.contentVariant
+                // Sea Glass: dates in the show's ink.
+                color = if (com.glasscast.app.ui.seaglass.LocalSea.current != null) colors.accent else colors.contentVariant
             )
             if (played) {
                 Spacer(Modifier.width(6.dp))
@@ -700,7 +780,7 @@ private fun EpisodeRow(
         Spacer(Modifier.height(10.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             val label = if (episode.positionMs > 1_000 && !played && episode.durationMs > 0) {
-                formatCompact(episode.durationMs - episode.positionMs) + " left"
+                tr("{0} left", formatCompact(episode.durationMs - episode.positionMs))
             } else {
                 formatCompact(episode.durationMs)
             }

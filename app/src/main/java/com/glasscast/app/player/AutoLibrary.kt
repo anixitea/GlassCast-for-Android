@@ -88,6 +88,7 @@ internal class AutoLibrary(
         val commands = MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS.buildUpon()
             .add(CarButtons.SKIP_BACK)
             .add(CarButtons.SKIP_FORWARD)
+            .add(CarButtons.SPEED)
             .build()
         return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
             .setAvailableSessionCommands(commands)
@@ -103,6 +104,10 @@ internal class AutoLibrary(
         when (customCommand.customAction) {
             CarButtons.SKIP_BACK.customAction -> session.player.seekBack()
             CarButtons.SKIP_FORWARD.customAction -> session.player.seekForward()
+            CarButtons.SPEED.customAction -> {
+                val p = session.player
+                p.setPlaybackSpeed(CarButtons.nextSpeed(p.playbackParameters.speed))
+            }
             else -> return Futures.immediateFuture(SessionResult(SessionError.ERROR_NOT_SUPPORTED))
         }
         return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
@@ -209,6 +214,7 @@ internal class AutoLibrary(
 
     private fun childrenOf(parentId: String, session: MediaLibrarySession): List<MediaItem> = when {
         parentId == ROOT -> topFolders()
+        parentId == CONTINUE -> continueListening().map { episodeItem(it, store.feedFor(it)) }
         parentId == UP_NEXT -> {
             val player = session.player
             val current = player.currentMediaItemIndex
@@ -240,7 +246,16 @@ internal class AutoLibrary(
         else -> emptyList()
     }
 
-    private fun topFolders(): List<MediaItem> = listOf(
+    /**
+     * Episodes started and not finished, the most recently played first:
+     * what you were in the middle of, one tap from the top. Only there when
+     * there's something in it.
+     */
+    private fun continueListening(): List<Episode> = store.inProgress(30)
+
+    private fun topFolders(): List<MediaItem> = listOfNotNull(
+        folder(CONTINUE, tr("Continue listening"), MediaMetadata.MEDIA_TYPE_FOLDER_PODCASTS)
+            .takeIf { continueListening().isNotEmpty() },
         folder(UP_NEXT, tr("Up Next"), MediaMetadata.MEDIA_TYPE_FOLDER_PODCASTS),
         folder(LATEST, tr("Latest"), MediaMetadata.MEDIA_TYPE_FOLDER_PODCASTS),
         folder(DOWNLOADS, tr("Downloads"), MediaMetadata.MEDIA_TYPE_FOLDER_PODCASTS),
@@ -421,11 +436,12 @@ internal class AutoLibrary(
     private companion object {
         const val ROOT = "glasscast:root"
         const val UP_NEXT = "glasscast:upnext"
+        const val CONTINUE = "glasscast:continue"
         const val LATEST = "glasscast:latest"
         const val DOWNLOADS = "glasscast:downloads"
         const val SHOWS = "glasscast:shows"
         const val SHOW_PREFIX = "glasscast:show:"
-        val FOLDERS = setOf(UP_NEXT, LATEST, DOWNLOADS, SHOWS)
+        val FOLDERS = setOf(CONTINUE, UP_NEXT, LATEST, DOWNLOADS, SHOWS)
 
         // Android Auto's browse hints and completion marks. Plain keys rather
         // than library constants, which have moved between Media3 versions.

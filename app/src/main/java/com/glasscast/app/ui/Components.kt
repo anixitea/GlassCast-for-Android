@@ -1,6 +1,7 @@
 package com.glasscast.app.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
@@ -44,6 +45,13 @@ fun Pill(
     modifier: Modifier = Modifier,
     onClick: (() -> Unit)? = null
 ) {
+    // Sea Glass: the lit pill is a capsule of glass in the accent's color, the
+    // others a quiet groove with a hairline.
+    val tokens = com.glasscast.app.ui.seaglass.LocalSea.current
+    if (tokens != null) {
+        SeaPill(label, active, accent, contentPadding, modifier, onClick, tokens)
+        return
+    }
     val bg = if (active) accent.copy(alpha = 0.20f)
     else MaterialTheme.colorScheme.onBackground.copy(alpha = 0.10f)
 
@@ -62,6 +70,90 @@ fun Pill(
             fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium,
             maxLines = 1,
             overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+        )
+    }
+}
+
+@Composable
+private fun SeaPill(
+    label: String,
+    active: Boolean,
+    accent: Color,
+    contentPadding: PaddingValues,
+    modifier: Modifier,
+    onClick: (() -> Unit)?,
+    tokens: com.glasscast.app.ui.seaglass.SeaTokens
+) {
+    val text: @Composable () -> Unit = {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.titleSmall,
+            color = if (active) com.glasscast.app.ui.seaglass.rememberPigment(accent, tokens.dark).ink else tokens.ink,
+            fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium,
+            maxLines = 1,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            modifier = Modifier.padding(contentPadding)
+        )
+    }
+    if (active) {
+        val pigment = com.glasscast.app.ui.seaglass.rememberPigment(accent, tokens.dark)
+        if (onClick != null) {
+            com.glasscast.app.ui.seaglass.GlassButton(
+                onClick = onClick,
+                pigment = pigment,
+                dark = tokens.dark,
+                recipe = com.glasscast.app.ui.seaglass.GlassRecipe.Quiet,
+                seed = label.hashCode(),
+                modifier = modifier
+            ) { text() }
+        } else {
+            com.glasscast.app.ui.seaglass.GlassSurface(
+                pigment = pigment,
+                dark = tokens.dark,
+                seed = label.hashCode(),
+                modifier = modifier
+            ) { text() }
+        }
+    } else {
+        Box(
+            modifier
+                .clip(RoundedCornerShape(percent = 50))
+                .background(com.glasscast.app.ui.seaglass.quietFill(tokens))
+                .border(0.75.dp, tokens.hairline, RoundedCornerShape(percent = 50))
+                .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
+            contentAlignment = Alignment.Center
+        ) { text() }
+    }
+}
+
+/**
+ * The app's switch: Material's in the Original look, a glass bead in a
+ * channel in Sea Glass. [accent] colors it where a screen has its own (the
+ * player's panel, a show's sheet).
+ */
+@Composable
+fun AppSwitch(
+    checked: Boolean,
+    onCheckedChange: ((Boolean) -> Unit)?,
+    modifier: Modifier = Modifier,
+    colors: SwitchColors = glassSwitchColors(),
+    accent: Color? = null
+) {
+    val tokens = com.glasscast.app.ui.seaglass.LocalSea.current
+    if (tokens != null) {
+        com.glasscast.app.ui.seaglass.SeaSwitch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            tokens = tokens,
+            pigment = accent?.let { com.glasscast.app.ui.seaglass.rememberPigment(it, tokens.dark) } ?: tokens.brand,
+            modifier = modifier
+        )
+    } else {
+        androidx.compose.material3.Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            colors = colors,
+            modifier = modifier
         )
     }
 }

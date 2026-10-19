@@ -6,6 +6,7 @@ import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -92,6 +93,12 @@ internal fun AccountCard() {
             .fillMaxWidth()
             .clip(RoundedCornerShape(24.dp))
             .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+            // Sea Glass: a paper card with a hairline, as the groups below are.
+            .then(
+                com.glasscast.app.ui.seaglass.LocalSea.current?.let {
+                    Modifier.border(0.75.dp, it.hairline, RoundedCornerShape(24.dp))
+                } ?: Modifier
+            )
             .clickable {
                 if (account.signedIn && !account.needsSignIn) sheetOpen = true else signIn()
             }
@@ -407,7 +414,7 @@ private fun rememberGoogleAccess(onError: (String) -> Unit): (suspend (String) -
 }
 
 /** "Today, 14:32" or "3 Oct, 09:10", in the phone's 12- or 24-hour clock. */
-private fun formatBackupTime(context: Context, ms: Long): String {
+internal fun formatBackupTime(context: Context, ms: Long): String {
     if (ms <= 0) return ""
     val time = android.text.format.DateFormat.getTimeFormat(context).format(java.util.Date(ms))
     return "${formatDate(ms)}, $time"

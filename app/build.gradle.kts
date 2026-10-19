@@ -1,7 +1,26 @@
+// Imported, not written out: in a build script `java` is Gradle's Java
+// extension, so `java.util.Properties` doesn't resolve.
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
+}
+
+/*
+ * The TV's Google sign-in (data/TvSignIn.kt) needs an OAuth client of the
+ * type "TVs and Limited Input devices". Its ID and secret go in
+ * local.properties, which never leaves this machine (it's in .gitignore):
+ *
+ *     glasscast.tvClientId=….apps.googleusercontent.com
+ *     glasscast.tvClientSecret=GOCSPX-…
+ *
+ * Without them the TV simply doesn't offer sign-in.
+ */
+val localProperties = Properties().apply {
+    val file = rootProject.file("local.properties")
+    if (file.exists()) file.inputStream().use { load(it) }
 }
 
 android {
@@ -12,8 +31,10 @@ android {
         applicationId = "com.glasscast.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 20
-        versionName = "1.8"
+        versionCode = 21
+        versionName = "1.9"
+        manifestPlaceholders["tvClientId"] = localProperties.getProperty("glasscast.tvClientId", "")
+        manifestPlaceholders["tvClientSecret"] = localProperties.getProperty("glasscast.tvClientSecret", "")
     }
 
     buildTypes {

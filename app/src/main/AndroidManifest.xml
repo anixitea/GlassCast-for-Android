@@ -148,6 +148,14 @@
                 android:resource="@xml/widget_now_playing_info" />
         </receiver>
 
+        <!-- The TV's Google sign-in client, from local.properties (see app/build.gradle.kts). -->
+        <meta-data
+            android:name="com.glasscast.app.tv_client_id"
+            android:value="${tvClientId}" />
+        <meta-data
+            android:name="com.glasscast.app.tv_client_secret"
+            android:value="${tvClientSecret}" />
+
         <!-- Android Auto: GlassCast as a media app (see player/AutoLibrary). -->
         <meta-data
             android:name="com.google.android.gms.car.application"

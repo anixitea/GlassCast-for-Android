@@ -50,8 +50,15 @@ import androidx.mediarouter.media.MediaRouteSelector
 import androidx.mediarouter.media.MediaRouter
 import com.google.android.gms.cast.CastMediaControlIntent
 
-private val Ink = Color.White
-private val InkDim = Color.White.copy(alpha = 0.62f)
+/*
+ * White on the player's dark panel color; ink when the sheet is paper (Sea
+ * Glass). Set by DeviceSheet from its surface for everything inside it.
+ */
+private val LocalDeviceInk = androidx.compose.runtime.staticCompositionLocalOf { Color.White }
+private val Ink: Color
+    @Composable @androidx.compose.runtime.ReadOnlyComposable get() = LocalDeviceInk.current
+private val InkDim: Color
+    @Composable @androidx.compose.runtime.ReadOnlyComposable get() = LocalDeviceInk.current.copy(alpha = 0.62f)
 
 /**
  * Where it plays: this phone, a Cast device, or another output.
@@ -113,6 +120,8 @@ fun DeviceSheet(
 
     val casting = routes.any { it.id == selectedId }
 
+    val sheetInk = com.glasscast.app.ui.seaglass.LocalSea.current?.takeIf { surface.luminance() > 0.5f }?.ink ?: Color.White
+    androidx.compose.runtime.CompositionLocalProvider(LocalDeviceInk provides sheetInk) {
     GlassSheet(
         onDismiss = onDismiss,
         containerColor = surface,
@@ -208,6 +217,7 @@ fun DeviceSheet(
                 openOutputSwitcher(context)
             }
         }
+    }
     }
 }
 

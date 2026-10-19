@@ -150,6 +150,11 @@ class PlayerConnection(
 
         override fun onTimelineChanged(timeline: Timeline, reason: Int) = syncQueue()
 
+        // Speed changed from elsewhere (the car's button): the app follows.
+        override fun onPlaybackParametersChanged(playbackParameters: androidx.media3.common.PlaybackParameters) {
+            _speed.value = playbackParameters.speed
+        }
+
         override fun onPlaybackStateChanged(state: Int) {
             _buffering.value = state == Player.STATE_BUFFERING
             pullState()
@@ -372,6 +377,21 @@ class PlayerConnection(
         val c = controller ?: return
         if (c.mediaItemCount <= 1) return
         playFromUpNext(0)
+    }
+
+    /**
+     * Moves an Up Next entry one place up ([by] -1) or down (1), found by
+     * guid in the player itself, so a burst of moves never acts on a stale
+     * position. False at either end, or if it isn't queued.
+     */
+    fun moveInUpNext(guid: String, by: Int): Boolean {
+        val c = controller ?: return false
+        val from = (1 until c.mediaItemCount).firstOrNull { c.getMediaItemAt(it).mediaId == guid } ?: return false
+        val to = from + by
+        if (by == 0 || to !in 1 until c.mediaItemCount) return false
+        c.moveMediaItem(from, to)
+        syncQueue()
+        return true
     }
 
     fun clearUpNext() {

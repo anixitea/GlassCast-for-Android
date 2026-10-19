@@ -15,6 +15,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.pulltorefresh.PullToRefreshState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
@@ -56,6 +57,9 @@ fun CookieRefreshIndicator(
     )
     val surface = MaterialTheme.colorScheme.surfaceContainerHighest
     val accent = MaterialTheme.colorScheme.primary
+    // Sea Glass: a pebble of clear glass in place of the cookie, turning as it comes.
+    val tokens = com.glasscast.app.ui.seaglass.LocalSea.current
+    val pebble = remember { com.glasscast.app.ui.seaglass.GlassPainter(com.glasscast.app.ui.seaglass.GlassRecipe.Pebble, seed = 71) }
 
     Box(
         modifier
@@ -88,7 +92,8 @@ fun CookieRefreshIndicator(
                 .shadow(10.dp, CircleShape)
         )
         Canvas(Modifier.size(48.dp)) {
-            drawPath(cookiePath(size.width, size.height), color = surface)
+            if (tokens != null) pebble.draw(this, size.width, size.height, tokens.fog)
+            else drawPath(cookiePath(size.width, size.height), color = surface)
             val stroke = 3.dp.toPx()
             val inset = 14.dp.toPx()
             val sweep = if (refreshing) 270f else 330f * fraction.coerceIn(0f, 1f)

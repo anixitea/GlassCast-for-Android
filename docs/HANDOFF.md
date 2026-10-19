@@ -3,7 +3,7 @@
 Written September 30, 2026, at the end of the chat that built 1.1 → 1.3;
 updated through 1.4 and 1.5, on October 9 for 1.6 (the OPPO Pad mini
 startup work and the GlassPlay ports), on October 12 for 1.7, and on
-October 13 for 1.8.
+October 13 for 1.8, and on October 19 for 1.9 (Sea Glass).
 Everything here is current as of the GlassCast.zip packaged alongside it.
 
 ---
@@ -77,6 +77,11 @@ packaged with it clean. Google Maven and Maven Central are blocked
 from the workspace. API 35's android.jar alone can come from GitHub
 (`Sable/android-platforms`, sparse checkout of `android-35/android.jar`) for
 checking plain-Android code.
+
+None of these checks read the Gradle scripts (`*.gradle.kts`). In a build
+script, `java` is Gradle's Java extension, so write `import java.util.X` at
+the top rather than `java.util.X()` inline (1.9's `local.properties` loader
+failed the sync that way).
 
 **Package and deliver** (only committed files go in):
 ```
@@ -155,6 +160,16 @@ release notes go in `docs/release-notes/<version>.md`.
   (ko/de/es/nl), then `python3 -I tools/l10n.py` writes the tables in
   `ui/L10n.kt`. Don't edit the tables by hand. Placeholders `{0}`,`{1}`.
   No code may compare against display text.
+- **Two looks (1.9).** Anything new that draws a filled shape, a hard-coded
+  white or black, or its own text color must also work in Sea Glass: check
+  `LocalSea.current` (null in the Original look) and use the shared pieces
+  (`Pill`, `GroupButton`, `AppSwitch`, `SheetPillButton`, `IconBadge`,
+  `chromePill`, `rowCard`, `rowTitleStyle()`, `GlassButton`, `seaGlass`)
+  rather than a new fill. Glass whose size changes every frame is drawn once
+  at full size and scaled with a layer (the player's morph does this), never
+  resized, or its ground needs new masks each frame. On the TV: colors from
+  `rememberTvColors`, panels in `tvPanelColor`, controls as `TvGlass` (no
+  focus ring on glass; the glass is the focus).
 
 ---
 
@@ -163,14 +178,32 @@ release notes go in `docs/release-notes/<version>.md`.
 - Package `com.glasscast.app` — Kotlin 2.0.21, AGP 8.7.3, Material 3,
   Media3 1.5.1, Cast SDK 21.5.0, mediarouter 1.7.0, WorkManager 2.9.1,
   Haze 1.3.1, palette-ktx, Figtree. Accent purple (#AF52DE dark / #9B37C3 light).
-- **Version 1.8 (versionCode 20)**, packaged October 13 (DEVELOPMENT.md,
+- **Version 1.9 (versionCode 21)**, packaged October 19 (DEVELOPMENT.md,
+  "1.9: Sea Glass"): a second look for the whole app, Settings > Appearance
+  > Original / Sea Glass. Release notes in `docs/release-notes/1.9.md`.
+  Typecheck and the six checks clean; first built on the Xiaomi on October
+  19, with a second round of fixes from those screenshots. Third round
+  (DEVELOPMENT.md, "1.9, third round"): the bubble as a pebble, more color,
+  Newsreader for Fraunces, play still on a skip; the car's speed button and
+  Continue listening; and the TV: Sign in with Google by QR code (needs the
+  TV OAuth client in `local.properties`, steps there), Sea Glass, a
+  Continue listening row, bookmarks, and reordering Up Next. Not yet built
+  on a device. Next planned: AI transcripts and ad skipping as a paid
+  subscription in 1.10 (per-listener processing because of dynamic ad
+  insertion, opt-in, Polar for payments, no bring-your-own-key unlock).
+- Before: **1.8 (versionCode 20)**, packaged October 13 (DEVELOPMENT.md,
   "1.8"): the released 1.7 was built from 619148b (sign-in off, before the
   fifth and sixth rounds), so 1.8 is those rounds plus Sign in with Google
   on. Both GitHub crash issues (#1 Pixel 9 Pro on 1.7, #2 Redmi on 1.6) are
   the pull-to-refresh shadow hang the fifth round fixed. Release notes in
   `docs/release-notes/1.8.md`. License GPL-3.0. Brand verification is
   waiting on Google (homepage check needs 24 h after the Search Console
-  verification); a scheduled check on October 14 looks again.
+  verification); a scheduled check on October 14 looks again. The GitHub
+  repo was a mix of old versions and Finder's " 2"/" 3" copies; on October 13
+  it was replaced with exactly this source (minus `site/`) in one commit,
+  13a0e75, pushed from Jonathan's GitHub Desktop clone at
+  `~/Documents/GitHub/GlassCast-for-Android`. His Android Studio copy at
+  `~/Downloads/GlassCast` was updated to the same source.
 - Before: **1.7 (versionCode 19)**, packaged October 12 (DEVELOPMENT.md,
   "1.7"): GlassBook's menus (sheets, confirmation sheets, Settings as the
   sixth tab), bookmarks with memos, the title opening its show, headset
@@ -247,7 +280,12 @@ debug) in `attachBaseContext`; launch disk work on its IO scope;
   (first sync merges) + play actions (on pause / mark played); outbox;
   gpodder.net devices joined into one sync group at sign-in; password
   sealed with a Keystore AES key. **Untested against a real server.**
+- `TvSignIn` (1.9) — the TV's Google sign-in by Google's device flow (QR
+  code, a code typed at google.com/device); keeps the refresh token in the
+  account's prefs; `GoogleAccount.withToken` uses it on a TV. Client ID and
+  secret come from `local.properties` through manifest meta-data.
 - `QueueStore`, `Opml`, `ImageStore`, iTunes directory search.
+  `FeedStore.inProgress` is Continue listening for the car and the TV.
 
 **player/**
 - `CastSupport` — starts Cast off the main thread, once per process; calls
@@ -267,8 +305,9 @@ debug) in `attachBaseContext`; launch disk work on its IO scope;
 - `VoiceBoost` — LoudnessEnhancer +7dB (the 1.4 DynamicsProcessing chain was
   reverted).
 - `AutoLibrary` — Android Auto browse tree, search, voice play, resumption;
-  also the session callback for headset buttons and the car's skip buttons
-  (`CarButtons`, on only while a car is connected);
+  also the session callback for headset buttons and the car's skip and speed
+  buttons (`CarButtons`, on only while a car is connected); browse opens on
+  Continue listening when there's something in it;
   `ArtworkProvider` — content:// covers for Auto; `EpisodeItems` — the one
   episode → MediaItem builder.
 
@@ -296,14 +335,27 @@ sync), `NewEpisodeNotifier`. **update/** `AppUpdater`. **widget/**
   pull-to-refresh), `SubscriptionsScreen` (Cider-style pill top bar).
 - `GlassSheet` (every sheet; `ConfirmSheet` for destructive actions),
   `Sheets`, `SyncSheet`, `SortIcons`, `L10n`.
+- `seaglass/` (1.9) — the Sea Glass look: `SeaGlass.kt` (tokens and
+  `LocalSea`, recipes, pigments, `seaPigment`), `GlassBody` (AGSL shader and
+  the drawn fallback), `GlassContour` (the tumbled outline), `GlassGround`
+  (cached shadow and pool masks), `GlassPiece` (`Modifier.seaGlass`,
+  `GlassButton`, `GlassSurface`, `GlassPainter`, `coverPool`), `SeaControls`
+  (`SeaSwitch`, `rowTitleStyle`, `seaCoverPool`, `chromePill`, `rowCard`).
+  `theme/Theme.kt` has `seaScheme`; `theme/Type.kt` has `SeaType` (Newsreader).
 
 **tv/**
 - `TvRoot` — rail; Discover/Search open a preview (Follow adds); episode
-  menu; unfollow confirmation; toasts.
-- `TvScreens` — Library, Discover, Latest, Show (own cover backdrop and
-  palette, `TvHoldStillSpec`), Search, Settings (incl. `TvSyncSettings`).
+  menu; unfollow confirmation; toasts; the sign-in overlay.
+- `TvScreens` — Library (Continue listening row on top), Discover, Latest,
+  Show (own cover backdrop and palette, `TvHoldStillSpec`), Search, Settings
+  (Appearance, `TvAccountSettings`, `TvSyncSettings`).
 - `TvPlayer` — rebuilt 1.3: connected transport group, wave scrubber,
-  side panels (Up Next / Info / Speed & sound / Timer).
+  side panels (Up Next with reordering / Info / Bookmarks / Speed & sound /
+  Timer).
+- `TvAccount` (1.9) — the Google account group and `TvSignInOverlay` (QR
+  code, the code to type, polling). `QrCode` — a small QR encoder.
+- `TvSea` (1.9) — Sea Glass on the TV: `rememberTvColors`, `tvPanelColor`,
+  `TvGlass` (a control as glass; focus lights or brightens it, no ring).
 - `TvOverlays` — toast, episode menu, confirm dialog, text field.
 - `TvFocus`, `TvTheme`, `TvGlass`.
 
@@ -313,6 +365,41 @@ Handoff/sync protocol designed (`handoff-sync-protocol.md`), not implemented.
 ---
 
 ## 6. Needs testing on device
+
+**1.9, third round (not built yet):**
+- **Skip** forward and back while playing: play doesn't turn over or flicker.
+- **Bubble** in Sea Glass: the cover fills a pebble, the line runs around it
+  and grows as the episode plays; the pebble slowly changes shape while
+  playing and holds still paused; the cover flies in and out of it cleanly.
+- **Show pages and the player** carry the cover's colors; the panel's tabs
+  press as pebbles with no rectangle.
+- **Newsreader** titles, in English and with Korean falling back cleanly.
+- **Car**: the speed button steps through the speeds and the phone's player
+  follows; Continue listening is first in browse when something is started.
+- **TV sign-in** (after adding the TV client to `local.properties`):
+  Settings > Sign in with Google shows a QR code and a code; scan, enter the
+  code, approve; the TV shows the account and syncs. Sign out works. A code
+  left 30 minutes expires and offers a new one.
+- **TV Sea Glass**: Settings > Appearance > Sea Glass; the tide wash drifts;
+  buttons light in the cover's color on focus; in option rows the chosen
+  one stays lit and the focused one brightens; moving focus fast through
+  the player stays smooth on the Streamer.
+- **TV Continue listening** row; **Bookmarks** tab (add, jump, remove);
+  **Up Next** reordering (handle or hold select, up/down, select or Back).
+
+**1.9 (Sea Glass):**
+- **Confirmed on the Xiaomi (October 19):** the AGSL shader compiles; the
+  glass is frosted in light and dark (second-round fixes in DEVELOPMENT.md).
+  On an Android 12 or older phone the smooth drawn fallback is expected.
+- **Player**: the cover flies in and lands on rounded corners; play changes
+  shape on each press; dragging the panel up shrinks the glass buttons into
+  the header without stutter; the bead follows the wave.
+- **Scrolling** the Library and Latest with something playing: smooth on the
+  release build (each cover's pool and each piece of glass is cached).
+- **Mini player** collapsing to the bubble and back: the card's shadow fades
+  first, the glass ring fades in around the cover.
+- **Dark**: the tide ground, glass lit from its edges, status bar icons light.
+- **Switching looks** back and forth: nothing left over in either.
 
 **1.8:**
 - **Pull to refresh** on the Library, many times, on the Pixel or the pad:
@@ -441,6 +528,13 @@ Deutschland3000 (purple on neutral), and a few covers that looked right in
 
 ## 7. Roadmap and promises
 
+- **1.10: AI transcripts and ad skipping** as a paid subscription (the plan
+  Jonathan shared on October 18): process per listener (dynamic ad insertion
+  means everyone hears different ads), opt-in with a plain privacy note,
+  payments through Polar, and no bring-your-own-API-key unlock. The dormant
+  ad-skip engine (AdFinder, AdSkipper, `skipAds` pinned false) is the place
+  it plugs in.
+
 - **1.6:** find the pad's cause from its first report, and fix that. Then,
   only with evidence: the image cache on large screens (if OutOfMemoryError),
   and 144 Hz choppiness (measure with `dumpsys gfxinfo … framestats` first).
@@ -497,3 +591,27 @@ r/androiddev (weekly threads). Answered so far: downloads keep the
 publisher's format; Export was promised but has since been dropped (reply owed); Boost voices is a loudness boost with
 compression, not voice isolation. Asked for: gPodder (built in 1.3), Android
 Auto, sponsor skipping, Spotify (no — public RSS only).
+
+## 9. Listings and launch posts
+
+The "GlassCast Launch List" artifact (claude.ai/artifact/PjQvi34x8ackcdEBLiuGVH)
+has every venue with its text; "GlassCast on Reddit" has the Reddit posts.
+
+- Obtainium badge: on both site pages (`site/glasscast/obtainium.png`, the
+  `.store-badge` link under the install buttons) and in the README
+  (`docs/images/obtainium.png`). The link is Obtainium's redirect page with
+  `{"id":"com.glasscast.app","url":"https://github.com/anixitea/GlassCast-for-Android","author":"anixitea","name":"GlassCast"}`.
+- Obtainium's own app list (ImranR98/apps.obtainium.imranr.dev) needs 35
+  stars and a repo at least 4 months old. The repo was created 2026-09-29, so
+  late January 2027 at the earliest.
+- Podcast Index apps list: fork `anixitea/web-ui` exists. The entry (end of
+  `server/data/apps.json`, Chapters and Transcript linked to RssParser.kt at
+  v1.8) and a 288px icon (`server/assets/glasscast.png`) are in the Mac's
+  Downloads/GlassCastCampaign/listings/podcastindex. The upload to the fork
+  was blocked here, so the PR isn't open yet.
+- Downloader code (go.aftvnews.com) needs a captcha, so Jonathan makes it.
+  The link is the v1.8 APK. Once he has the code, add "Downloader code
+  NNNNNNN" to the site's install section (both languages) and the
+  r/AndroidTV post.
+- Skipped: IzzyOnDroid (rejects AI-written apps), F-Droid (Play services),
+  Podnews articles (need an own domain).

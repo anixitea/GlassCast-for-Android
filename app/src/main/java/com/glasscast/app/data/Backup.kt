@@ -116,6 +116,7 @@ class BackupManager(private val app: GlassCastApp) {
             })
             root.put("settings", JSONObject().apply {
                 put("theme", settings.theme.value.name)
+                put("look", settings.look.value.name)
                 put("dynamicColor", settings.dynamicColor.value)
                 put("sort", settings.sort.value.name)
                 put("showSort", settings.showSort.value.name)
@@ -281,6 +282,7 @@ class BackupManager(private val app: GlassCastApp) {
         val s = app.settings
         fun <T : Enum<T>> enumOf(values: Array<T>, name: String?): T? = values.firstOrNull { it.name == name }
         enumOf(ThemeMode.entries.toTypedArray(), o.optString("theme"))?.let(s::setTheme)
+        enumOf(Look.entries.toTypedArray(), o.optString("look"))?.let(s::setLook)
         if (o.has("dynamicColor")) s.setDynamicColor(o.optBoolean("dynamicColor"))
         enumOf(EpisodeSort.entries.toTypedArray(), o.optString("sort"))?.let(s::setSort)
         enumOf(ShowSort.entries.toTypedArray(), o.optString("showSort"))?.let(s::setShowSort)

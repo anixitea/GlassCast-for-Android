@@ -33,6 +33,7 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import com.glasscast.app.ui.seaglass.seaGlass
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -96,12 +97,27 @@ fun ToastHost(state: ToastState, modifier: Modifier = Modifier) {
         exit = slideOutVertically(tween(200)) { -it / 2 } + fadeOut(tween(180))
     ) {
         val m = shown ?: return@AnimatedVisibility
+        // Sea Glass: a sliver of clear glass with ink on it, not a dark pill.
+        val tokens = com.glasscast.app.ui.seaglass.LocalSea.current
+        val ink = tokens?.ink ?: Color.White
         Row(
             Modifier
                 .widthIn(max = 340.dp)
-                .shadow(14.dp, RoundedCornerShape(percent = 50), clip = false)
-                .clip(RoundedCornerShape(percent = 50))
-                .background(Color(0xF02A292F))
+                .then(
+                    if (tokens != null) {
+                        Modifier.seaGlass(
+                            pigment = tokens.fog,
+                            recipe = com.glasscast.app.ui.seaglass.GlassRecipe.Quiet,
+                            seed = 61,
+                            dark = tokens.dark
+                        )
+                    } else {
+                        Modifier
+                            .shadow(14.dp, RoundedCornerShape(percent = 50), clip = false)
+                            .clip(RoundedCornerShape(percent = 50))
+                            .background(Color(0xF02A292F))
+                    }
+                )
                 .padding(start = 6.dp, end = 18.dp, top = 6.dp, bottom = 6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -111,7 +127,7 @@ fun ToastHost(state: ToastState, modifier: Modifier = Modifier) {
                 Icon(
                     m.icon,
                     contentDescription = null,
-                    tint = Color.White,
+                    tint = ink,
                     modifier = Modifier
                         .padding(horizontal = 6.dp)
                         .size(22.dp)
@@ -121,14 +137,14 @@ fun ToastHost(state: ToastState, modifier: Modifier = Modifier) {
             Icon(
                 m.icon,
                 contentDescription = null,
-                tint = Color.White.copy(alpha = 0.8f),
+                tint = ink.copy(alpha = 0.8f),
                 modifier = Modifier.size(18.dp)
             )
             Spacer(Modifier.width(8.dp))
             Text(
                 text = m.text,
                 style = MaterialTheme.typography.titleSmall,
-                color = Color.White,
+                color = ink,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )

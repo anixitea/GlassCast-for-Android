@@ -307,3 +307,16 @@ Sign in again to keep syncing || 계속 동기화하려면 다시 로그인하�
 Use this color || 이 색상 사용 || Diese Farbe verwenden || Usar este color || Deze kleur gebruiken
 Custom color || 사용자 지정 색상 || Eigene Farbe || Color personalizado || Eigen kleur
 Adaptive tab bar || 적응형 탭 막대 || Adaptive Tab-Leiste || Barra de pestañas adaptable || Adaptieve tabbalk
+Original || 오리지널 || Original || Original || Origineel
+Sea Glass || 씨글라스 || Meerglas || Vidrio marino || Zeeglas
+{0} hr || {0}시간 || {0} Std. || {0} h || {0} u
+{0} hr {1} min || {0}시간 {1}분 || {0} Std. {1} Min. || {0} h {1} min || {0} u {1} min
+Continue listening || 이어 듣기 || Weiterhören || Seguir escuchando || Verder luisteren
+Speed {0} || 속도 {0} || Tempo {0} || Velocidad {0} || Snelheid {0}
+GOOGLE ACCOUNT || GOOGLE 계정 || GOOGLE-KONTO || CUENTA DE GOOGLE || GOOGLE-ACCOUNT
+Go to {0} and enter this code || {0}에 접속해 이 코드를 입력하세요 || Öffne {0} und gib diesen Code ein || Ve a {0} e introduce este código || Ga naar {0} en voer deze code in
+That code has expired || 코드가 만료되었습니다 || Der Code ist abgelaufen || El código ha caducado || De code is verlopen
+Get a new code || 새 코드 받기 || Neuen Code anfordern || Obtener un código nuevo || Nieuwe code ophalen
+Signed in || 로그인됨 || Angemeldet || Sesión iniciada || Ingelogd
+{0} left || {0} 남음 || noch {0} || quedan {0} || nog {0}
+Move || 이동 || Verschieben || Mover || Verplaatsen

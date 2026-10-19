@@ -51,6 +51,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import com.glasscast.app.ui.seaglass.chromePill
+import com.glasscast.app.ui.seaglass.seaCoverPool
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
@@ -197,8 +199,8 @@ fun DiscoverScreen(
                 Box(
                     Modifier
                         .size(44.dp)
+                        .chromePill(MaterialTheme.colorScheme.surfaceContainerHigh, seed = 14)
                         .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.surfaceContainerHigh)
                         .clickable(enabled = shelves != null) {
                             haptics.play(Haptic.Select)
                             round += 1
@@ -389,6 +391,44 @@ private fun PickCard(
     onClick: () -> Unit,
     onLongClick: () -> Unit
 ) {
+    // Sea Glass: the cover whole, in a pool of its color, the name set
+    // beneath it in the serif, rather than over a darkened foot.
+    if (com.glasscast.app.ui.seaglass.LocalSea.current != null) {
+        Column(
+            Modifier
+                .width(260.dp)
+                .height(330.dp)
+                .combinedClickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = onClick,
+                    onLongClick = onLongClick
+                )
+        ) {
+            Artwork(
+                url = result.artworkUrl,
+                sizeDp = 260.dp,
+                corner = 24.dp,
+                modifier = Modifier.seaCoverPool(result.artworkUrl, 24.dp)
+            )
+            Spacer(Modifier.height(14.dp))
+            Text(
+                text = result.title,
+                style = MaterialTheme.typography.titleLarge,
+                color = MaterialTheme.colorScheme.onBackground,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = if (busy) tr("Opening…") else result.author,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        return
+    }
     Box {
         Box(
             Modifier
@@ -474,12 +514,13 @@ private fun ShowCard(
             Artwork(
                 url = result.artworkUrl,
                 sizeDp = 148.dp,
-                corner = 16.dp
+                corner = if (com.glasscast.app.ui.seaglass.LocalSea.current != null) 18.dp else 16.dp,
+                modifier = Modifier.seaCoverPool(result.artworkUrl, 18.dp, strength = 0.9f)
             )
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(if (com.glasscast.app.ui.seaglass.LocalSea.current != null) 12.dp else 8.dp))
             Text(
                 text = result.title,
-                style = MaterialTheme.typography.titleSmall,
+                style = com.glasscast.app.ui.seaglass.rowTitleStyle(),
                 color = MaterialTheme.colorScheme.onBackground,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis

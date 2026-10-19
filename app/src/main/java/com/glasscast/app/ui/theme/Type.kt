@@ -90,3 +90,46 @@ fun Typography.allFigtree(): Typography = Typography(
     labelMedium = labelMedium.copy(fontFamily = Sans),
     labelSmall = labelSmall.copy(fontFamily = Sans)
 )
+
+/*
+ * Sea Glass's type: Newsreader for titles, Figtree for everything else.
+ *
+ * Newsreader is Production Type's editorial serif (OFL; see
+ * NEWSREADER-OFL.txt), bundled as two fixed cuts of its variable font: a
+ * display cut (optical size 72, weight 400) for page titles and the player's
+ * title, and a text cut (optical size 16, weight 500) for names in lists.
+ * It replaced Fraunces in 1.9's third round: Fraunces' soft, wonky shapes
+ * read as odd on a phone. One weight each, so nothing may ask for bold: synthesis
+ * is off, and a bold request draws the regular cut rather than a smeared one.
+ * Hangul has no Newsreader glyphs and falls back to the system's, as it does
+ * for Figtree.
+ */
+private val SeaDisplay = FontFamily(Font(R.font.newsreader_display, FontWeight.Normal))
+private val SeaText = FontFamily(Font(R.font.newsreader_text, FontWeight.Normal))
+
+/** Newsreader's text cut, for a name set in a list row (Sea Glass only). */
+val SeaSerif: FontFamily get() = SeaText
+
+private fun TextStyle.serif(family: FontFamily, tracking: Float = 0f) = copy(
+    fontFamily = family,
+    fontWeight = FontWeight.Normal,
+    fontSynthesis = androidx.compose.ui.text.font.FontSynthesis.None,
+    letterSpacing = tracking.em
+)
+
+/** GlassType with the titles in Newsreader. */
+val SeaType: Typography = GlassType.let { t ->
+    t.copy(
+        displayLarge = t.displayLarge.serif(SeaDisplay, -0.02f),
+        displayMedium = t.displayMedium.serif(SeaDisplay, -0.02f),
+        displaySmall = t.displaySmall.copy(fontSize = 38.sp, lineHeight = 44.sp).serif(SeaDisplay, -0.015f),
+        headlineLarge = t.headlineLarge.serif(SeaDisplay, -0.01f),
+        headlineMedium = t.headlineMedium.copy(fontSize = 27.sp, lineHeight = 33.sp).serif(SeaDisplay, -0.01f),
+        headlineSmall = t.headlineSmall.serif(SeaDisplay, -0.005f),
+        titleLarge = t.titleLarge.serif(SeaText),
+        titleMedium = t.titleMedium.copy(fontSize = 18.sp, lineHeight = 23.sp).serif(SeaText, -0.005f),
+        // Labels set in capitals (the section names in Settings, a show's
+        // episode count) are spaced out, as an eyebrow should be.
+        labelMedium = t.labelMedium.copy(letterSpacing = 0.12.em, fontWeight = FontWeight.SemiBold)
+    )
+}

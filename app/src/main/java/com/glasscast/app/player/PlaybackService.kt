@@ -165,6 +165,10 @@ class PlaybackService : MediaLibraryService() {
             // flip the widget's button back and forth.
             override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) = updateWidget()
 
+            // The car's speed button shows the speed it's at.
+            override fun onPlaybackParametersChanged(playbackParameters: androidx.media3.common.PlaybackParameters) =
+                carButtons.refresh()
+
             override fun onPlaybackStateChanged(state: Int) {
                 if (state == Player.STATE_READY) reconcileDuration()
                 if (state == Player.STATE_ENDED) {

@@ -28,6 +28,12 @@ There's more about it, in English and Korean, at
 The player takes its colors from the cover of whatever you're listening to, and
 so do the mini player and the tab bar.
 
+There are two looks to choose from in Settings. The original one, and Sea
+Glass, where the pages are paper, the titles are set in a serif, and the
+buttons are pieces of frosted glass in the colors of your shows.
+
+![Sea Glass, the second look](docs/images/sea-glass-screens.jpg)
+
 You can queue episodes by swiping them, read show notes, jump between chapters,
 follow along with transcripts, change the speed, skip silences, boost quiet
 voices, and set a sleep timer. Shaking the phone restarts the timer. You can
@@ -48,7 +54,8 @@ mine), or save them to a backup file instead. There's a home screen widget, and
 long-pressing the icon gets you straight to Resume, Latest, Search or Downloads.
 
 The same APK installs on Google TV, where it has its own interface made for the
-remote.
+remote. You can sign in with Google there too, by scanning a QR code with your
+phone, and the TV picks up where your phone left off.
 
 It's free, and there are no ads. If you'd like to support it, you can
 [buy me a coffee](https://buymeacoffee.com/theglassmaker).
@@ -96,3 +103,9 @@ license with its source available. The full text is in [LICENSE](LICENSE).
 
 The typeface is [Figtree](https://github.com/erikdkennedy/figtree) by Erik
 Kennedy, used under the SIL Open Font License (see FIGTREE-OFL.txt).
+
+The Sea Glass look sets its titles in
+[Newsreader](https://github.com/productiontype/Newsreader) by Production Type,
+also under the SIL Open Font License (see NEWSREADER-OFL.txt). Its glass is adapted
+from the [Sea Glass](https://github.com/mttmcknn/sea-glass) library for
+Compose, used under the Apache License 2.0 (see SEA-GLASS-LICENSE.txt).

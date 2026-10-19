@@ -389,6 +389,24 @@ class FeedStore(context: Context) {
         markFeedsDirty()
     }
 
+    /**
+     * Started and not finished, for Continue listening (the car, the TV):
+     * shows played most recently first, newer episodes first within a show.
+     * Half a minute in counts as started, so a tap that played a few seconds
+     * doesn't.
+     */
+    fun inProgress(limit: Int = 30): List<Episode> {
+        val feeds = _feeds.value.associateBy { it.url }
+        return _episodes.value.values.asSequence().flatten()
+            .filter { it.positionMs > 30_000 && !it.effectivelyPlayed && it.durationMs > 0 }
+            .sortedWith(
+                compareByDescending<Episode> { feeds[it.feedUrl]?.lastPlayedAt ?: 0L }
+                    .thenByDescending { it.pubDate }
+            )
+            .take(limit)
+            .toList()
+    }
+
     /** Newest episode date, for the recently-updated sort. Falls back to when it was added. */
     fun latestEpisodeAt(feed: Feed): Long =
         _episodes.value[feed.url]?.maxOfOrNull { it.pubDate }?.takeIf { it > 0 } ?: feed.addedAt

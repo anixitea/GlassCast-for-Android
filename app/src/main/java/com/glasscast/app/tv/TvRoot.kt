@@ -157,6 +157,7 @@ fun TvRoot(
     var menuFor by remember { mutableStateOf<Episode?>(null) }
     var showMenu by remember { mutableStateOf<TvShowMenuRequest?>(null) }
     var confirmUnfollow by remember { mutableStateOf<Feed?>(null) }
+    var signingIn by remember { mutableStateOf(false) }
     val toast = remember { TvToastState() }
     // Skip ads says so when it skips, as the phone does.
     val adLifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
@@ -187,6 +188,14 @@ fun TvRoot(
     val railFocus = remember { FocusRequester() }
 
     val selectedFeed = feeds.firstOrNull { it.url == selectedFeedUrl }
+    val bookmarkStore = (androidx.compose.ui.platform.LocalContext.current.applicationContext
+        as com.glasscast.app.GlassCastApp).bookmarks
+    val allBookmarks by bookmarkStore.all.collectAsStateWithLifecycle()
+    // The library's top row. What's playing is left out: the rail has it.
+    val playingGuid = nowPlaying?.guid
+    val continueListening = remember(episodeMap, feeds, playingGuid) {
+        feedStore.inProgress(13).filter { it.guid != playingGuid }.take(12)
+    }
     fun openShow(url: String) {
         val known = feeds.firstOrNull { it.url.equals(url, ignoreCase = true) }
         if (known != null) {
@@ -212,7 +221,8 @@ fun TvRoot(
     // The whole shell takes its color from whatever is playing, exactly as the
     // phone's show page does. On a large panel this matters more, not less.
     val art = nowPlaying?.imageUrl?.ifBlank { nowPlayingFeed?.imageUrl.orEmpty() }.orEmpty()
-    val (colors, _) = rememberArtworkColors(art)
+    val colors = rememberTvColors(art)
+    val seaTokens = com.glasscast.app.ui.seaglass.LocalSea.current
 
     val railWidth by animateDpAsState(
         targetValue = if (railFocused) TvSpacing.railExpanded else TvSpacing.railCollapsed,
@@ -248,7 +258,11 @@ fun TvRoot(
     val ground = remember(colors) { artworkGround(colors) }
     // The rail is the phone tab bar's counterpart: a floating panel in the
     // cover's hue, a step darker than the page.
-    val railSurface by animateColorAsState(colors.chromeBar, tween(600), label = "railSurface")
+    val railSurface by animateColorAsState(
+        if (seaTokens != null) tvPanelColor(colors) else colors.chromeBar,
+        tween(600),
+        label = "railSurface"
+    )
     val railAccent by animateColorAsState(colors.chromeButton, tween(600), label = "railAccent")
     val dim by animateFloatAsState(if (railFocused) 1f else 0f, tween(220), label = "railDim")
 
@@ -395,7 +409,14 @@ fun TvRoot(
                     colors = colors,
                     hasNowPlaying = nowPlaying != null,
                     focusRequester = contentFocus,
-                    onOpenFeed = { selectedFeedUrl = it.url }
+                    onOpenFeed = { selectedFeedUrl = it.url },
+                    continueListening = continueListening,
+                    feedFor = { feedStore.feedFor(it) },
+                    onPlay = { episode ->
+                        player.play(episode, feedStore.feedFor(episode))
+                        playerOpen = true
+                    },
+                    onEpisodeMenu = { menuFor = it }
                 )
 
                 tab == TvTab.LATEST -> TvLatestScreen(
@@ -440,7 +461,9 @@ fun TvRoot(
                     showSort = showSort,
                     colors = colors,
                     hasNowPlaying = nowPlaying != null,
-                    focusRequester = contentFocus
+                    focusRequester = contentFocus,
+                    signingIn = signingIn,
+                    onSignIn = { signingIn = true }
                 )
 
                 // PLAYING opens the player rather than routing, so it never
@@ -571,7 +594,13 @@ fun TvRoot(
                         onSkipSilenceChange = settings::setSkipSilence,
                         onVoiceBoostChange = settings::setVoiceBoost,
                         skipAds = skipAds,
-                        onSkipAdsChange = settings::setSkipAds
+                        onSkipAdsChange = settings::setSkipAds,
+                        bookmarks = remember(allBookmarks, episode.guid) {
+                            allBookmarks.filter { it.guid == episode.guid }.sortedBy { it.positionMs }
+                        },
+                        onAddBookmark = { bookmarkStore.add(episode.guid, player.positionMs.value) },
+                        onRemoveBookmark = bookmarkStore::remove,
+                        onMoveInUpNext = player::moveInUpNext
                     )
                 }
             }
@@ -647,6 +676,16 @@ fun TvRoot(
                 }
             )
         }
+        if (signingIn) {
+            TvSignInOverlay(
+                colors = colors,
+                onDone = {
+                    signingIn = false
+                    toast.show(tr("Signed in"))
+                },
+                onDismiss = { signingIn = false }
+            )
+        }
         TvToastHost(toast, accent = colors.chromeButton)
     }
     }
@@ -675,6 +714,56 @@ private fun TvRailItem(
     modifier: Modifier = Modifier,
     onClick: () -> Unit
 ) {
+    // Sea Glass: the current tab is a piece of the cover's glass; focus
+    // brings up clear glass, so the two never look alike.
+    val tokens = com.glasscast.app.ui.seaglass.LocalSea.current
+    if (tokens != null) {
+        TvGlass(
+            tokens = tokens,
+            accent = accent,
+            modifier = modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp),
+            filled = selected,
+            bare = true,
+            focusLights = false,
+            recipe = com.glasscast.app.ui.seaglass.GlassRecipe.Quiet,
+            seed = glassSeed(label),
+            grow = 1.03f,
+            onClick = onClick
+        ) { ink ->
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 9.dp, vertical = 11.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(Modifier.size(34.dp), contentAlignment = Alignment.Center) {
+                    Icon(imageVector = icon, contentDescription = label, tint = ink, modifier = Modifier.size(24.dp))
+                    if (badge) {
+                        Box(
+                            Modifier
+                                .align(Alignment.TopEnd)
+                                .size(9.dp)
+                                .clip(CircleShape)
+                                .background(accent)
+                        )
+                    }
+                }
+                if (expanded) {
+                    Spacer(Modifier.width(14.dp))
+                    Text(
+                        text = label,
+                        style = MaterialTheme.typography.titleSmall,
+                        color = ink,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+        }
+        return
+    }
     Row(
         modifier
             .fillMaxWidth()
@@ -753,12 +842,25 @@ private fun TvRailNowPlaying(
             .padding(horizontal = 4.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        // Sea Glass: the phone's pebble bubble, held still, the line tracing
+        // the pebble's edge.
+        val sea = com.glasscast.app.ui.seaglass.LocalSea.current != null
         Box(
             Modifier
                 .size(48.dp)
                 .drawWithCache {
                     val strokePx = 3.dp.toPx()
-                    val outline = cookiePath(size.width, size.height, inset = strokePx / 2f)
+                    val outline = if (sea) {
+                        Path().also {
+                            com.glasscast.app.ui.seaBubbleOutline(
+                                it, size.width - strokePx, size.height - strokePx, density,
+                                e = 1f, cornerDp = 0f, turn = 0f
+                            )
+                            it.translate(androidx.compose.ui.geometry.Offset(strokePx / 2f, strokePx / 2f))
+                        }
+                    } else {
+                        cookiePath(size.width, size.height, inset = strokePx / 2f)
+                    }
                     outline.close()
                     val measure = PathMeasure().apply { setPath(outline, true) }
                     val length = measure.length
@@ -780,7 +882,7 @@ private fun TvRailNowPlaying(
                 Modifier
                     .padding(6.dp)
                     .fillMaxSize()
-                    .clip(CookieShape())
+                    .clip(if (sea) SeaBubbleShape else CookieShape())
             ) {
                 Artwork(url = artworkUrl, sizeDp = 48.dp, corner = 0.dp, fill = true)
             }

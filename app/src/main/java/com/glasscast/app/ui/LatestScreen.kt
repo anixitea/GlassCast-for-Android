@@ -38,6 +38,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.border
+import androidx.compose.ui.graphics.Color
+import com.glasscast.app.ui.seaglass.chromePill
+import com.glasscast.app.ui.seaglass.rowCard
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -105,6 +109,7 @@ fun LatestScreen(
                 Box(
                     Modifier
                         .size(42.dp)
+                        .chromePill(Color.Transparent, seed = 14)
                         .clip(CircleShape)
                         .clickable(enabled = !refreshing) {
                             haptics.play(Haptic.Tap)
@@ -213,6 +218,9 @@ private fun LatestRow(
 ) {
     // A light wash of the show's own color, so shows tell apart at a glance.
     val (showColors, _) = rememberArtworkColors(feed?.imageUrl.orEmpty().ifBlank { episode.imageUrl.orEmpty() })
+    // Sea Glass: a paper card, its show's glass color washed in from the
+    // cover's side and fading across.
+    val tokens = com.glasscast.app.ui.seaglass.LocalSea.current
     val wash by androidx.compose.animation.animateColorAsState(showColors.elevated, androidx.compose.animation.core.tween(400), label = "rowWash")
     val played = episode.effectivelyPlayed
     val art = episode.imageUrl.ifBlank { feed?.imageUrl.orEmpty() }
@@ -223,8 +231,7 @@ private fun LatestRow(
     Row(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(20.dp))
-            .background(wash)
+            .rowCard(if (tokens != null) showColors.meshAccent else wash)
             .combinedClickable(onClick = onClick, onLongClick = onLongClick)
             .padding(horizontal = 14.dp, vertical = 12.dp),
         horizontalArrangement = Arrangement.spacedBy(13.dp)
@@ -263,7 +270,7 @@ private fun LatestRow(
             Spacer(Modifier.height(3.dp))
             Text(
                 text = episode.title,
-                style = MaterialTheme.typography.titleSmall,
+                style = com.glasscast.app.ui.seaglass.rowTitleStyle(),
                 color = MaterialTheme.colorScheme.onBackground,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis
@@ -272,7 +279,7 @@ private fun LatestRow(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Pill(
                     label = if (started) {
-                        formatCompact(episode.durationMs - episode.positionMs) + " left"
+                        tr("{0} left", formatCompact(episode.durationMs - episode.positionMs))
                     } else {
                         formatCompact(episode.durationMs)
                     }

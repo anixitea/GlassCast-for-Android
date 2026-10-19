@@ -175,7 +175,7 @@ fun TvEpisodeMenu(
         Row(
             Modifier
                 .width(900.dp)
-                .tvPanel(RoundedCornerShape(34.dp), container = colors.chromeSurface.copy(alpha = 0.98f))
+                .tvPanel(RoundedCornerShape(34.dp), container = tvPanelColor(colors).copy(alpha = 0.98f))
                 .padding(32.dp)
         ) {
             Artwork(url = episode.imageUrl.ifBlank { feed?.imageUrl.orEmpty() }, sizeDp = 200.dp, corner = 22.dp)
@@ -241,8 +241,8 @@ fun TvShowMenu(
     val first = remember { FocusRequester() }
     LaunchedEffect(Unit) { first.requestWhenReady() }
     BackHandler { onDismiss() }
-    val (showColors, _) = rememberArtworkColors(result.artworkUrl)
-    val container by animateColorAsState(showColors.chromeSurface, tween(300), label = "showMenuSurface")
+    val showColors = rememberTvColors(result.artworkUrl)
+    val container by animateColorAsState(tvPanelColor(showColors), tween(300), label = "showMenuSurface")
     val accent by animateColorAsState(showColors.chromeButton, tween(300), label = "showMenuAccent")
 
     Box(
@@ -325,7 +325,7 @@ fun TvConfirmDialog(
         Column(
             Modifier
                 .width(620.dp)
-                .tvPanel(RoundedCornerShape(30.dp), container = colors.chromeSurface.copy(alpha = 0.98f))
+                .tvPanel(RoundedCornerShape(30.dp), container = tvPanelColor(colors).copy(alpha = 0.98f))
                 .padding(32.dp)
         ) {
             Text(title, style = MaterialTheme.typography.headlineSmall, color = Color.White)
@@ -341,7 +341,21 @@ fun TvConfirmDialog(
 }
 
 @Composable
-private fun TvDialogButton(label: String, accent: Color, filled: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+internal fun TvDialogButton(label: String, accent: Color, filled: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    val tokens = com.glasscast.app.ui.seaglass.LocalSea.current
+    if (tokens != null) {
+        TvGlass(
+            tokens = tokens,
+            accent = accent,
+            modifier = modifier.height(54.dp),
+            filled = filled,
+            seed = glassSeed(label),
+            onClick = onClick
+        ) { ink ->
+            Text(label, style = MaterialTheme.typography.titleMedium, color = ink, modifier = Modifier.padding(horizontal = 28.dp))
+        }
+        return
+    }
     Box(
         modifier
             .height(54.dp)

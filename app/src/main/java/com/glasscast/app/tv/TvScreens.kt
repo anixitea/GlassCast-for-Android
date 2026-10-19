@@ -95,6 +95,9 @@ import com.glasscast.app.ui.stripHtml
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.offset
+import androidx.compose.ui.layout.layout
+import com.glasscast.app.ui.seaglass.LocalSea
+import com.glasscast.app.ui.seaglass.seaCoverPool
 
 /**
  * Foot of every list. The now-playing bar used to sit here and needed clearing;
@@ -133,7 +136,12 @@ fun TvLibraryScreen(
     colors: ArtworkColors,
     hasNowPlaying: Boolean,
     focusRequester: FocusRequester,
-    onOpenFeed: (Feed) -> Unit
+    onOpenFeed: (Feed) -> Unit,
+    /** Started and not finished (FeedStore.inProgress), minus what's playing. */
+    continueListening: List<Episode> = emptyList(),
+    feedFor: (Episode) -> Feed? = { null },
+    onPlay: (Episode) -> Unit = {},
+    onEpisodeMenu: (Episode) -> Unit = {}
 ) {
     val ordered = remember(feeds, showSort) {
         when (showSort) {
@@ -169,6 +177,38 @@ fun TvLibraryScreen(
         verticalArrangement = Arrangement.spacedBy(TvSpacing.tileGap),
         modifier = Modifier.fillMaxSize()
     ) {
+        // What you were in the middle of, one press from the top: a row of
+        // wide cards above the shows. Focus starts on the first of them.
+        if (continueListening.isNotEmpty()) {
+            item(key = "continue", span = { GridItemSpan(maxLineSpan) }, contentType = "continue") {
+                Column(Modifier.padding(bottom = 8.dp)) {
+                    Text(
+                        text = tr("Continue listening"),
+                        style = MaterialTheme.typography.headlineSmall,
+                        color = colors.content
+                    )
+                    LazyRow(
+                        // Out to the screen's edges, so the row scrolls under the
+                        // margins and a focused card's grow isn't clipped.
+                        modifier = Modifier.bleed(TvSpacing.overscanH),
+                        contentPadding = PaddingValues(horizontal = TvSpacing.overscanH, vertical = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(TvSpacing.tileGap)
+                    ) {
+                        itemsIndexed(continueListening, key = { _, e -> "continue:" + e.guid }) { index, episode ->
+                            TvContinueCard(
+                                episode = episode,
+                                feed = feedFor(episode),
+                                colors = colors,
+                                modifier = if (index == 0) Modifier.focusRequester(focusRequester) else Modifier,
+                                onLongClick = { onEpisodeMenu(episode) },
+                                onClick = { onPlay(episode) }
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
         item(span = { GridItemSpan(maxLineSpan) }) {
             TvHeading(tr("Podcasts"), tr("{0} shows", ordered.size), colors)
         }
@@ -176,7 +216,7 @@ fun TvLibraryScreen(
         itemsIndexed(ordered, key = { _, feed -> feed.url }, contentType = { _, _ -> "show" }) { index, feed ->
             Column(
                 Modifier
-                    .then(if (index == 0) Modifier.focusRequester(focusRequester) else Modifier)
+                    .then(if (index == 0 && continueListening.isEmpty()) Modifier.focusRequester(focusRequester) else Modifier)
                     .tvFocusable(accent = colors.chromeButton) { onOpenFeed(feed) }
             ) {
                 // Decoded near the size it's shown: a tile on the Streamer's
@@ -205,6 +245,95 @@ fun TvLibraryScreen(
             }
         }
     }
+}
+
+/**
+ * A Continue listening card: the cover, the show, the title, and how far in
+ * (a bar and the time left). Select plays it from where it was left; holding
+ * select opens the episode menu.
+ */
+@Composable
+private fun TvContinueCard(
+    episode: Episode,
+    feed: Feed?,
+    colors: ArtworkColors,
+    modifier: Modifier = Modifier,
+    onLongClick: () -> Unit,
+    onClick: () -> Unit
+) {
+    val ring = colors.chromeButton
+    Row(
+        modifier
+            .width(470.dp)
+            .tvFocusable(
+                shape = RoundedCornerShape(20.dp),
+                accent = ring,
+                scale = 1.04f,
+                onLongClick = onLongClick,
+                onClick = onClick
+            )
+            .background(colors.content.copy(alpha = 0.07f))
+            .padding(14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Artwork(url = episode.imageUrl.ifBlank { feed?.imageUrl.orEmpty() }, sizeDp = 104.dp, corner = 14.dp)
+        Spacer(Modifier.width(18.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = feed?.title.orEmpty().uppercase(),
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.contentVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = episode.title,
+                style = MaterialTheme.typography.titleMedium,
+                color = colors.content,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(Modifier.height(10.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .height(4.dp)
+                        .clip(CircleShape)
+                        .background(colors.content.copy(alpha = 0.16f))
+                ) {
+                    Box(
+                        Modifier
+                            .fillMaxHeight()
+                            .fillMaxWidth(episode.progress.coerceIn(0f, 1f))
+                            .background(ring)
+                    )
+                }
+                Spacer(Modifier.width(12.dp))
+                Text(
+                    text = tr("{0} left", formatCompact(episode.durationMs - episode.positionMs)),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.contentVariant,
+                    maxLines = 1
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Widens a child by [by] on each side of the room it's given, for a row
+ * inside a padded list that should still run to the screen's edges.
+ */
+private fun Modifier.bleed(by: Dp): Modifier = layout { measurable, constraints ->
+    val extra = by.roundToPx()
+    val wide = constraints.copy(
+        minWidth = (constraints.minWidth + extra * 2).coerceAtMost(constraints.maxWidth + extra * 2),
+        maxWidth = constraints.maxWidth + extra * 2
+    )
+    val placeable = measurable.measure(wide)
+    layout(constraints.maxWidth, placeable.height) { placeable.place(-extra, 0) }
 }
 
 // ----------------------------------------------------------------- discover
@@ -645,13 +774,19 @@ fun TvShowScreen(
      */
     leadingInset: Dp = 0.dp
 ) {
-    val (showColors, _) = rememberArtworkColors(feed.imageUrl)
-    val pc = remember(showColors) {
-        showColors.copy(
-            content = Color.White,
-            contentVariant = Color.White.copy(alpha = 0.7f),
-            accent = showColors.chromeButton
-        )
+    val showColors = rememberTvColors(feed.imageUrl)
+    val seaOn = LocalSea.current != null
+    val pc = remember(showColors, seaOn) {
+        if (seaOn) {
+            // The tide's ink already reads on its ground.
+            showColors.copy(accent = showColors.chromeButton)
+        } else {
+            showColors.copy(
+                content = Color.White,
+                contentVariant = Color.White.copy(alpha = 0.7f),
+                accent = showColors.chromeButton
+            )
+        }
     }
     val ordered = remember(episodes, sort) {
         when (sort) {
@@ -674,7 +809,7 @@ fun TvShowScreen(
 
     Box(Modifier.fillMaxSize()) {
         TvCoverBackdrop(url = feed.imageUrl, colors = showColors)
-        Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.28f)))
+        if (!seaOn) Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.28f)))
 
         CompositionLocalProvider(LocalBringIntoViewSpec provides scrollSpec) {
             LazyColumn(
@@ -698,13 +833,18 @@ fun TvShowScreen(
                                 headerHasFocus = now
                             }
                     ) {
-                        Artwork(url = feed.imageUrl, sizeDp = 260.dp, corner = 24.dp)
+                        Artwork(
+                            url = feed.imageUrl,
+                            sizeDp = 260.dp,
+                            corner = 24.dp,
+                            modifier = Modifier.seaCoverPool(feed.imageUrl, 24.dp)
+                        )
                         Spacer(Modifier.width(34.dp))
                         Column(Modifier.weight(1f)) {
                             Text(
                                 text = feed.title,
                                 style = MaterialTheme.typography.displaySmall,
-                                color = Color.White,
+                                color = pc.content,
                                 maxLines = 2,
                                 overflow = TextOverflow.Ellipsis
                             )
@@ -1088,7 +1228,9 @@ fun TvSettingsScreen(
     showSort: ShowSort,
     colors: ArtworkColors,
     hasNowPlaying: Boolean,
-    focusRequester: FocusRequester
+    focusRequester: FocusRequester,
+    signingIn: Boolean,
+    onSignIn: () -> Unit
 ) {
     LazyColumn(
         contentPadding = PaddingValues(
@@ -1103,13 +1245,35 @@ fun TvSettingsScreen(
         item { TvHeading(tr("Settings"), null, colors) }
 
         /*
-         * No appearance section.
+         * No theme choice, only the look.
          *
          * Every surface on TV takes its color from the artwork, so Dark and
          * Lights out had nothing left to change — which is exactly what you saw
          * when switching to Lights out did nothing at all. An option that
-         * visibly does nothing is worse than no option.
+         * visibly does nothing is worse than no option. Original and Sea
+         * Glass do change everything, so that choice is here.
          */
+        item {
+            val look by settings.look.collectAsStateWithLifecycle()
+            TvSettingGroup(tr("APPEARANCE"), colors) {
+                TvPillButton(
+                    label = tr("Original"),
+                    icon = null,
+                    colors = colors,
+                    filled = look == com.glasscast.app.data.Look.ORIGINAL,
+                    modifier = Modifier.focusRequester(focusRequester),
+                    onClick = { settings.setLook(com.glasscast.app.data.Look.ORIGINAL) }
+                )
+                TvPillButton(
+                    label = tr("Sea Glass"),
+                    icon = null,
+                    colors = colors,
+                    filled = look == com.glasscast.app.data.Look.SEA_GLASS,
+                    onClick = { settings.setLook(com.glasscast.app.data.Look.SEA_GLASS) }
+                )
+            }
+        }
+
         item {
             TvSettingGroup(tr("SHOW ORDER"), colors) {
                 TvPillButton(
@@ -1117,7 +1281,6 @@ fun TvSettingsScreen(
                     icon = null,
                     colors = colors,
                     filled = showSort == ShowSort.RECENTLY_UPDATED,
-                    modifier = Modifier.focusRequester(focusRequester),
                     onClick = { settings.setShowSort(ShowSort.RECENTLY_UPDATED) }
                 )
                 TvPillButton(
@@ -1145,6 +1308,7 @@ fun TvSettingsScreen(
             }
         }
 
+        item { TvAccountSettings(colors, signingIn, onSignIn) }
         item { TvSyncSettings(colors) }
         item {
             // In-app updates: the TV is where sideloading hurts most, so the
@@ -1240,7 +1404,7 @@ fun TvSettingsScreen(
 }
 
 @Composable
-private fun TvSettingGroup(
+internal fun TvSettingGroup(
     label: String,
     colors: ArtworkColors,
     content: @Composable () -> Unit
@@ -1376,7 +1540,7 @@ fun TvEpisodeRow(
         Spacer(Modifier.width(20.dp))
         Text(
             text = if (started) {
-                formatCompact(episode.durationMs - episode.positionMs) + " left"
+                tr("{0} left", formatCompact(episode.durationMs - episode.positionMs))
             } else {
                 formatCompact(episode.durationMs)
             },
@@ -1397,11 +1561,50 @@ fun TvPillButton(
     busy: Boolean = false,
     onClick: () -> Unit
 ) {
-    val fill = if (filled) colors.accent else colors.content.copy(alpha = 0.12f)
-    val labelColor = if (filled) colors.onAccent else colors.content
+    @Composable
+    fun Inside(labelColor: Color, inner: Modifier) {
+        Row(inner.padding(horizontal = 24.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (busy) {
+                CircularProgressIndicator(
+                    strokeWidth = 2.dp,
+                    color = labelColor,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(Modifier.width(10.dp))
+            } else if (icon != null) {
+                Icon(icon, contentDescription = null, tint = labelColor, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(10.dp))
+            }
+            Text(
+                text = label,
+                style = MaterialTheme.typography.titleSmall,
+                color = labelColor,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
 
-    Row(
-        modifier
+    // Sea Glass: a pebble of the cover's glass when chosen or focused.
+    val tokens = LocalSea.current
+    if (tokens != null) {
+        TvGlass(
+            tokens = tokens,
+            accent = colors.chromeButton,
+            modifier = modifier,
+            filled = filled,
+            // Pills come in rows of options: lit means chosen.
+            focusLights = false,
+            seed = glassSeed(label),
+            onClick = onClick
+        ) { ink -> Inside(ink, Modifier) }
+        return
+    }
+
+    val fill = if (filled) colors.accent else colors.content.copy(alpha = 0.12f)
+    Inside(
+        labelColor = if (filled) colors.onAccent else colors.content,
+        inner = modifier
             .tvFocusable(
                 shape = RoundedCornerShape(percent = 50),
                 accent = colors.accent,
@@ -1409,28 +1612,7 @@ fun TvPillButton(
                 onClick = onClick
             )
             .background(fill)
-            .padding(horizontal = 24.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        if (busy) {
-            CircularProgressIndicator(
-                strokeWidth = 2.dp,
-                color = labelColor,
-                modifier = Modifier.size(18.dp)
-            )
-            Spacer(Modifier.width(10.dp))
-        } else if (icon != null) {
-            Icon(icon, contentDescription = null, tint = labelColor, modifier = Modifier.size(20.dp))
-            Spacer(Modifier.width(10.dp))
-        }
-        Text(
-            text = label,
-            style = MaterialTheme.typography.titleSmall,
-            color = labelColor,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
-    }
+    )
 }
 
 /**
@@ -1447,6 +1629,25 @@ fun TvIconButton(
     busy: Boolean = false,
     onClick: () -> Unit
 ) {
+    val tokens = LocalSea.current
+    if (tokens != null) {
+        TvGlass(
+            tokens = tokens,
+            accent = colors.chromeButton,
+            modifier = modifier.size(53.dp),
+            seed = glassSeed(description),
+            grow = 1.08f,
+            onClick = onClick
+        ) { ink ->
+            val shown = if (tint == colors.content) ink else tint
+            if (busy) {
+                CircularProgressIndicator(strokeWidth = 2.dp, color = shown, modifier = Modifier.size(20.dp))
+            } else {
+                Icon(icon, contentDescription = description, tint = shown, modifier = Modifier.size(22.dp))
+            }
+        }
+        return
+    }
     Box(
         modifier
             .size(53.dp)

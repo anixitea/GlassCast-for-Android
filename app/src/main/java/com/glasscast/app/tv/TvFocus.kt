@@ -268,7 +268,7 @@ private class HoldState {
  * timer is dropped, so a menu never opens over something else.
  */
 @Composable
-private fun Modifier.holdSelect(onClick: () -> Unit, onLongClick: () -> Unit): Modifier {
+internal fun Modifier.holdSelect(onClick: () -> Unit, onLongClick: () -> Unit): Modifier {
     val scope = rememberCoroutineScope()
     val timeout = LocalViewConfiguration.current.longPressTimeoutMillis
     val click by rememberUpdatedState(onClick)

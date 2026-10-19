@@ -1,5 +1,241 @@
 # GlassCast — developer notes
 
+## 1.9, third round: the bubble as a pebble, more color, the car and the TV
+
+Still 1.9 (versionCode 21). From Jonathan's notes on the second build
+(October 19): skipping animated play, the bubble should be a pebble of sea
+glass holding the cover, the show pages and the player looked clinical, the
+panel's capsule buttons pressed with a highlight of the wrong shape, the
+serif looked odd, and the TV and the car needed real updates, starting with
+Google sign-in on the TV.
+
+**Play holds still on a skip.** A seek buffers, the player reports "not
+playing" for a beat, and the play pebble turned over with it. It turns only
+when pressed now, and its glyph goes through `SteadyPlaying` (a press shows
+its result at once; a stop from elsewhere shows after 450 ms unless playing
+resumed). The TV's play pebble does the same.
+
+**The bubble is a pebble.** In Sea Glass the mini player's bubble is the
+cover clipped to a tumbled pebble (`seaBubbleOutline`, seed 31, tumble
+0.075), with the progress line running around the same outline outside it: a
+faint track and the lit arc with a dot at its head. While playing the pebble
+turns slowly (one turn per 7 s, `SeaBubbleBreath`), so the outline breathes;
+paused, it holds. The cover clip, the line and `FlightClip` all build the
+outline from the same seed and turn, so the flight lands on exactly the
+shape the bubble has. The card ⇄ bubble morph eases the outline from the
+card's rounded square to the pebble.
+
+**More color.** The show page and the player are washed with the cover
+(`SeaWash`: the ground tinted by the cover's glass, a pool of that color,
+and up to two more of the cover's own colors coming in from the sides,
+drawn by `drawSeaWash`). Cards on a show page and the player's panel are
+tinted with it, dates are in the accent, and `seaPigment` keeps more chroma
+(light 0.65× clamped 0.12 to 0.24, dark 0.60× clamped 0.12 to 0.21). Clear
+glass on those pages takes some of the page's color, as clear glass picks up
+what's around it (`clearGlass`, with the page's pigment in `LocalSeaTint`).
+
+**The panel's buttons.** The capsule tabs pressed with Material's ripple, a
+rectangle over a pebble. In Sea Glass the selection is a pebble of the
+accent's glass, a press squashes the piece itself, and there's no ripple.
+
+**Newsreader for Fraunces.** Fraunces' soft, wonky shapes read oddly at
+list sizes. Newsreader (Production Type, OFL, `NEWSREADER-OFL.txt`) is a
+calmer reading serif. Two static cuts made from the variable font: display
+(opsz 72, weight 400) for titles and text (opsz 16, weight 500) for names in
+lists, each one weight, `FontSynthesis.None`. Fraunces, Newsreader, Source
+Serif 4 and Instrument Serif were compared on GlassCast's own titles first.
+
+**The car.** A speed button beside the skip buttons (`CarButtons.SPEED`, a
+session command): it steps through 0.8, 1, 1.2, 1.5, 1.8 and 2×, with
+Media3's `ICON_PLAYBACK_SPEED_*` icon for the current speed, and the app's
+own speed follows it. Like the skip buttons it's in the custom layout only
+while a car is connected. Browse opens on **Continue listening** (only when
+there's something in it): episodes more than 30 s in and not finished,
+shows played most recently first (`FeedStore.inProgress`, shared with the
+TV).
+
+**The TV: Sign in with Google by QR code.** The phone's sign-in goes
+through Play services' account picker, which a remote can't drive. The TV
+uses Google's flow for TVs and limited-input devices (`data/TvSignIn.kt`):
+it asks `oauth2.googleapis.com/device/code` for a code, shows a QR code for
+google.com/device with the code beside it, and polls `/token` at the
+interval Google gives (slowing down when told to) until the person finishes
+on their phone. The refresh token is kept in the account's private prefs;
+`GoogleAccount.withToken` takes tokens from it on a TV (a refused token is
+dropped and asked for once more; `invalid_grant` means access was removed,
+so the card asks to sign in again). Sign out revokes it. Same scope
+(`drive.appdata`, allowed in this flow) and the same Cloud project, so the
+TV syncs the same hidden app folder as the phones. The QR code is drawn by
+`tv/QrCode.kt` (byte mode, level M, versions 1 to 10, checked with zxing).
+Settings gets a Google account group (`TvAccount.kt`), and the TV syncs on
+start and stop like the phone.
+
+It needs its own OAuth client, which can't go in the repository (GitHub's
+push protection blocks a client secret, rightly). Setup, once:
+
+1. console.cloud.google.com, project `glasscast-511413` > Google Auth
+   Platform > Clients > Create client > **TVs and Limited Input devices**,
+   name it "GlassCast TV".
+2. Copy its client ID and client secret into `local.properties` at the
+   project root (it's in .gitignore):
+
+       glasscast.tvClientId=….apps.googleusercontent.com
+       glasscast.tvClientSecret=GOCSPX-…
+
+3. Build. `app/build.gradle.kts` reads them into manifest meta-data. A
+   build without them doesn't show the Google account group on the TV at
+   all.
+
+Google's own docs call this secret not really secret for this kind of
+client (it ships in the app); keeping it out of the repository is about the
+push protection and tidiness, not security.
+
+**The TV: Continue listening, bookmarks, reordering Up Next.** The library
+opens on a row of wide cards (cover, show, title, a bar and the time left);
+select plays from where you were, holding select opens the episode menu.
+What's playing is left out (the rail has it). The player gets a Bookmarks
+tab and bar slot: "Bookmark 12:34" adds one at the current time, select
+jumps to one, the button beside it removes it; memos written on the phone
+show (they're edited there). Up Next entries have a handle: select it (or
+hold select on the entry) to pick the entry up, up and down carry it, and
+select or Back sets it down. Moves go by guid in the player itself
+(`PlayerConnection.moveInUpNext`), because a held key repeats faster than
+the list recomposes and a position from the last frame could name another
+entry.
+
+**The TV: Sea Glass.** Settings > Appearance on the TV picks the look; it's
+the same setting as the phone's. The TV is always dark, so Sea Glass there
+is the tide (`tv/TvSea.kt`):
+
+- `rememberTvColors` gives the TV's pages the tide's grounds and ink
+  through the cover's glass, keeping the cover's mesh colors so focus rings
+  and the scrubber keep its hue. Panels (the side panel, menus, the rail)
+  are tide cards tinted with it (`tvPanelColor`).
+- The backdrop is the wash, not the blurred cover: the tinted tide with
+  the cover's colors pooled on it, drifting on the same clock as the
+  Original look's cover and holding still under the same conditions. It's
+  three gradient fills, lighter than the cover's two image draws.
+- Controls are glass (`TvGlass`): clear at rest; focused, the piece lights
+  up in the cover's color and grows a little; pressed, it gives and glows.
+  There's no ring around glass, so the highlight is always the piece's own
+  shape (the phone's complaint about the panel's buttons, not repeated
+  here). Where lit glass already means "chosen" (rows of options, the
+  rail's current tab, the panel's tabs and speeds), focus brightens and
+  grows the piece instead of changing its color, so the chosen one and the
+  focused one never look alike.
+- The player's transport is laid out as the phone's: round pebbles for the
+  skips, a wider tumbled pebble for play (resting a little lit, turning over
+  when pressed), and restart and next as bare icons that become glass when
+  focused, 12 dp apart. The panel bar's five slots are quiet capsules.
+- The rail's bubble is the phone's pebble, held still.
+- Covers sit in a pool of their own color; covers and episode cards keep
+  their rings (they're rectangles).
+
+**Also.** "left" in the time left on an episode was English in every
+language; it goes through `tr("{0} left")` now.
+
+**Not checked on a device:** everything in this round. The typecheck and
+the six checks are clean. On the TV: sign-in end to end (needs the client
+above), the glass's cost on the Streamer while moving focus quickly through
+the player, and the backdrop's drift.
+
+## 1.9, second round: from the first screenshots
+
+Jonathan's first build on the Xiaomi (October 19) shows the AGSL shader
+compiling and the glass frosted, in light and dark. Fixed from his screenshots:
+
+- The player panel's title read "Playing" for "Playing Next": the serif is
+  wider, and a one-line Text without an ellipsis wraps and drops the second
+  word. It's a size down in Sea Glass now, on one line with an ellipsis.
+- With the panel up, the cover showed as a gray ghost behind the header's
+  controls (the paper scrim was 94%). In portrait it now fades out with its
+  pool as the panel rises.
+- The player's top line said "32M" (formatCompact uppercased reads as
+  millions). It spells the length out: "32 MIN", "1 HR 4 MIN".
+- Scrolled show pages ran their title crisp under the clock. In Sea Glass
+  `TopGlassFade` also fades the page back into paper under the status bar
+  (tinted by the show's wash on its page).
+- Dark glass read as pale stones with big halos: clear glass is darker in
+  the body at night, its pool and shadows are lighter, and a subscribed
+  show's check is tinted glass in dark too (`pigmentFor` threshold).
+- The panel's chips (timer presets, Clear, Cancel), Bookmark, and the show
+  page's sort button now use the same quiet groove or glass as the rest; the
+  switch bead and the mini player card throw lighter shadows.
+
+## 1.9: Sea Glass
+
+**Version 1.9 (versionCode 21).** A second look for the whole app, picked in
+Settings > Appearance above the brightness tiles: `Look { ORIGINAL, SEA_GLASS }`
+in `Settings` (key `look`, in backups as `look`). Brightness, dynamic color
+and the custom color apply to either. The widget stays Original. (So did the
+TV, until the third round.)
+
+**What it is.** Jonathan wanted a look that changes the app rather than
+skinning it. Sea Glass is the [Sea Glass](https://github.com/mttmcknn/sea-glass)
+library's material (Apache-2.0, `SEA-GLASS-LICENSE.txt`): frosted, tumbled
+glass pebbles in pastel colors that cast a shadow and a pool of their own
+color, on a paper ground with serif titles. In GlassCast:
+
+- Grounds are paper (`#F4F5F0`) by day and the tide (`#0E1716`) at night;
+  cards are paper laid on them, with hairlines (`seaScheme` in Theme.kt).
+- Titles were Fraunces at first (Newsreader since the third round), two fixed cuts of the
+  variable font (SOFT 100, WONK 0): display (opsz 72, wght 380) for page and
+  player titles, text (opsz 28, wght 440) for names in lists (`SeaType`,
+  `rowTitleStyle()`). One weight each, `FontSynthesis.None`, so a bold
+  request draws the regular cut instead of a smeared fake bold.
+- Every control that was a filled shape is glass: the tab bar (clear glass,
+  the selection a pebble of the accent's glass traveling along it), the
+  mini player's play button and the bubble's ring, the player's transport,
+  bead playhead and panel capsule, the show page's button group, pills,
+  segmented controls, switches (a bead in a channel), Settings' badges, sheet
+  buttons, the toast, the refresh indicator.
+- Each show brings its own glass: `seaPigment()` turns a cover's accent
+  (`meshAccent`) into body, edge and ink. Gray covers give clear glass;
+  yellows go gold as everywhere else. Covers lie in a pool of that color
+  (`coverPool`), list rows take a wash of it from the cover's side, and the
+  player and show page are washed with it.
+- The player becomes a page: the cover inset (24dp corners) above the title,
+  a line of small capitals with the date and length at the top, download and
+  cast beside it. The morph is unchanged; the glass in it is drawn once at
+  full size and scaled into the header, so dragging the panel never redraws
+  a piece. Play turns over (its outline changes) on every press.
+
+**How the glass is drawn** (`ui/seaglass/`). The library needs Kotlin 2.3,
+Compose MP 1.10, AGP 9 and SDK 36, so it's adapted, not a dependency.
+
+- `GlassBody`: the library's body shader as AGSL (`RuntimeShader`, Android 13
+  and up), compiled once (warmed in the background at launch when Sea Glass
+  is on, and when it's picked). One shader serves every piece: each draw sets
+  the uniforms and draws, and the canvas snapshots the shader at that moment
+  (`setFloatUniform` discards the native instance, so the next draw gets a
+  fresh one). Below 13, or if the shader fails to compile, a drawn fallback:
+  gradients for depth, the highlight and the lit lower edge, and a rim.
+- `GlassContour`: the shape, analytic instead of the library's precomputed
+  geometry textures. A rounded box whose edge wanders by two slow waves (2×
+  and 3× around) with phases from a seed (mulberry32); the shader works out
+  the distance from the same edge per pixel. `turn` moves the phases at
+  different rates, so animating it reshapes the pebble.
+- `GlassGround`: cast shadow, contact shadow and the colored pool, with the
+  library's formulas, as blurred rounded-rectangle alpha masks made once in
+  software (about 1.5 px per dp), cached (LRU, 6 MB) and drawn tinted. Sizes
+  round to about 3% and the mask stretches, so a bar whose width animates
+  needs a handful of masks. No platform shadows anywhere (the 1.7 hang).
+- `Modifier.seaGlass` draws the ground outside the piece and the body inside
+  an offscreen layer, so a scrolling list moves a picture rather than running
+  the shader; `GlassPainter` draws glass inside someone else's drawing (the
+  tab bar's selection, the bubble, the bead, the refresh pebble).
+
+Everything that changes asks `LocalSea.current` (null in the Original look);
+the Original path is untouched in every file. `PlayerPanel` and `DeviceSheet`
+got their text color from a CompositionLocal instead of a hard-coded white,
+so they read on paper. `FlightClip` lands on `MiniArtShape.bigCorner`, the
+inset cover's rounding.
+
+**Not checked on a device.** The typecheck is clean, but the shader has only
+been compiled by Skia's own compiler (skia-python), not Android 13's AGSL
+compiler. If it fails there, every piece falls back to the drawn version;
+nothing crashes. Worth a look on the Pixel and on an Android 12 phone.
+
 ## 1.8
 
 **Version 1.8 (versionCode 20).** The released 1.7 was built from 619148b:

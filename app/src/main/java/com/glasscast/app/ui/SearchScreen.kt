@@ -252,7 +252,7 @@ private fun SearchField(
 
     val border by animateColorAsState(
         targetValue = if (isFocused) MaterialTheme.colorScheme.primary.copy(alpha = 0.55f)
-        else Color.Transparent,
+        else com.glasscast.app.ui.seaglass.LocalSea.current?.hairline ?: Color.Transparent,
         label = "searchBorder"
     )
 
@@ -352,24 +352,26 @@ private fun DirectoryRow(
             .padding(horizontal = 20.dp, vertical = 9.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        val sea = com.glasscast.app.ui.seaglass.LocalSea.current != null
         if (rank > 0) {
             Text(
                 text = rank.toString(),
-                style = MaterialTheme.typography.bodySmall,
+                // Sea Glass: the chart position in the serif, as a magazine sets it.
+                style = if (sea) MaterialTheme.typography.titleLarge else MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.width(22.dp)
+                modifier = Modifier.width(if (sea) 30.dp else 22.dp)
             )
         }
         Artwork(
             url = result.artworkUrl,
             sizeDp = 58.dp,
-            corner = 10.dp
+            corner = if (sea) 14.dp else 10.dp
         )
         Spacer(Modifier.size(14.dp))
         Column(Modifier.weight(1f)) {
             Text(
                 text = result.title,
-                style = MaterialTheme.typography.titleSmall,
+                style = com.glasscast.app.ui.seaglass.rowTitleStyle(),
                 color = MaterialTheme.colorScheme.onBackground,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis

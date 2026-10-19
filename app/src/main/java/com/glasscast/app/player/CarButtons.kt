@@ -77,7 +77,14 @@ internal class CarButtons(private val skipSeconds: () -> Int) {
     private fun buttons(): List<CommandButton> {
         val seconds = skipSeconds()
         val short = seconds <= 15
+        val speed = session?.player?.playbackParameters?.speed ?: 1f
         return listOf(
+            // Speed, tapped round the app's presets; its icon shows the
+            // speed it's at (Auto shows it beside the skips, or in the overflow).
+            CommandButton.Builder(speedIcon(speed))
+                .setSessionCommand(SPEED)
+                .setDisplayName(tr("Speed {0}", com.glasscast.app.ui.formatSpeed(speed)))
+                .build(),
             CommandButton.Builder(if (short) CommandButton.ICON_SKIP_BACK_15 else CommandButton.ICON_SKIP_BACK_30)
                 .setSessionCommand(SKIP_BACK)
                 .setDisplayName(tr("Back {0} seconds", seconds))
@@ -92,5 +99,22 @@ internal class CarButtons(private val skipSeconds: () -> Int) {
     companion object {
         val SKIP_BACK = SessionCommand("com.glasscast.app.SKIP_BACK", Bundle.EMPTY)
         val SKIP_FORWARD = SessionCommand("com.glasscast.app.SKIP_FORWARD", Bundle.EMPTY)
+        val SPEED = SessionCommand("com.glasscast.app.SPEED", Bundle.EMPTY)
+
+        /** The speeds the car's button steps through: the speed panel's presets, in order. */
+        private val SPEEDS = floatArrayOf(0.8f, 1f, 1.2f, 1.5f, 1.8f, 2f)
+
+        /** The speed after [now]: the next preset up, round to the slowest after the fastest. */
+        fun nextSpeed(now: Float): Float = SPEEDS.firstOrNull { it > now + 0.01f } ?: SPEEDS.first()
+
+        private fun speedIcon(speed: Float): Int = when {
+            kotlin.math.abs(speed - 0.8f) < 0.01f -> CommandButton.ICON_PLAYBACK_SPEED_0_8
+            kotlin.math.abs(speed - 1f) < 0.01f -> CommandButton.ICON_PLAYBACK_SPEED_1_0
+            kotlin.math.abs(speed - 1.2f) < 0.01f -> CommandButton.ICON_PLAYBACK_SPEED_1_2
+            kotlin.math.abs(speed - 1.5f) < 0.01f -> CommandButton.ICON_PLAYBACK_SPEED_1_5
+            kotlin.math.abs(speed - 1.8f) < 0.01f -> CommandButton.ICON_PLAYBACK_SPEED_1_8
+            kotlin.math.abs(speed - 2f) < 0.01f -> CommandButton.ICON_PLAYBACK_SPEED_2_0
+            else -> CommandButton.ICON_PLAYBACK_SPEED
+        }
     }
 }

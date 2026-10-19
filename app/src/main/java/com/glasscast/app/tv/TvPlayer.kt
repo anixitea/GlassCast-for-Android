@@ -126,9 +126,27 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.launch
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.foundation.gestures.animateScrollBy
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material.icons.filled.DragHandle
+import androidx.compose.material.icons.filled.SwapVert
+import androidx.compose.material.icons.outlined.BookmarkAdd
+import androidx.compose.material.icons.outlined.BookmarkBorder
+import com.glasscast.app.data.Bookmark
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import com.glasscast.app.ui.rememberSteadyPlaying
+import com.glasscast.app.ui.seaglass.GlassRecipe
+import com.glasscast.app.ui.seaglass.LocalSea
+import com.glasscast.app.ui.seaglass.seaCoverPool
+import com.glasscast.app.ui.seaglass.drawSeaWash
+import com.glasscast.app.ui.seaglass.seaPigment
+import com.glasscast.app.ui.seaglass.seaWash
 
 private enum class TvPanel(val label: String) {
-    UP_NEXT(tr("Up Next")), INFO(tr("Info")), SOUND(tr("Speed & sound")), TIMER(tr("Timer"))
+    UP_NEXT(tr("Up Next")), INFO(tr("Info")), BOOKMARKS(tr("Bookmarks")), SOUND(tr("Speed & sound")), TIMER(tr("Timer"))
 }
 
 private val Speeds = listOf(0.8f, 1f, 1.2f, 1.5f, 1.8f, 2f)
@@ -174,12 +192,20 @@ fun TvPlayerScreen(
     onSkipSilenceChange: (Boolean) -> Unit = {},
     onVoiceBoostChange: (Boolean) -> Unit = {},
     skipAds: Boolean = false,
-    onSkipAdsChange: (Boolean) -> Unit = {}
+    onSkipAdsChange: (Boolean) -> Unit = {},
+    /** This episode's bookmarks, in order. */
+    bookmarks: List<Bookmark> = emptyList(),
+    onAddBookmark: () -> Unit = {},
+    onRemoveBookmark: (Long) -> Unit = {},
+    /** Moves an Up Next entry up (-1) or down (1), by guid; false if it couldn't. */
+    onMoveInUpNext: (String, Int) -> Boolean = { _, _ -> false }
 ) {
     val art = episode.imageUrl.ifBlank { feed?.imageUrl.orEmpty() }
     val accent = colors.chromeButton
     val glyph = if (accent.luminance() > 0.5f) Color(0xFF15121A) else Color.White
     val playFocus = remember { FocusRequester() }
+    // Sea Glass draws each button as its own pebble, so they stand apart.
+    val groupGap = if (LocalSea.current != null) 12.dp else 4.dp
     var panel by remember { mutableStateOf<TvPanel?>(null) }
     var shownPanel by remember { mutableStateOf(TvPanel.UP_NEXT) }
     val progress = if (durationMs > 0) (positionMs.toFloat() / durationMs).coerceIn(0f, 1f) else 0f
@@ -232,7 +258,7 @@ fun TvPlayerScreen(
                 .padding(horizontal = TvSpacing.overscanH * 1.4f, vertical = TvSpacing.overscanV),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Artwork(url = art, sizeDp = 400.dp, corner = 30.dp)
+            Artwork(url = art, sizeDp = 400.dp, corner = 30.dp, modifier = Modifier.seaCoverPool(art, 30.dp))
             Spacer(Modifier.width(64.dp))
             Column(Modifier.weight(1f)) {
                 Text(
@@ -275,16 +301,16 @@ fun TvPlayerScreen(
                 // across the full column, so it fits whatever width the
                 // column has. It used to be fixed widths totalling 512dp in a
                 // 362dp column: Forward 30 got the leftovers and Next nothing.
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(groupGap)) {
                     TvGroupButton(
                         corners = TvCorners(30.dp, 10.dp, 10.dp, 30.dp), height = 76.dp,
-                        accent = accent, glyph = glyph, modifier = Modifier.weight(0.78f), onClick = onRestart
+                        accent = accent, glyph = glyph, modifier = Modifier.weight(0.78f), seed = 3, bare = true, onClick = onRestart
                     ) {
                         Icon(Icons.Filled.SkipPrevious, tr("Restart"), tint = it, modifier = Modifier.size(30.dp))
                     }
                     TvGroupButton(
                         corners = TvCorners.all(10.dp), height = 76.dp,
-                        accent = accent, glyph = glyph, modifier = Modifier.weight(1f), onClick = { onSeekBy(-skipSeconds * 1_000L) }
+                        accent = accent, glyph = glyph, modifier = Modifier.weight(1f), seed = 5, onClick = { onSeekBy(-skipSeconds * 1_000L) }
                     ) {
                         Icon(com.glasscast.app.ui.skipBackIcon(skipSeconds), tr("Back {0} seconds", skipSeconds), tint = it, modifier = Modifier.size(32.dp))
                     }
@@ -294,13 +320,13 @@ fun TvPlayerScreen(
                     )
                     TvGroupButton(
                         corners = TvCorners.all(10.dp), height = 76.dp,
-                        accent = accent, glyph = glyph, modifier = Modifier.weight(1f), onClick = { onSeekBy(skipSeconds * 1_000L) }
+                        accent = accent, glyph = glyph, modifier = Modifier.weight(1f), seed = 6, onClick = { onSeekBy(skipSeconds * 1_000L) }
                     ) {
                         Icon(com.glasscast.app.ui.skipForwardIcon(skipSeconds), tr("Forward {0} seconds", skipSeconds), tint = it, modifier = Modifier.size(32.dp))
                     }
                     TvGroupButton(
                         corners = TvCorners(10.dp, 30.dp, 30.dp, 10.dp), height = 76.dp,
-                        accent = accent, glyph = glyph, modifier = Modifier.weight(0.78f),
+                        accent = accent, glyph = glyph, modifier = Modifier.weight(0.78f), seed = 4, bare = true,
                         enabled = upNext.isNotEmpty(), onClick = onSkipNext
                     ) {
                         Icon(Icons.Filled.SkipNext, tr("Next"), tint = it, modifier = Modifier.size(30.dp))
@@ -314,28 +340,34 @@ fun TvPlayerScreen(
                 // other language is longer); the side panel names each tab.
                 // Values show where there is one: queue length, speed, the
                 // timer's time left.
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(groupGap)) {
                     TvGroupButton(
                         corners = TvCorners(30.dp, 10.dp, 10.dp, 30.dp), height = 60.dp,
-                        accent = accent, glyph = glyph, modifier = Modifier.weight(1f), onClick = { open(TvPanel.UP_NEXT) }
+                        accent = accent, glyph = glyph, modifier = Modifier.weight(1f), seed = 11, onClick = { open(TvPanel.UP_NEXT) }
                     ) {
                         TvBarContent(Icons.AutoMirrored.Filled.QueueMusic, tr("Up Next"), upNext.size.takeIf { n -> n > 0 }?.toString(), it)
                     }
                     TvGroupButton(
                         corners = TvCorners.all(10.dp), height = 60.dp,
-                        accent = accent, glyph = glyph, modifier = Modifier.weight(1f), onClick = { open(TvPanel.INFO) }
+                        accent = accent, glyph = glyph, modifier = Modifier.weight(1f), seed = 12, onClick = { open(TvPanel.INFO) }
                     ) {
                         TvBarContent(Icons.Outlined.Info, tr("Info"), null, it)
                     }
                     TvGroupButton(
                         corners = TvCorners.all(10.dp), height = 60.dp,
-                        accent = accent, glyph = glyph, modifier = Modifier.weight(1f), onClick = { open(TvPanel.SOUND) }
+                        accent = accent, glyph = glyph, modifier = Modifier.weight(1f), seed = 13, onClick = { open(TvPanel.BOOKMARKS) }
+                    ) {
+                        TvBarContent(Icons.Outlined.BookmarkBorder, tr("Bookmarks"), bookmarks.size.takeIf { n -> n > 0 }?.toString(), it)
+                    }
+                    TvGroupButton(
+                        corners = TvCorners.all(10.dp), height = 60.dp,
+                        accent = accent, glyph = glyph, modifier = Modifier.weight(1f), seed = 14, onClick = { open(TvPanel.SOUND) }
                     ) {
                         TvBarContent(null, tr("Speed & sound"), speedLabel(speed), it)
                     }
                     TvGroupButton(
                         corners = TvCorners(10.dp, 30.dp, 30.dp, 10.dp), height = 60.dp,
-                        accent = accent, glyph = glyph, modifier = Modifier.weight(1f), onClick = { open(TvPanel.TIMER) }
+                        accent = accent, glyph = glyph, modifier = Modifier.weight(1f), seed = 15, onClick = { open(TvPanel.TIMER) }
                     ) {
                         TvBarContent(Icons.Filled.Bedtime, tr("Sleep timer"), timerLabel, it)
                     }
@@ -370,7 +402,13 @@ fun TvPlayerScreen(
                 onSkipSilenceChange = onSkipSilenceChange,
                 onVoiceBoostChange = onVoiceBoostChange,
                 skipAds = skipAds,
-                onSkipAdsChange = onSkipAdsChange
+                onSkipAdsChange = onSkipAdsChange,
+                positionMs = positionMs,
+                bookmarks = bookmarks,
+                onAddBookmark = onAddBookmark,
+                onRemoveBookmark = onRemoveBookmark,
+                onSeekTo = onSeekTo,
+                onMoveInUpNext = onMoveInUpNext
             )
         }
     }
@@ -422,6 +460,34 @@ private fun TvPlayPauseButton(
     modifier: Modifier = Modifier,
     onClick: () -> Unit
 ) {
+    // Sea Glass: a tumbled pebble that turns over when it's pressed, and only
+    // then, its glyph held steady through the beat of buffering a skip causes
+    // (as on the phone).
+    if (LocalSea.current != null) {
+        val turns = remember { Animatable(0f) }
+        val scope = rememberCoroutineScope()
+        val shown = rememberSteadyPlaying(isPlaying)
+        TvGroupButton(
+            corners = TvCorners.all(38.dp), height = 76.dp,
+            accent = accent, glyph = glyph, primary = true,
+            focusRequester = focusRequester, modifier = modifier,
+            seed = 8,
+            turn = { turns.value },
+            onClick = {
+                shown.pressed()
+                scope.launch { turns.animateTo(turns.targetValue + 1f, tween(520, easing = FastOutSlowInEasing)) }
+                onClick()
+            }
+        ) {
+            Icon(
+                if (shown.value) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                if (shown.value) "Pause" else tr("Play"),
+                tint = it,
+                modifier = Modifier.size(40.dp)
+            )
+        }
+        return
+    }
     val corner by animateDpAsState(
         targetValue = if (isPlaying) 22.dp else 38.dp,
         animationSpec = spring(dampingRatio = 0.55f, stiffness = 380f),
@@ -470,9 +536,48 @@ private fun TvGroupButton(
     primary: Boolean = false,
     enabled: Boolean = true,
     focusRequester: FocusRequester? = null,
+    /** Sea Glass: which pebble, and its turn (play turns over when pressed). */
+    seed: Int = 1,
+    turn: () -> Float = { 0f },
+    /** Sea Glass: only the icon until focused (restart and next, as on the phone). */
+    bare: Boolean = false,
     onClick: () -> Unit,
     content: @Composable (Color) -> Unit
 ) {
+    // Sea Glass: each button its own piece of glass, the group's shapes left
+    // behind, laid out as the phone's player lays them out: the skips are
+    // round pebbles, play a wider tumbled one resting a little lit, and
+    // restart and next ([bare]) are just their icons until focused. Focus
+    // lights a piece in the cover's color. The panel bar's slots stay
+    // capsules.
+    val tokens = LocalSea.current
+    if (tokens != null) {
+        androidx.compose.foundation.layout.BoxWithConstraints(
+            modifier.height(height),
+            contentAlignment = Alignment.Center
+        ) {
+            val round = !primary && height >= 70.dp
+            TvGlass(
+                tokens = tokens,
+                accent = accent,
+                modifier = if (round) Modifier.size(minOf(maxWidth, height)) else Modifier.fillMaxSize(),
+                rest = if (primary) 0.4f else 0f,
+                bare = bare,
+                recipe = when {
+                    primary -> GlassRecipe.Tumbled
+                    !round -> GlassRecipe.Quiet
+                    else -> GlassRecipe.Pebble
+                },
+                seed = seed,
+                grow = if (round) 1.08f else 1.05f,
+                enabled = enabled,
+                focusRequester = focusRequester,
+                turn = turn,
+                onClick = onClick
+            ) { ink -> content(ink) }
+        }
+        return
+    }
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
     val pressed by interaction.collectIsPressedAsState()
@@ -582,7 +687,13 @@ private fun TvSidePanel(
     onSkipSilenceChange: (Boolean) -> Unit,
     onVoiceBoostChange: (Boolean) -> Unit,
     skipAds: Boolean,
-    onSkipAdsChange: (Boolean) -> Unit
+    onSkipAdsChange: (Boolean) -> Unit,
+    positionMs: Long,
+    bookmarks: List<Bookmark>,
+    onAddBookmark: () -> Unit,
+    onRemoveBookmark: (Long) -> Unit,
+    onSeekTo: (Long) -> Unit,
+    onMoveInUpNext: (String, Int) -> Boolean
 ) {
     val tabFocus = remember { FocusRequester() }
     LaunchedEffect(Unit) { tabFocus.requestWhenReady() }
@@ -591,10 +702,15 @@ private fun TvSidePanel(
             .fillMaxHeight()
             .width(600.dp)
             .padding(vertical = TvSpacing.overscanV, horizontal = 28.dp)
-            .tvPanel(RoundedCornerShape(34.dp), container = colors.chromeSurface.copy(alpha = 0.97f))
+            .tvPanel(RoundedCornerShape(34.dp), container = tvPanelColor(colors).copy(alpha = 0.97f))
             .padding(horizontal = 28.dp, vertical = 26.dp)
     ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        // Five tabs can outgrow the panel in a longer language; the row
+        // scrolls, and focus brings the chosen one into view.
+        Row(
+            Modifier.horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
             TvPanel.entries.forEach { t ->
                 TvChip(
                     label = t.label,
@@ -612,38 +728,26 @@ private fun TvSidePanel(
                 if (upNext.isEmpty()) {
                     Text(tr("Nothing queued"), style = MaterialTheme.typography.titleMedium, color = Color.White.copy(alpha = 0.7f))
                 } else {
-                    LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(bottom = 12.dp)) {
-                        itemsIndexed(upNext, key = { _, e -> e.guid }) { index, e ->
-                            val f = feedFor(e)
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Row(
-                                    Modifier
-                                        .weight(1f)
-                                        .tvFocusableRow(accent = accent, surface = Color.White, onClick = { onPlayFromUpNext(index) })
-                                        .padding(10.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Artwork(url = e.imageUrl.ifBlank { f?.imageUrl.orEmpty() }, sizeDp = 60.dp, corner = 12.dp)
-                                    Spacer(Modifier.width(14.dp))
-                                    Column(Modifier.weight(1f)) {
-                                        Text(e.title, style = MaterialTheme.typography.titleSmall, color = Color.White, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                                        Text(f?.title.orEmpty(), style = MaterialTheme.typography.bodySmall, color = Color.White.copy(alpha = 0.65f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                    }
-                                }
-                                Spacer(Modifier.width(8.dp))
-                                Box(
-                                    Modifier
-                                        .size(48.dp)
-                                        .tvFocusable(shape = CircleShape, accent = accent) { onRemoveFromUpNext(e) },
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(Icons.Outlined.Close, tr("Remove"), tint = Color.White.copy(alpha = 0.8f), modifier = Modifier.size(22.dp))
-                                }
-                            }
-                        }
-                    }
+                    TvUpNextList(
+                        upNext = upNext,
+                        feedFor = feedFor,
+                        accent = accent,
+                        glyph = glyph,
+                        onPlay = onPlayFromUpNext,
+                        onRemove = onRemoveFromUpNext,
+                        onMove = onMoveInUpNext
+                    )
                 }
             }
+
+            TvPanel.BOOKMARKS -> TvBookmarkList(
+                positionMs = positionMs,
+                bookmarks = bookmarks,
+                accent = accent,
+                onAdd = onAddBookmark,
+                onRemove = onRemoveBookmark,
+                onSeekTo = onSeekTo
+            )
 
             TvPanel.INFO -> {
                 val notes = remember(episode.description) {
@@ -718,6 +822,241 @@ private fun TvSidePanel(
     }
 }
 
+/** Remembers, between key events, that a press's release is already spoken for. */
+private class MoveKeys {
+    var swallowUp = false
+}
+
+/**
+ * Up Next, with reordering for a remote. Each entry plays on select and has
+ * two buttons: the handle, which picks it up, and remove. Holding select on
+ * the entry picks it up too. While it's up, up and down carry it through the
+ * list and select or Back sets it down; left and right do nothing, so focus
+ * can't wander off with it.
+ */
+@Composable
+private fun TvUpNextList(
+    upNext: List<Episode>,
+    feedFor: (Episode) -> Feed?,
+    accent: Color,
+    glyph: Color,
+    onPlay: (Int) -> Unit,
+    onRemove: (Episode) -> Unit,
+    /** Moves the entry with this guid up (-1) or down (1); false if it couldn't. */
+    onMove: (String, Int) -> Boolean
+) {
+    var moving by remember { mutableStateOf<String?>(null) }
+    // It left the list (played, removed elsewhere): nothing is up any more.
+    LaunchedEffect(upNext) {
+        if (moving != null && upNext.none { it.guid == moving }) moving = null
+    }
+    BackHandler(enabled = moving != null) { moving = null }
+    val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    val keys = remember { MoveKeys() }
+
+    // By guid, not position: a held key repeats faster than the list
+    // recomposes, and a position from the last frame could be another entry.
+    fun step(guid: String, by: Int) {
+        if (!onMove(guid, by)) return
+        // Keep the carried entry on screen: scroll a row's height when it
+        // reaches the edge of what's visible.
+        val info = listState.layoutInfo
+        val row = info.visibleItemsInfo.firstOrNull { it.key == guid } ?: return
+        val step = row.size + info.mainAxisItemSpacing
+        val nextTop = row.offset + if (by > 0) step else -step
+        if (nextTop < info.viewportStartOffset || nextTop + row.size > info.viewportEndOffset) {
+            scope.launch { listState.animateScrollBy((if (by > 0) step else -step).toFloat()) }
+        }
+    }
+
+    LazyColumn(
+        state = listState,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        contentPadding = PaddingValues(bottom = 12.dp)
+    ) {
+        itemsIndexed(upNext, key = { _, e -> e.guid }) { index, e ->
+            val f = feedFor(e)
+            val lifted = moving == e.guid
+            val liftFill by animateColorAsState(
+                if (lifted) accent.copy(alpha = 0.24f) else Color.Transparent,
+                tween(160),
+                label = "lifted"
+            )
+            Row(
+                Modifier
+                    .animateItem()
+                    .onPreviewKeyEvent { ev ->
+                        if (!lifted && !keys.swallowUp) return@onPreviewKeyEvent false
+                        when {
+                            ev.isSelectKey() -> {
+                                if (ev.type == KeyEventType.KeyDown) {
+                                    // A fresh press sets it down. The repeats
+                                    // of the hold that picked it up don't.
+                                    if (lifted && ev.nativeKeyEvent.repeatCount == 0) {
+                                        moving = null
+                                        keys.swallowUp = true
+                                    }
+                                } else if (ev.type == KeyEventType.KeyUp) {
+                                    keys.swallowUp = false
+                                }
+                                true
+                            }
+                            !lifted -> false
+                            ev.key == Key.DirectionUp -> {
+                                if (ev.type == KeyEventType.KeyDown) step(e.guid, -1)
+                                true
+                            }
+                            ev.key == Key.DirectionDown -> {
+                                if (ev.type == KeyEventType.KeyDown) step(e.guid, 1)
+                                true
+                            }
+                            ev.key == Key.DirectionLeft || ev.key == Key.DirectionRight -> true
+                            else -> false
+                        }
+                    },
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    Modifier
+                        .weight(1f)
+                        .tvFocusableRow(
+                            accent = accent,
+                            surface = Color.White,
+                            onLongClick = {
+                                moving = e.guid
+                                keys.swallowUp = true
+                            },
+                            onClick = { onPlay(index) }
+                        )
+                        .drawBehind { drawRect(liftFill) }
+                        .padding(10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Artwork(url = e.imageUrl.ifBlank { f?.imageUrl.orEmpty() }, sizeDp = 60.dp, corner = 12.dp)
+                    Spacer(Modifier.width(14.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(e.title, style = MaterialTheme.typography.titleSmall, color = Color.White, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Text(f?.title.orEmpty(), style = MaterialTheme.typography.bodySmall, color = Color.White.copy(alpha = 0.65f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+                Spacer(Modifier.width(8.dp))
+                Box(
+                    Modifier
+                        .size(48.dp)
+                        .tvFocusable(shape = CircleShape, accent = accent) {
+                            moving = if (lifted) null else e.guid
+                        }
+                        .background(if (lifted) accent else Color.Transparent),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        if (lifted) Icons.Filled.SwapVert else Icons.Filled.DragHandle,
+                        tr("Move"),
+                        tint = if (lifted) glyph else Color.White.copy(alpha = 0.8f),
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+                Spacer(Modifier.width(4.dp))
+                Box(
+                    Modifier
+                        .size(48.dp)
+                        .tvFocusable(shape = CircleShape, accent = accent, enabled = !lifted) { onRemove(e) },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Outlined.Close, tr("Remove"), tint = Color.White.copy(alpha = if (lifted) 0.3f else 0.8f), modifier = Modifier.size(22.dp))
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Bookmarks, as on the phone: one at the current time, then this episode's
+ * bookmarks in order. Select jumps to one; the button beside it removes it.
+ * Memos written on the phone show here; they're edited there.
+ */
+@Composable
+private fun TvBookmarkList(
+    positionMs: Long,
+    bookmarks: List<Bookmark>,
+    accent: Color,
+    onAdd: () -> Unit,
+    onRemove: (Long) -> Unit,
+    onSeekTo: (Long) -> Unit
+) {
+    LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(bottom = 12.dp)) {
+        item(key = "add") {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .tvFocusableRow(accent = accent, surface = Color.White, onClick = onAdd)
+                    .background(accent.copy(alpha = 0.16f))
+                    .padding(horizontal = 14.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(Icons.Outlined.BookmarkAdd, contentDescription = null, tint = accent, modifier = Modifier.size(24.dp))
+                Spacer(Modifier.width(12.dp))
+                Text(
+                    tr("Bookmark {0}", formatTime(positionMs)),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = Color.White
+                )
+            }
+        }
+        if (bookmarks.isEmpty()) {
+            item(key = "none") {
+                Text(
+                    tr("No bookmarks"),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = Color.White.copy(alpha = 0.7f),
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 18.dp)
+                )
+            }
+        }
+        items(bookmarks, key = { it.id }) { b ->
+            Row(Modifier.animateItem(), verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    Modifier
+                        .weight(1f)
+                        .tvFocusableRow(accent = accent, surface = Color.White, onClick = { onSeekTo(b.positionMs) })
+                        .padding(horizontal = 12.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(accent.copy(alpha = 0.2f))
+                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                    ) {
+                        Text(formatTime(b.positionMs), style = MaterialTheme.typography.titleSmall, color = Color.White)
+                    }
+                    if (b.memo.isNotBlank()) {
+                        Spacer(Modifier.width(14.dp))
+                        Text(
+                            b.memo,
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = Color.White.copy(alpha = 0.88f),
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+                Spacer(Modifier.width(8.dp))
+                Box(
+                    Modifier
+                        .size(48.dp)
+                        .tvFocusable(shape = CircleShape, accent = accent) { onRemove(b.id) },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Outlined.Close, tr("Remove"), tint = Color.White.copy(alpha = 0.8f), modifier = Modifier.size(22.dp))
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun TvPanelLabel(text: String) {
     Text(text, style = MaterialTheme.typography.labelMedium, color = Color.White.copy(alpha = 0.6f))
@@ -734,6 +1073,23 @@ private fun TvChip(
     modifier: Modifier = Modifier,
     onClick: () -> Unit
 ) {
+    val tokens = LocalSea.current
+    if (tokens != null) {
+        TvGlass(
+            tokens = tokens,
+            accent = accent,
+            modifier = modifier.height(48.dp),
+            filled = selected,
+            focusLights = false,
+            recipe = GlassRecipe.Quiet,
+            seed = glassSeed(label),
+            grow = 1.05f,
+            onClick = onClick
+        ) { ink ->
+            Text(label, style = MaterialTheme.typography.titleSmall, color = ink, maxLines = 1, modifier = Modifier.padding(horizontal = 18.dp))
+        }
+        return
+    }
     Box(
         modifier
             .height(48.dp)
@@ -819,6 +1175,11 @@ val LocalTvBackdropMoving = compositionLocalOf { true }
  */
 @Composable
 internal fun TvCoverBackdrop(url: String, colors: ArtworkColors, darken: Float = 1f, even: Boolean = false) {
+    val tokens = LocalSea.current
+    if (tokens != null) {
+        TvSeaBackdrop(colors, tokens, even)
+        return
+    }
     val store = LocalImageStore.current
     var soft by remember { mutableStateOf<ImageBitmap?>(null) }
     LaunchedEffect(url) {
@@ -856,6 +1217,31 @@ internal fun TvCoverBackdrop(url: String, colors: ArtworkColors, darken: Float =
                     }
                 )
         )
+    }
+}
+
+/**
+ * Sea Glass's backdrop: the night tide, tinted by the cover's glass, with the
+ * cover's colors pooled on it as light through colored glass falls on a
+ * floor. The pools drift slowly on the same clock as the Original look's
+ * cover, and hold still under the same conditions; drawing them is three
+ * gradient fills, lighter than the cover's two image draws.
+ *
+ * The main pool sits toward the top right, above the player's title and
+ * clear of the cover, which has its own pool under it.
+ */
+@Composable
+private fun TvSeaBackdrop(colors: ArtworkColors, tokens: com.glasscast.app.ui.seaglass.SeaTokens, even: Boolean) {
+    val wash = remember(colors, tokens) { seaWash(colors, seaPigment(colors.meshAccent, dark = true), tokens) }
+    val clock = rememberDriftClock(LocalTvBackdropMoving.current)
+    Canvas(Modifier.fillMaxSize()) {
+        val t = clock.floatValue
+        val drift = Offset(
+            cos(t / 31f) * 0.05f * size.width,
+            sin(t / 43f) * 0.06f * size.height
+        )
+        val home = if (even) Offset(size.width * 0.70f, size.height * 0.16f) else Offset(size.width * 0.66f, size.height * 0.18f)
+        drawSeaWash(wash, dark = true, center = home + drift, reach = size.maxDimension * 0.58f)
     }
 }
 

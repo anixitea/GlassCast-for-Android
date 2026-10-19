@@ -110,6 +110,7 @@ fun TopGlassFade(
     // the strip would blur the page's own still header, which reads the same
     // unblurred — so it costs nothing until you scroll.
     if (!active) return
+    val sea = com.glasscast.app.ui.seaglass.LocalSea.current != null
     Box(
         modifier
             .fillMaxWidth()
@@ -125,7 +126,24 @@ fun TopGlassFade(
                 inputScale = HazeInputScale.Auto
                 noiseFactor = 0f
             }
-    )
+    ) {
+        // Sea Glass: the page fades back into paper under the status bar, so
+        // titles scrolling up don't run crisp under the clock.
+        if (sea) {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(statusInset + 72.dp)
+                    .background(
+                        Brush.verticalGradient(
+                            0f to pageColor.copy(alpha = 0.96f),
+                            0.5f to pageColor.copy(alpha = 0.82f),
+                            1f to pageColor.copy(alpha = 0f)
+                        )
+                    )
+            )
+        }
+    }
 }
 
 /**

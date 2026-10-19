@@ -38,10 +38,16 @@ class MainActivity : ComponentActivity() {
 
         app.player.connect()
         handleIncoming(intent)
+        // Sea Glass's shader compiles in the background, so the first piece
+        // of glass doesn't wait on it.
+        if (app.settings.look.value == com.glasscast.app.data.Look.SEA_GLASS) {
+            lifecycleScope.launch(Dispatchers.Default) { com.glasscast.app.ui.seaglass.GlassBody.warm() }
+        }
         lifecycleScope.launch(Dispatchers.IO) { Shortcuts.publish(this@MainActivity) }
 
         setContent {
             val themeMode by app.settings.theme.collectAsStateWithLifecycle()
+            val look by app.settings.look.collectAsStateWithLifecycle()
             val dynamicColor by app.settings.dynamicColor.collectAsStateWithLifecycle()
             val customColorOn by app.settings.customColorOn.collectAsStateWithLifecycle()
             val customColor by app.settings.customColor.collectAsStateWithLifecycle()
@@ -78,7 +84,7 @@ class MainActivity : ComponentActivity() {
                 val showAccent = playingColors.accent.takeIf { dynamicColor && artUrl.isNotBlank() }
                     ?: androidx.compose.ui.graphics.Color(customColor).takeIf { customColorOn }
 
-            GlassCastTheme(themeMode, showAccent) {
+            GlassCastTheme(themeMode, showAccent, look) {
                 GlassCastRoot(
                     feedStore = app.feedStore,
                     imageStore = app.imageStore,

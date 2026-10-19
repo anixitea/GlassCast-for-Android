@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -31,6 +32,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.glasscast.app.ui.seaglass.clearGlass
 
 /**
  * A connected button group — Material 3 Expressive's shape, as Cider uses it
@@ -89,6 +91,41 @@ fun RowScope.GroupButton(
     enabled: Boolean = true,
     onClick: () -> Unit
 ) {
+    // Sea Glass: each part is its own piece of glass. A quiet part is clear
+    // glass, a colored one (play, an accent) glass in that color; the wide
+    // middle is the most worn piece, as play is in the player.
+    val tokens = com.glasscast.app.ui.seaglass.LocalSea.current
+    if (tokens != null) {
+        val tint = com.glasscast.app.ui.seaglass.LocalSeaTint.current
+        val pigment = remember(container, tokens, tint) {
+            com.glasscast.app.ui.seaglass.pigmentFor(container, tokens).let { if (it == tokens.fog) tokens.clearGlass(tint) else it }
+        }
+        val ink = if (enabled) pigment.ink else pigment.ink.copy(alpha = 0.4f)
+        com.glasscast.app.ui.seaglass.GlassButton(
+            onClick = onClick,
+            pigment = pigment,
+            dark = tokens.dark,
+            enabled = enabled,
+            recipe = if (weight > 1.5f) com.glasscast.app.ui.seaglass.GlassRecipe.Tumbled else com.glasscast.app.ui.seaglass.GlassRecipe.Pebble,
+            seed = 11 + position.ordinal * 7,
+            description = if (label == null) description else null,
+            modifier = Modifier
+                .weight(weight)
+                .fillMaxHeight()
+                .padding(horizontal = 3.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (icon != null) {
+                    Icon(imageVector = icon, contentDescription = null, tint = ink, modifier = Modifier.size(iconSize))
+                }
+                if (icon != null && label != null) Spacer(Modifier.width(8.dp))
+                if (label != null) {
+                    Text(text = label, style = MaterialTheme.typography.titleSmall, color = ink)
+                }
+            }
+        }
+        return
+    }
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     val squash by animateFloatAsState(

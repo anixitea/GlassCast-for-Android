@@ -1,6 +1,7 @@
 package com.glasscast.app.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
@@ -62,10 +63,16 @@ val OldestFirstIcon: ImageVector by lazy { sortIcon("OldestFirst", newestFirst =
 @Composable
 fun SortPill(sort: EpisodeSort, onToggle: () -> Unit) {
     val newest = sort == EpisodeSort.NEWEST_FIRST
+    // Sea Glass: the same quiet groove as the pills beside it.
+    val tokens = com.glasscast.app.ui.seaglass.LocalSea.current
     Box(
         Modifier
             .clip(RoundedCornerShape(18.dp))
-            .background(MaterialTheme.colorScheme.onBackground.copy(alpha = 0.10f))
+            .background(
+                if (tokens != null) com.glasscast.app.ui.seaglass.quietFill(tokens)
+                else MaterialTheme.colorScheme.onBackground.copy(alpha = 0.10f)
+            )
+            .then(if (tokens != null) Modifier.border(0.75.dp, tokens.hairline, RoundedCornerShape(18.dp)) else Modifier)
             .clickable(onClick = onToggle)
             .padding(horizontal = 12.dp, vertical = 8.dp)
     ) {

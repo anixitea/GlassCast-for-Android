@@ -11,6 +11,8 @@ import androidx.compose.ui.layout.MeasurePolicy
 import androidx.compose.ui.layout.MeasureResult
 import androidx.compose.ui.layout.MeasureScope
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.drawscope.translate
+import com.glasscast.app.ui.seaglass.seaGlass
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -120,6 +122,11 @@ fun GlassTabBar(
 ) {
     val haptics = rememberHaptics()
     val shape = RoundedCornerShape(percent = 50)
+    // Sea Glass: the bar is a long piece of clear glass, and the selection a
+    // pebble in the accent's glass traveling along it.
+    val tokens = com.glasscast.app.ui.seaglass.LocalSea.current
+    val selectionGlass = remember { com.glasscast.app.ui.seaglass.GlassPainter(com.glasscast.app.ui.seaglass.GlassRecipe.Pebble, seed = 21) }
+    val barInk: () -> Color = if (tokens != null) ({ tokens.ink }) else content
 
     /*
      * Everything that moves here is driven by two animated numbers, read only
@@ -162,21 +169,33 @@ fun GlassTabBar(
             .navigationBarsPadding()
             .padding(horizontal = GlassGutter)
             .padding(bottom = 8.dp)
-            .clip(shape)
-            // Opaque, as Cider's is. The page's blur shows around and beneath
-            // the bar (BottomGlassFade), not through it — the bar itself is a
-            // solid object in the cover's hue.
-            .drawBehind {
-                drawRect(tint())
-                val hairline = 0.5.dp.toPx()
-                drawRoundRect(
-                    color = content().copy(alpha = 0.08f),
-                    topLeft = Offset(hairline / 2f, hairline / 2f),
-                    size = Size(size.width - hairline, size.height - hairline),
-                    cornerRadius = CornerRadius(size.height / 2f),
-                    style = androidx.compose.ui.graphics.drawscope.Stroke(hairline)
-                )
-            }
+            .then(
+                if (tokens != null) {
+                    Modifier.seaGlass(
+                        pigment = tokens.fog,
+                        recipe = com.glasscast.app.ui.seaglass.GlassRecipe.Quiet,
+                        seed = 5,
+                        dark = tokens.dark
+                    )
+                } else {
+                    Modifier
+                        .clip(shape)
+                        // Opaque, as Cider's is. The page's blur shows around and beneath
+                        // the bar (BottomGlassFade), not through it — the bar itself is a
+                        // solid object in the cover's hue.
+                        .drawBehind {
+                            drawRect(tint())
+                            val hairline = 0.5.dp.toPx()
+                            drawRoundRect(
+                                color = content().copy(alpha = 0.08f),
+                                topLeft = Offset(hairline / 2f, hairline / 2f),
+                                size = Size(size.width - hairline, size.height - hairline),
+                                cornerRadius = CornerRadius(size.height / 2f),
+                                style = androidx.compose.ui.graphics.drawscope.Stroke(hairline)
+                            )
+                        }
+                }
+            )
             .padding(6.dp)
     ) {
         Layout(
@@ -197,7 +216,8 @@ fun GlassTabBar(
                                 (1f - kotlin.math.abs(pill.value - index)).coerceAtLeast(0f)).coerceIn(0f, 1f)
                         },
                         room = { labelRoom.getOrElse(index) { 0 } },
-                        content = content,
+                        content = if (tokens != null && selected) ({ tokens.brand.ink }) else barInk,
+                        dimmed = tokens != null && !selected,
                         modifier = Modifier,
                         onClick = {
                             if (!selected) haptics.play(Haptic.Select)
@@ -217,12 +237,16 @@ fun GlassTabBar(
                     val f = p - i
                     val x = slots[i * 2] + (slots[j * 2] - slots[i * 2]) * f
                     val w = slots[i * 2 + 1] + (slots[j * 2 + 1] - slots[i * 2 + 1]) * f
-                    drawRoundRect(
-                        color = content().copy(alpha = 0.16f),
-                        topLeft = Offset(x, 0f),
-                        size = Size(w, size.height),
-                        cornerRadius = CornerRadius(size.height / 2f)
-                    )
+                    if (tokens != null) {
+                        translate(left = x) { selectionGlass.draw(this, w, size.height, tokens.brand) }
+                    } else {
+                        drawRoundRect(
+                            color = content().copy(alpha = 0.16f),
+                            topLeft = Offset(x, 0f),
+                            size = Size(w, size.height),
+                            cornerRadius = CornerRadius(size.height / 2f)
+                        )
+                    }
                 }
         ) { measurables, constraints ->
             val total = constraints.maxWidth
@@ -301,6 +325,8 @@ private fun TabItem(
     room: () -> Int,
     content: () -> Color,
     modifier: Modifier,
+    /** Sea Glass: the tabs not chosen sit back a little further. */
+    dimmed: Boolean = false,
     onClick: () -> Unit
 ) {
     val interaction = remember { MutableInteractionSource() }
@@ -314,7 +340,7 @@ private fun TabItem(
     )
     // Read here, so a fade recomposes the tab, not the bar.
     val ink = content()
-    val tint = if (selected) ink else ink.copy(alpha = 0.66f)
+    val tint = if (selected) ink else ink.copy(alpha = if (dimmed) 0.62f else 0.66f)
 
     val policy = remember(reveal, room) {
         object : MeasurePolicy {

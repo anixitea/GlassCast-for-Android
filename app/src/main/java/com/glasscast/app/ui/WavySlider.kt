@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import kotlin.math.PI
 import kotlin.math.sin
 import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.graphics.drawscope.translate
 
 /**
  * The wavy scrubber.
@@ -71,8 +72,12 @@ fun WavySlider(
     marks: List<ClosedFloatingPointRange<Float>> = emptyList(),
     markColor: Color = color,
     /** Points marked with a small dot under the line (bookmarks), as fractions of the whole. */
-    ticks: List<Float> = emptyList()
+    ticks: List<Float> = emptyList(),
+    /** Sea Glass: the playhead is a bead of this glass instead of a bar. */
+    thumbGlass: com.glasscast.app.ui.seaglass.Pigment? = null,
+    thumbGlassDark: Boolean = false
 ) {
+    val bead = remember { com.glasscast.app.ui.seaglass.GlassPainter(com.glasscast.app.ui.seaglass.GlassRecipe.Pebble, seed = 4) }
     var dragging by remember { mutableStateOf(false) }
     var local by remember { mutableStateOf(0f) }
     val shown = if (dragging) local else progress.coerceIn(0f, 1f)
@@ -133,7 +138,12 @@ fun WavySlider(
         val a = amplitude.toPx() * amp * (if (voice != null) 0.3f + 0.7f * voice() else 1f)
         val k = (2 * PI / wavelength.toPx()).toFloat()
         val head = (w * shown).coerceIn(0f, w)
-        val gap = if (showThumb) 7.dp.toPx() else 3.dp.toPx()
+        val beadSize = if (thumbGlass != null) (size.height * 0.64f).coerceAtMost(22.dp.toPx()) * (if (dragging) 1.18f else 1f) else 0f
+        val gap = when {
+            showThumb && thumbGlass != null -> beadSize / 2f + 3.dp.toPx()
+            showThumb -> 7.dp.toPx()
+            else -> 3.dp.toPx()
+        }
 
         // Played: the wave. Sampled every 2px, which is smooth at any density
         // and cheap enough to redraw on every frame of the animation.
@@ -198,8 +208,13 @@ fun WavySlider(
             }
         }
 
-        // The playhead bar — the part a finger aims at.
-        if (showThumb) {
+        // The playhead bar — the part a finger aims at. In Sea Glass, a bead.
+        if (showThumb && thumbGlass != null) {
+            translate(head - beadSize / 2f, cy - beadSize / 2f) {
+                bead.ground(this, beadSize, beadSize, thumbGlass, thumbGlassDark, strength = 0.8f)
+                bead.draw(this, beadSize, beadSize, thumbGlass, glow = if (dragging) 0.8f else 0f)
+            }
+        } else if (showThumb) {
             val barH = size.height * (if (dragging) 1f else 0.86f)
             drawLine(
                 color = color,

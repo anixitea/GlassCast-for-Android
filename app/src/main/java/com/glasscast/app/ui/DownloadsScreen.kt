@@ -36,6 +36,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import com.glasscast.app.ui.seaglass.rowCard
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -259,8 +260,7 @@ private fun DownloadRow(
     Row(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(20.dp))
-            .background(wash)
+            .rowCard(if (com.glasscast.app.ui.seaglass.LocalSea.current != null) showColors.meshAccent else wash)
             .clickable(enabled = entry.state == DownloadState.DONE && (selecting || episode != null), onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -278,7 +278,7 @@ private fun DownloadRow(
             Spacer(Modifier.height(3.dp))
             Text(
                 text = episode?.title ?: entry.title,
-                style = MaterialTheme.typography.titleSmall,
+                style = com.glasscast.app.ui.seaglass.rowTitleStyle(),
                 color = MaterialTheme.colorScheme.onBackground,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis
@@ -391,6 +391,27 @@ private fun HeaderIcon(
     tint: Color = MaterialTheme.colorScheme.onSurface,
     onClick: () -> Unit
 ) {
+    // Sea Glass: a pebble of clear glass, or of the accent's glass when on.
+    val tokens = com.glasscast.app.ui.seaglass.LocalSea.current
+    if (tokens != null) {
+        val glass = if (active) tokens.brand else tokens.fog
+        com.glasscast.app.ui.seaglass.GlassButton(
+            onClick = onClick,
+            pigment = glass,
+            dark = tokens.dark,
+            enabled = enabled,
+            seed = icon.name.hashCode(),
+            modifier = Modifier.size(44.dp)
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = description,
+                tint = if (tint == MaterialTheme.colorScheme.onSurface) glass.ink else tint,
+                modifier = Modifier.size(22.dp)
+            )
+        }
+        return
+    }
     Box(
         Modifier
             .size(44.dp)

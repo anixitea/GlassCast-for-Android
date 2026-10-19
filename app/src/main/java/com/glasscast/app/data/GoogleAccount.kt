@@ -114,6 +114,9 @@ class GoogleAccount(private val app: GlassCastApp) {
     )
     val state: StateFlow<AccountState> = _state.asStateFlow()
 
+    /** The TV's way in: a code typed on a phone (see TvSignIn). */
+    val tv = TvSignIn(app, prefs)
+
     private val request = AuthorizationRequest.builder()
         .setRequestedScopes(listOf(Scope(SCOPE)))
         .build()
@@ -166,6 +169,21 @@ class GoogleAccount(private val app: GlassCastApp) {
      * account is marked as needing to sign in again.
      */
     private suspend fun <T> withToken(context: Context, block: suspend (String) -> T): T {
+        // Signed in on a TV: tokens come from the kept refresh token instead.
+        if (tv.signedIn) {
+            repeat(2) { attempt ->
+                val token = tv.token() ?: run {
+                    setNeedsSignIn(true)
+                    throw NeedsSignIn()
+                }
+                try {
+                    return block(token)
+                } catch (e: Unauthorized) {
+                    tv.invalidate()
+                    if (attempt == 1) throw e
+                }
+            }
+        }
         repeat(2) { attempt ->
             when (val auth = authorize(context)) {
                 is GoogleAuth.Granted -> try {
@@ -223,7 +241,9 @@ class GoogleAccount(private val app: GlassCastApp) {
      */
     suspend fun signOut(context: Context) {
         val email = _state.value.email
-        if (email.isNotBlank()) {
+        if (tv.signedIn) {
+            tv.signOut()
+        } else if (email.isNotBlank()) {
             runCatching {
                 Identity.getAuthorizationClient(context).revokeAccess(
                     RevokeAccessRequest.builder()

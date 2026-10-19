@@ -1,5 +1,7 @@
 package com.glasscast.app.ui
 
+import com.glasscast.app.ui.seaglass.drawSeaWash
+import com.glasscast.app.ui.seaglass.clearGlass
 import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.union
 import androidx.compose.ui.unit.LayoutDirection
@@ -108,6 +110,11 @@ import kotlin.math.roundToInt
 import com.glasscast.app.player.AdSkipper
 import com.glasscast.app.data.usable
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.requiredSize
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import com.glasscast.app.ui.seaglass.coverPool
+import com.glasscast.app.ui.seaglass.seaGlass
 import androidx.compose.animation.core.FastOutLinearInEasing
 
 private val OnPlayer = Color(0xFFF7F7F9)
@@ -192,10 +199,41 @@ fun PlayerScreen(
         }
     }
     val accent = colors.meshAccent
+    /*
+     * Sea Glass turns the player from a poster into a page: the cover inset on
+     * paper (or the tide at night) washed with its own color, ink type, and
+     * the transport as glass: clear pebbles for the skips and a worn pebble
+     * of the cover's glass for play. Everything that moves keeps its geometry
+     * (the morph below is the same); only what it's made of changes.
+     */
+    val tokens = com.glasscast.app.ui.seaglass.LocalSea.current
+    val pigment = if (tokens != null) {
+        com.glasscast.app.ui.seaglass.animatePigment(
+            remember(colors, tokens.dark) { com.glasscast.app.ui.seaglass.seaPigment(colors.meshAccent, tokens.dark) }
+        )
+    } else {
+        null
+    }
+    val onPlayer = tokens?.ink ?: OnPlayer
+    val onPlayerDim = tokens?.muted ?: OnPlayer.copy(alpha = 0.66f)
+    // Sea Glass: the cover's own ink for the small type, the line and the
+    // volume, so the page carries its color past the wash.
+    val seaInk = if (tokens != null && pigment != null) (if (tokens.dark) pigment.edge else pigment.ink) else null
+    val wash = if (tokens != null && pigment != null) com.glasscast.app.ui.seaglass.seaWash(colors, pigment, tokens) else null
     // The panel is dark in every case, so its accent is the pale tone of the
-    // cover's accent — the same one the mini player's play button uses.
-    val panelColor by animateColorAsState(colors.panelSurface, tween(500), label = "panelSurface")
-    val panelAccent by animateColorAsState(colors.chromeButton, tween(500), label = "panelAccent")
+    // cover's accent — the same one the mini player's play button uses. In Sea
+    // Glass it's paper, and the accent is the cover glass's ink.
+    val panelColor by animateColorAsState(
+        if (tokens != null && pigment != null) androidx.compose.ui.graphics.lerp(tokens.card, pigment.body, if (tokens.dark) 0.22f else 0.30f)
+        else colors.panelSurface,
+        tween(500),
+        label = "panelSurface"
+    )
+    val panelAccent by animateColorAsState(
+        if (tokens != null && pigment != null) (if (tokens.dark) pigment.edge else pigment.ink) else colors.chromeButton,
+        tween(500),
+        label = "panelAccent"
+    )
     val haptics = rememberHaptics()
 
     // 0 = panel collapsed to its strip, 1 = pulled all the way up.
@@ -229,15 +267,17 @@ fun PlayerScreen(
     val shownPosition = if (scrubbing && durationMs > 0) (scrubValue * durationMs).toLong() else positionMs
 
     // Always light icons: the top of this screen is the artwork under a top
-    // scrim, and the foot is darkened by the bottom one.
+    // scrim, and the foot is darkened by the bottom one. (Sea Glass on paper:
+    // dark icons, as on any light page.)
     val view = LocalView.current
-    DisposableEffect(Unit) {
+    val lightBars = tokens != null && !tokens.dark
+    DisposableEffect(lightBars) {
         val window = (view.context as? Activity)?.window
         val controller = window?.let { WindowCompat.getInsetsController(it, view) }
         val wasLight = controller?.isAppearanceLightStatusBars ?: false
         val wasLightNav = controller?.isAppearanceLightNavigationBars ?: false
-        controller?.isAppearanceLightStatusBars = false
-        controller?.isAppearanceLightNavigationBars = false
+        controller?.isAppearanceLightStatusBars = lightBars
+        controller?.isAppearanceLightNavigationBars = lightBars
         onDispose {
             controller?.isAppearanceLightStatusBars = wasLight
             controller?.isAppearanceLightNavigationBars = wasLightNav
@@ -325,7 +365,11 @@ fun PlayerScreen(
 
     BackHandler(enabled = expand.value > 0.5f) { settlePanel(2000f) }
 
-    CompositionLocalProvider(LocalContentColor provides OnPlayer) {
+    // The flight lands on the inset cover's corners in Sea Glass.
+    val bigCorner = with(LocalDensity.current) { if (tokens != null) SeaCoverCorner.toPx() else 0f }
+    SideEffect { MiniArtShape.bigCorner = bigCorner }
+
+    CompositionLocalProvider(LocalContentColor provides onPlayer) {
         BoxWithConstraints(
             Modifier
                 .fillMaxSize()
@@ -336,7 +380,7 @@ fun PlayerScreen(
                     scaleX = shrink
                     scaleY = shrink
                 }
-                .background(Color.Black)
+                .background(tokens?.ground ?: Color.Black)
                 .pointerInput(Unit) {
                     /*
                      * One gesture, two meanings, decided by direction at the
@@ -405,6 +449,14 @@ fun PlayerScreen(
             val shortLandscape = landscape && maxHeight < 480.dp
             val artWidth = if (landscape) minOf(maxHeight, maxWidth * 0.55f) else maxWidth
 
+            if (tokens != null && wash != null) {
+                SeaPlayerGround(
+                    wash = wash,
+                    dark = tokens.dark,
+                    landscape = landscape,
+                    modifier = Modifier.fillMaxSize()
+                )
+            } else {
             PlayerBackdrop(
                 url = art,
                 band = if (landscape) artWidth else artHeight,
@@ -443,6 +495,7 @@ fun PlayerScreen(
                         )
                     )
             )
+            }
 
             // The handle is the dismiss affordance now, in place of a chevron:
             // the gesture is drag-down, so the hint should look draggable.
@@ -460,7 +513,7 @@ fun PlayerScreen(
                     .padding(top = 10.dp)
                     .size(width = 40.dp, height = 5.dp)
                     .clip(CircleShape)
-                    .background(OnPlayer.copy(alpha = 0.55f))
+                    .background(onPlayer.copy(alpha = if (tokens != null) 0.22f else 0.55f))
             )
 
             val navInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
@@ -486,32 +539,11 @@ fun PlayerScreen(
             // time the panel is 40% open, so they never overlap the moving parts.
             val fade = (1f - e * 2.5f).coerceIn(0f, 1f)
 
-            // The cover dims as the panel rises, so the compact controls that
-            // arrive over it stay legible on a bright cover.
-            // Not in landscape: there the panel covers only the column and
-            // the compact controls sit over the blur, never the cover — a
-            // dimmed column read as a dark box cut out of the screen.
-            if (e > 0f && !landscape) {
-                Box(
-                    Modifier
-                        .fillMaxSize()
-                        .background(Color.Black.copy(alpha = 0.46f * e))
-                )
-            }
-
             /*
-             * ---- the morph ----
-             *
-             * The title, the transport and the wave are drawn once each, and
-             * every one has two rectangles: where it sits in the full player,
-             * and where it sits in the compact header above the open panel.
-             * Their position, size, corners and icon sizes are interpolated by
-             * `e` — how far the panel is open — and `e` follows the finger. So
-             * they travel with the drag, every frame, the way Cider's do,
-             * instead of fading out below and fading back in above.
-             *
              * The full layout is computed from the bottom up, anchored to the
-             * panel's collapsed top, so it holds its shape on any screen height.
+             * panel's collapsed top, so it holds its shape on any screen
+             * height (the morph below has the rest). It comes first so the
+             * Sea Glass cover can fit itself above the title.
              */
             val side = 26.dp
             // Sideways, the camera cutout or the three-button bar can be on
@@ -550,12 +582,73 @@ fun PlayerScreen(
             val sliderTop = timesTop - (if (shortLandscape) 4.dp else 6.dp) - 30.dp
             val titleTop = sliderTop - (if (shortLandscape) 10.dp else 14.dp) - 60.dp
 
+            // Sea Glass: the cover sits on the page, inset and rounded, in the
+            // room between the line of small type at the top and the title;
+            // in landscape, centered in its half.
+            val seaPortrait = tokens != null && !landscape
+            if (tokens != null && pigment != null) {
+                val coverTop = statusInset + 58.dp
+                val coverSize = if (landscape) {
+                    minOf(artWidth - 56.dp, maxHeight - statusInset - navInset - 40.dp).coerceAtLeast(120.dp)
+                } else {
+                    minOf(w - 56.dp, titleTop - 18.dp - coverTop).coerceAtLeast(120.dp)
+                }
+                val coverX = if (landscape) (artWidth - 24.dp - coverSize) / 2 + 4.dp else (w - coverSize) / 2
+                val coverY = if (landscape) statusInset + (maxHeight - statusInset - navInset - coverSize) / 2 else coverTop
+                // In portrait it leaves as the panel rises (it would only be a
+                // ghost behind the header's controls), its pool with it.
+                val coverShown = if (landscape) 1f else (1f - e * 1.6f).coerceIn(0f, 1f)
+                SeaPlayerCover(
+                    url = art,
+                    modifier = Modifier
+                        .offset(coverX, coverY)
+                        .size(coverSize)
+                        .coverPool(pigment, SeaCoverCorner.value, tokens.dark, strength = coverShown)
+                        .then(
+                            if (closing) Modifier
+                            else Modifier.sharedArtwork(artKey, LocalPlayerScope.current, clip = FlightClip)
+                        )
+                        .graphicsLayer { alpha = coverShown }
+                )
+            }
+
+            // The cover dims as the panel rises, so the compact controls that
+            // arrive over it stay legible on a bright cover.
+            // Not in landscape: there the panel covers only the column and
+            // the compact controls sit over the blur, never the cover — a
+            // dimmed column read as a dark box cut out of the screen. (Sea
+            // Glass: the paper comes back over the cover instead.)
+            if (e > 0f && !landscape) {
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .background(
+                            if (tokens != null) tokens.ground.copy(alpha = 0.94f * e)
+                            else Color.Black.copy(alpha = 0.46f * e)
+                        )
+                )
+            }
+
+            /*
+             * ---- the morph ----
+             *
+             * The title, the transport and the wave are drawn once each, and
+             * every one has two rectangles: where it sits in the full player,
+             * and where it sits in the compact header above the open panel.
+             * Their position, size, corners and icon sizes are interpolated by
+             * `e` — how far the panel is open — and `e` follows the finger. So
+             * they travel with the drag, every frame, the way Cider's do,
+             * instead of fading out below and fading back in above.
+             *
+             * The full layout is computed from the bottom up, anchored to the
+             * panel's collapsed top, so it holds its shape on any screen height.
+             */
             // Title and show name, scaled down into the header.
             // The icons beside the title: download and cast. (A moon joined
             // them while a timer ran; it took room from the title and repeated
             // the one in the panel bar, which now shows a running timer.)
             val iconsWidth = 96.dp
-            val titleFull = DpRect(colLeft, titleTop, colW - iconsWidth - 4.dp, 60.dp)
+            val titleFull = DpRect(colLeft, titleTop, if (seaPortrait) colW else colW - iconsWidth - 4.dp, 60.dp)
             val titleCompact = DpRect(cLeft, compactTop, cW - 178.dp - 12.dp, 48.dp)
             val titleScale = mix(1f, 0.8f, e)
             Column(
@@ -590,7 +683,7 @@ fun PlayerScreen(
                     Text(
                         text = episode.title,
                         style = MaterialTheme.typography.headlineMedium,
-                        color = OnPlayer,
+                        color = onPlayer,
                         maxLines = 1,
                         modifier = Modifier
                             // Full width, so the fade sits at the edge of the
@@ -617,15 +710,53 @@ fun PlayerScreen(
                 }
                 Text(
                     text = feed?.title.orEmpty(),
-                    style = MaterialTheme.typography.titleMedium,
-                    color = OnPlayer.copy(alpha = 0.66f),
+                    // Sea Glass sets the show in the sans, under the serif title.
+                    style = if (tokens != null) MaterialTheme.typography.titleSmall.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Medium)
+                    else MaterialTheme.typography.titleMedium,
+                    color = seaInk ?: onPlayerDim,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
             }
 
+            // Sea Glass, portrait: a line of small capitals at the top, the
+            // episode's date and length, with download and cast at its end.
+            if (seaPortrait && fade > 0f) {
+                val length = if (durationMs > 0) durationMs else episode.durationMs
+                val eyebrow = listOf(formatDate(episode.pubDate), formatLength(length))
+                    .filter { it.isNotBlank() }
+                    .joinToString("  ·  ")
+                    .uppercase()
+                Row(
+                    Modifier
+                        .offset(colLeft, statusInset + 14.dp)
+                        .width(colW)
+                        .height(44.dp)
+                        .graphicsLayer { alpha = fade },
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = eyebrow,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = seaInk ?: onPlayerDim,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                    DownloadIconButton(download, tint = onPlayer) {
+                        haptics.play(Haptic.Tap)
+                        if (download == null || download.state == com.glasscast.app.data.DownloadState.FAILED) onDownload()
+                        else onRemoveDownload()
+                    }
+                    PlayerIconButton(Icons.Filled.Cast, tr("Play on another device"), tint = onPlayer) {
+                        haptics.play(Haptic.Tap)
+                        showDevices = true
+                    }
+                }
+            }
+
             // Download and cast.
-            if (fade > 0f) {
+            if (fade > 0f && !seaPortrait) {
                 Row(
                     Modifier
                         .offset(colLeft + colW - iconsWidth, titleTop + 8.dp)
@@ -634,12 +765,12 @@ fun PlayerScreen(
                     horizontalArrangement = Arrangement.End,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    DownloadIconButton(download) {
+                    DownloadIconButton(download, tint = onPlayer) {
                         haptics.play(Haptic.Tap)
                         if (download == null || download.state == com.glasscast.app.data.DownloadState.FAILED) onDownload()
                         else onRemoveDownload()
                     }
-                    PlayerIconButton(Icons.Filled.Cast, tr("Play on another device")) {
+                    PlayerIconButton(Icons.Filled.Cast, tr("Play on another device"), tint = onPlayer) {
                         haptics.play(Haptic.Tap)
                         showDevices = true
                     }
@@ -655,7 +786,9 @@ fun PlayerScreen(
             WavySlider(
                 progress = if (scrubbing) scrubValue else progress,
                 playing = isPlaying,
-                color = OnPlayer,
+                color = seaInk ?: onPlayer,
+                thumbGlass = pigment,
+                thumbGlassDark = tokens?.dark == true,
                 enabled = durationMs > 0,
                 height = sliderRect.h,
                 amplitude = mix(4.dp, 3.dp, e),
@@ -692,13 +825,13 @@ fun PlayerScreen(
                     Text(
                         text = formatTime(shownPosition),
                         style = MaterialTheme.typography.bodySmall,
-                        color = OnPlayer.copy(alpha = 0.66f)
+                        color = onPlayerDim
                     )
                     Spacer(Modifier.weight(1f))
                     Text(
                         text = formatRemaining(shownPosition, durationMs),
                         style = MaterialTheme.typography.bodySmall,
-                        color = OnPlayer.copy(alpha = 0.66f)
+                        color = onPlayerDim
                     )
                 }
             }
@@ -720,15 +853,18 @@ fun PlayerScreen(
                 animationSpec = spring(dampingRatio = 0.55f, stiffness = 380f),
                 label = "playShapeSmall"
             )
-            val quiet = OnPlayer.copy(alpha = 0.16f)
+            val quiet = if (tokens != null) Color.Transparent else OnPlayer.copy(alpha = 0.16f)
             val leftEdge = compactSlots[0].copy(w = 0.dp)
             val rightEdge = compactSlots[2].copy(x = compactSlots[2].x + compactSlots[2].w, w = 0.dp)
+            // Sea Glass: the skips are clear pebbles, drawn once at their full
+            // size and scaled into the header, so the morph never redraws them.
+            val skipGlass = tokens?.let { SkipGlass(it.clearGlass(pigment), it.dark, minOf(fullSlots[1].w, fullSlots[1].h).coerceAtLeast(8.dp)) }
 
             if (fade > 0f) {
                 MorphButton(
                     rect = mix(fullSlots[0], leftEdge, e),
                     corners = Corners(30.dp, 10.dp, 10.dp, 30.dp),
-                    container = quiet, content = OnPlayer,
+                    container = quiet, content = onPlayer,
                     icon = Icons.Filled.SkipPrevious, description = tr("Restart episode"),
                     iconSize = 24.dp, alpha = fade
                 ) {
@@ -739,9 +875,10 @@ fun PlayerScreen(
             MorphButton(
                 rect = mix(fullSlots[1], compactSlots[0], e),
                 corners = mix(Corners(10.dp, 10.dp, 10.dp, 10.dp), Corners(20.dp, 8.dp, 8.dp, 20.dp), e),
-                container = quiet, content = OnPlayer,
+                container = quiet, content = onPlayer,
                 icon = skipBackIcon(skipSeconds), description = tr("Back {0} seconds", skipSeconds),
-                iconSize = mix(28.dp, 20.dp, e)
+                iconSize = mix(28.dp, 20.dp, e),
+                glass = skipGlass?.copy(seed = 32)
             ) {
                 haptics.play(Haptic.SkipBack)
                 onSeekBy(-skipSeconds * 1_000L)
@@ -752,6 +889,31 @@ fun PlayerScreen(
                     .size(mix(fullSlots[2].w, compactSlots[1].w, e), mix(fullSlots[2].h, compactSlots[1].h, e))
             ) {
                 val c = mix(playCorner, playCornerSmall, e)
+                if (tokens != null && pigment != null) {
+                    // Drawn at its full size and scaled, like the skips.
+                    val fullH = fullSlots[2].h.coerceAtLeast(8.dp)
+                    val fullW = minOf(fullSlots[2].w, fullH * 1.25f).coerceAtLeast(8.dp)
+                    val nowH = mix(fullSlots[2].h, compactSlots[1].h, e)
+                    SeaPlayPebble(
+                        isPlaying = isPlaying,
+                        pigment = pigment,
+                        dark = tokens.dark,
+                        size = fullH,
+                        width = fullW,
+                        iconSize = 38.dp,
+                        modifier = Modifier
+                            .align(Alignment.Center)
+                            .requiredSize(fullW, fullH)
+                            .graphicsLayer {
+                                val k = nowH / fullH
+                                scaleX = k
+                                scaleY = k
+                            }
+                    ) {
+                        haptics.play(if (isPlaying) Haptic.Pause else Haptic.Resume)
+                        onPlayPause()
+                    }
+                } else {
                 MorphButton(
                     rect = DpRect(0.dp, 0.dp, mix(fullSlots[2].w, compactSlots[1].w, e), mix(fullSlots[2].h, compactSlots[1].h, e)),
                     corners = Corners(c, c, c, c),
@@ -763,10 +925,11 @@ fun PlayerScreen(
                     haptics.play(if (isPlaying) Haptic.Pause else Haptic.Resume)
                     onPlayPause()
                 }
+                }
                 if (buffering) {
                     CircularProgressIndicator(
                         strokeWidth = 2.5.dp,
-                        color = PlayGlyph.copy(alpha = 0.55f),
+                        color = (pigment?.ink ?: PlayGlyph).copy(alpha = 0.55f),
                         modifier = Modifier
                             .align(Alignment.Center)
                             .size(mix(52.dp, 32.dp, e))
@@ -776,9 +939,10 @@ fun PlayerScreen(
             MorphButton(
                 rect = mix(fullSlots[3], compactSlots[2], e),
                 corners = mix(Corners(10.dp, 10.dp, 10.dp, 10.dp), Corners(8.dp, 20.dp, 20.dp, 8.dp), e),
-                container = quiet, content = OnPlayer,
+                container = quiet, content = onPlayer,
                 icon = skipForwardIcon(skipSeconds), description = tr("Forward {0} seconds", skipSeconds),
-                iconSize = mix(28.dp, 20.dp, e)
+                iconSize = mix(28.dp, 20.dp, e),
+                glass = skipGlass?.copy(seed = 33)
             ) {
                 haptics.play(Haptic.SkipForward)
                 onSeekBy(skipSeconds * 1_000L)
@@ -787,7 +951,7 @@ fun PlayerScreen(
                 MorphButton(
                     rect = mix(fullSlots[4], rightEdge, e),
                     corners = Corners(10.dp, 30.dp, 30.dp, 10.dp),
-                    container = quiet, content = OnPlayer,
+                    container = quiet, content = onPlayer,
                     icon = Icons.Filled.SkipNext,
                     description = if (upNextCount > 0) "Next episode" else tr("Nothing queued"),
                     iconSize = 24.dp, alpha = fade, enabled = upNextCount > 0
@@ -804,7 +968,7 @@ fun PlayerScreen(
                         .width(colW)
                         .graphicsLayer { alpha = fade }
                 ) {
-                    VolumeRow(accent = OnPlayer, onGround = OnPlayer.copy(alpha = 0.66f))
+                    VolumeRow(accent = seaInk ?: onPlayer, onGround = onPlayerDim)
                 }
             }
 
@@ -819,6 +983,8 @@ fun PlayerScreen(
                 timerArmed = timerArmed,
                 surface = panelColor,
                 accent = panelAccent,
+                ink = onPlayer,
+                glass = pigment,
                 onTab = { openPanel(it) },
                 onDrag = { dragPanel(it) },
                 onDragEnd = { settlePanel(it) },
@@ -938,6 +1104,8 @@ private fun MorphButton(
     iconSize: Dp,
     alpha: Float = 1f,
     enabled: Boolean = true,
+    /** Sea Glass: a pebble instead of the filled shape. */
+    glass: SkipGlass? = null,
     onClick: () -> Unit
 ) {
     val interaction = remember { MutableInteractionSource() }
@@ -947,6 +1115,50 @@ private fun MorphButton(
         animationSpec = spring(dampingRatio = 0.55f),
         label = "morphPress"
     )
+    if (glass != null) {
+        val glow by animateFloatAsState(if (pressed) 1f else 0f, tween(if (pressed) 90 else 260), label = "morphGlow")
+        Box(
+            Modifier
+                .offset(rect.x, rect.y)
+                .size(rect.w, rect.h)
+                .graphicsLayer {
+                    scaleX = squash
+                    scaleY = squash
+                    this.alpha = alpha
+                }
+                .clickable(
+                    enabled = enabled && alpha > 0.3f,
+                    interactionSource = interaction,
+                    indication = null,
+                    onClick = onClick
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            Box(
+                Modifier
+                    .requiredSize(glass.reference)
+                    .graphicsLayer {
+                        val k = minOf(rect.w, rect.h) / glass.reference
+                        scaleX = k
+                        scaleY = k
+                    }
+                    .seaGlass(
+                        pigment = glass.pigment,
+                        recipe = com.glasscast.app.ui.seaglass.GlassRecipe.Pebble,
+                        seed = glass.seed,
+                        dark = glass.dark,
+                        glow = { glow }
+                    )
+            )
+            Icon(
+                imageVector = icon,
+                contentDescription = description,
+                tint = if (enabled) glass.pigment.ink else glass.pigment.ink.copy(alpha = 0.35f),
+                modifier = Modifier.size(iconSize)
+            )
+        }
+        return
+    }
     val shape = RoundedCornerShape(corners.topStart, corners.topEnd, corners.bottomEnd, corners.bottomStart)
     Box(
         Modifier
@@ -1134,6 +1346,7 @@ private fun PlayerArtwork(url: String, modifier: Modifier = Modifier, sideways: 
 @Composable
 private fun DownloadIconButton(
     entry: com.glasscast.app.data.DownloadEntry?,
+    tint: Color = OnPlayer,
     onClick: () -> Unit
 ) {
     Box(
@@ -1148,14 +1361,14 @@ private fun DownloadIconButton(
                 CircularProgressIndicator(
                     progress = { entry.progress.coerceAtLeast(0.04f) },
                     strokeWidth = 2.5.dp,
-                    color = OnPlayer,
-                    trackColor = OnPlayer.copy(alpha = 0.25f),
+                    color = tint,
+                    trackColor = tint.copy(alpha = 0.25f),
                     modifier = Modifier.size(20.dp)
                 )
             com.glasscast.app.data.DownloadState.DONE ->
-                Icon(Icons.Filled.DownloadForOffline, contentDescription = tr("Remove download"), tint = OnPlayer, modifier = Modifier.size(24.dp))
+                Icon(Icons.Filled.DownloadForOffline, contentDescription = tr("Remove download"), tint = tint, modifier = Modifier.size(24.dp))
             else ->
-                Icon(Icons.Outlined.DownloadForOffline, contentDescription = tr("Download"), tint = OnPlayer, modifier = Modifier.size(24.dp))
+                Icon(Icons.Outlined.DownloadForOffline, contentDescription = tr("Download"), tint = tint, modifier = Modifier.size(24.dp))
         }
     }
 }
@@ -1266,5 +1479,73 @@ private fun VolumeRow(accent: Color, onGround: Color) {
             tint = onGround,
             modifier = Modifier.size(22.dp)
         )
+    }
+}
+
+/** The Sea Glass cover's corner, here and where the flight lands. */
+private val SeaCoverCorner = 24.dp
+
+/** A skip button's glass: its pigment, and the size it's drawn at before scaling. */
+private data class SkipGlass(
+    val pigment: com.glasscast.app.ui.seaglass.Pigment,
+    val dark: Boolean,
+    val reference: Dp,
+    val seed: Int = 32
+)
+
+/**
+ * Sea Glass's ground behind the player: the page (paper, or the tide at
+ * night) with the cover's glass color washed across its upper part, as light
+ * through colored glass would pool on a table.
+ */
+@Composable
+private fun SeaPlayerGround(
+    wash: com.glasscast.app.ui.seaglass.SeaWash,
+    dark: Boolean,
+    landscape: Boolean,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier.drawBehind {
+            val center = if (landscape) Offset(size.width * 0.28f, size.height * 0.5f) else Offset(size.width / 2f, size.height * 0.30f)
+            drawSeaWash(wash, dark, center, maxOf(size.width, size.height) * 0.62f)
+        }
+    )
+}
+
+/** The cover as Sea Glass sets it: inset on the page, rounded, whole. */
+@Composable
+private fun SeaPlayerCover(url: String, modifier: Modifier = Modifier) {
+    val store = LocalImageStore.current
+    var bitmap by remember(url) { mutableStateOf(store.peek(url, 1080)) }
+    LaunchedEffect(url) {
+        if (bitmap == null && url.isNotBlank()) bitmap = store.load(url, 1080)
+    }
+    Box(modifier.clip(RoundedCornerShape(SeaCoverCorner))) {
+        bitmap?.let { bmp ->
+            Image(
+                bitmap = bmp.asImageBitmap(),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+    }
+}
+
+/**
+ * An episode's length in words, for the player's line of small capitals:
+ * "32 min", "1 hr 4 min". (formatCompact's "32m" reads as 32 million once
+ * it's set in capitals.)
+ */
+private fun formatLength(ms: Long): String {
+    if (ms <= 0) return ""
+    val minutes = ((ms + 30_000) / 60_000).toInt().coerceAtLeast(1)
+    val h = minutes / 60
+    val m = minutes % 60
+    return when {
+        h == 0 -> tr("{0} min", m)
+        m == 0 -> tr("{0} hr", h)
+        else -> tr("{0} hr {1} min", h, m)
     }
 }

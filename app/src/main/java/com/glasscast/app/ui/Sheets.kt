@@ -32,7 +32,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material.icons.outlined.DeleteOutline
@@ -259,10 +258,11 @@ fun SleepSheet(
                     )
                 }
                 Spacer(Modifier.size(12.dp))
-                Switch(
+                AppSwitch(
                     checked = shakeToRestart,
                     onCheckedChange = onShakeToggle,
-                    colors = glassSwitchColors(accent)
+                    colors = glassSwitchColors(accent),
+                    accent = accent
                 )
             }
         }

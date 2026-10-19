@@ -142,6 +142,15 @@ internal object MiniArtShape {
     @JvmField var bubble: Float = 0f
     /** The bubble's current spin, so the scallops line up on landing. */
     @JvmField var rotation: Float = 0f
+    /**
+     * The player's cover corner in pixels: 0 for the Original look's
+     * full-bleed cover, the inset cover's rounding in Sea Glass. Written by
+     * the player.
+     */
+    @JvmField var bigCorner: Float = 0f
+    /** Sea Glass: the bubble is a pebble (seaBubbleOutline), at this turn. */
+    @JvmField var sea: Boolean = false
+    @JvmField var seaTurn: Float = 0f
 }
 
 /**
@@ -164,8 +173,22 @@ internal val FlightClip: Shape = object : Shape {
         val small = with(density) { 48.dp.toPx() }
         val big = with(density) { 280.dp.toPx() }
         val t = ((big - side) / (big - small)).coerceIn(0f, 1f)
-        if (MiniArtShape.bubble >= 1f) return Outline.Generic(bubbleFlightPath(size, t))
-        val radius = MiniArtShape.roundness * side * t * t
+        if (MiniArtShape.bubble >= 1f) {
+            if (MiniArtShape.sea) {
+                // From the player's rounded cover into the bubble's pebble:
+                // the corners round off and the edge starts to wander as it
+                // shrinks, arriving as exactly the bubble's outline.
+                val path = Path()
+                val k = t * t * (3f - 2f * t)
+                seaBubbleOutline(
+                    path, size.width, size.height, density.density,
+                    e = k, cornerDp = MiniArtShape.bigCorner / density.density, turn = MiniArtShape.seaTurn
+                )
+                return Outline.Generic(path)
+            }
+            return Outline.Generic(bubbleFlightPath(size, t))
+        }
+        val radius = MiniArtShape.bigCorner * (1f - t) + MiniArtShape.roundness * side * t * t
         return Outline.Rounded(RoundRect(0f, 0f, size.width, size.height, CornerRadius(radius)))
     }
 }

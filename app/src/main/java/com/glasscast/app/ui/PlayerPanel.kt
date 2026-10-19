@@ -41,7 +41,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
-import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxValue
@@ -54,6 +53,10 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.foundation.border
+import com.glasscast.app.ui.seaglass.seaGlass
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -90,8 +93,15 @@ enum class PanelTab { UP_NEXT, INFO, BOOKMARKS, SPEED, TIMER }
 /** Height of the panel's header — also the collapsed strip, since they're one surface. */
 val PanelHeaderHeight: Dp = 80.dp
 
-private val Ink = Color.White
-private val InkDim = Color.White.copy(alpha = 0.62f)
+/*
+ * The panel's text color: white on the dark panel of the Original look, ink
+ * on Sea Glass's paper. Provided by PlayerPanel to everything inside it.
+ */
+private val LocalPanelInk = androidx.compose.runtime.staticCompositionLocalOf { Color.White }
+private val Ink: Color
+    @Composable @androidx.compose.runtime.ReadOnlyComposable get() = LocalPanelInk.current
+private val InkDim: Color
+    @Composable @androidx.compose.runtime.ReadOnlyComposable get() = LocalPanelInk.current.copy(alpha = 0.62f)
 
 /**
  * The pull-up panel: Up Next, episode info, speed and the sleep timer, inside
@@ -120,19 +130,69 @@ fun PlayerPanel(
     timerArmed: Boolean,
     surface: Color,
     accent: Color,
+    /** The text color: white on the Original look's dark panel, ink on Sea Glass's paper. */
+    ink: Color = Color.White,
+    /** Sea Glass: the cover's glass, for the capsule of buttons. */
+    glass: com.glasscast.app.ui.seaglass.Pigment? = null,
     onTab: (PanelTab) -> Unit,
     onDrag: (Float) -> Unit,
     onDragEnd: (Float) -> Unit,
     modifier: Modifier = Modifier,
     body: @Composable (PanelTab) -> Unit
 ) {
+    androidx.compose.runtime.CompositionLocalProvider(LocalPanelInk provides ink) {
+        PanelContent(expand, tab, art, upNextCount, bookmarkCount, speed, timerArmed, surface, accent, glass, onTab, onDrag, onDragEnd, modifier, body)
+    }
+}
+
+@Composable
+private fun PanelContent(
+    expand: Float,
+    tab: PanelTab,
+    art: String,
+    upNextCount: Int,
+    bookmarkCount: Int,
+    speed: Float,
+    timerArmed: Boolean,
+    surface: Color,
+    accent: Color,
+    glass: com.glasscast.app.ui.seaglass.Pigment?,
+    onTab: (PanelTab) -> Unit,
+    onDrag: (Float) -> Unit,
+    onDragEnd: (Float) -> Unit,
+    modifier: Modifier,
+    body: @Composable (PanelTab) -> Unit
+) {
     val shape = RoundedCornerShape(topStart = 30.dp, topEnd = 30.dp)
     val open = expand > 0.5f
+    val tokens = com.glasscast.app.ui.seaglass.LocalSea.current
 
     Column(
         modifier
+            // Sea Glass: a sheet of paper laid over the page, its edge
+            // lifted by a soft shadow above it and a hairline.
+            .then(
+                if (tokens != null) {
+                    Modifier.drawBehind {
+                        val lift = 14.dp.toPx()
+                        drawRect(
+                            brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+                                0f to Color.Transparent,
+                                1f to Color.Black.copy(alpha = if (tokens.dark) 0.28f else 0.06f),
+                                startY = -lift,
+                                endY = 30.dp.toPx()
+                            ),
+                            topLeft = androidx.compose.ui.geometry.Offset(0f, -lift),
+                            size = androidx.compose.ui.geometry.Size(size.width, lift + 30.dp.toPx())
+                        )
+                    }
+                } else {
+                    Modifier
+                }
+            )
             .clip(shape)
             .background(surface)
+            .then(if (tokens != null) Modifier.border(0.75.dp, tokens.hairline, shape) else Modifier)
             // The panel owns every touch that lands on it.
             .pointerInput(Unit) {}
     ) {
@@ -201,9 +261,13 @@ fun PlayerPanel(
                                 PanelTab.TIMER -> tr("Sleep timer")
                                 else -> tr("Playing Next")
                             },
-                            style = MaterialTheme.typography.titleMedium,
+                            // Sea Glass's serif runs wider: a size down, and an
+                            // ellipsis rather than losing the second word.
+                            style = if (tokens != null) com.glasscast.app.ui.seaglass.rowTitleStyle() else MaterialTheme.typography.titleMedium,
                             color = Ink,
-                            maxLines = 1
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Ellipsis
                         )
                         Text(
                             text = when {
@@ -232,11 +296,29 @@ fun PlayerPanel(
                 // tab showing, and only while the panel is actually open.
                 Row(
                     Modifier
-                        .clip(RoundedCornerShape(18.dp))
-                        .background(Ink.copy(alpha = 0.10f))
+                        .then(
+                            if (tokens != null && glass != null) {
+                                Modifier.seaGlass(
+                                    pigment = glass,
+                                    recipe = com.glasscast.app.ui.seaglass.GlassRecipe.Quiet,
+                                    seed = 17,
+                                    dark = tokens.dark
+                                )
+                            } else {
+                                Modifier
+                                    .clip(RoundedCornerShape(18.dp))
+                                    .background(Ink.copy(alpha = 0.10f))
+                            }
+                        )
                         .padding(4.dp),
                     horizontalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
+                    // On glass, the icons take the glass's ink.
+                    val onCapsule = if (tokens != null && glass != null) glass.ink else Ink
+                    androidx.compose.runtime.CompositionLocalProvider(
+                        LocalPanelInk provides onCapsule,
+                        com.glasscast.app.ui.seaglass.LocalSeaTint provides glass
+                    ) {
                     PanelTabButton(open && tab == PanelTab.UP_NEXT, { onTab(PanelTab.UP_NEXT) }) {
                         Icon(Icons.AutoMirrored.Filled.QueueMusic, tr("Up Next"), Modifier.size(21.dp), tint = Ink)
                     }
@@ -261,8 +343,9 @@ fun PlayerPanel(
                             Icons.Filled.Bedtime,
                             tr("Sleep timer"),
                             Modifier.size(20.dp),
-                            tint = if (timerArmed) accent else Ink
+                            tint = if (timerArmed && glass == null) accent else Ink
                         )
+                    }
                     }
                 }
             }
@@ -282,6 +365,53 @@ fun PlayerPanel(
 
 @Composable
 private fun PanelTabButton(active: Boolean, onClick: () -> Unit, content: @Composable () -> Unit) {
+    // Sea Glass: no rectangle of ripple on a pebble. The button gives a
+    // little under the finger, and the open tab is a small, clearer pebble
+    // set into the capsule.
+    val tokens = com.glasscast.app.ui.seaglass.LocalSea.current
+    val tint = com.glasscast.app.ui.seaglass.LocalSeaTint.current
+    if (tokens != null && tint != null) {
+        val interaction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+        val pressed by interaction.collectIsPressedAsState()
+        val squash by androidx.compose.animation.core.animateFloatAsState(
+            targetValue = if (pressed) 0.86f else 1f,
+            animationSpec = androidx.compose.animation.core.spring(dampingRatio = 0.8f, stiffness = 700f),
+            label = "panelTabPress"
+        )
+        val lit = remember(tint, tokens.dark) {
+            com.glasscast.app.ui.seaglass.Pigment(
+                body = androidx.compose.ui.graphics.lerp(tint.edge, Color.White, if (tokens.dark) 0.1f else 0.45f),
+                edge = Color.White,
+                ink = tint.ink
+            )
+        }
+        Box(
+            Modifier
+                .size(width = 46.dp, height = 40.dp)
+                .graphicsLayer {
+                    scaleX = squash
+                    scaleY = squash
+                }
+                .clickable(interactionSource = interaction, indication = null, onClick = onClick),
+            contentAlignment = Alignment.Center
+        ) {
+            if (active) {
+                Box(
+                    Modifier
+                        .size(width = 42.dp, height = 34.dp)
+                        .seaGlass(
+                            pigment = lit,
+                            recipe = com.glasscast.app.ui.seaglass.GlassRecipe.Pebble,
+                            seed = 23,
+                            dark = tokens.dark,
+                            ground = false
+                        )
+                )
+            }
+            content()
+        }
+        return
+    }
     Box(
         Modifier
             .size(width = 46.dp, height = 40.dp)
@@ -298,21 +428,38 @@ private fun PanelTabButton(active: Boolean, onClick: () -> Unit, content: @Compo
  */
 @Composable
 private fun PanelColors(accent: Color, content: @Composable () -> Unit) {
+    val ink = Ink
+    // Ink on paper in Sea Glass: the same roles, on a light scheme.
+    val dark = ink.luminance() > 0.5f
     MaterialTheme(
-        colorScheme = darkColorScheme(
+        colorScheme = if (!dark) androidx.compose.material3.lightColorScheme(
             primary = accent,
             onPrimary = if (accent.luminance() > 0.62f) Color(0xFF101014) else Color.White,
             background = Color.Transparent,
-            onBackground = Ink,
+            onBackground = ink,
             surface = Color.Transparent,
-            onSurface = Ink,
-            onSurfaceVariant = InkDim,
-            surfaceVariant = Ink.copy(alpha = 0.10f),
-            surfaceContainer = Ink.copy(alpha = 0.08f),
-            surfaceContainerHigh = Ink.copy(alpha = 0.12f),
-            surfaceContainerHighest = Ink.copy(alpha = 0.16f),
-            outline = Ink.copy(alpha = 0.20f),
-            outlineVariant = Ink.copy(alpha = 0.12f)
+            onSurface = ink,
+            onSurfaceVariant = ink.copy(alpha = 0.62f),
+            surfaceVariant = ink.copy(alpha = 0.06f),
+            surfaceContainer = ink.copy(alpha = 0.05f),
+            surfaceContainerHigh = ink.copy(alpha = 0.08f),
+            surfaceContainerHighest = ink.copy(alpha = 0.11f),
+            outline = ink.copy(alpha = 0.16f),
+            outlineVariant = ink.copy(alpha = 0.10f)
+        ) else darkColorScheme(
+            primary = accent,
+            onPrimary = if (accent.luminance() > 0.62f) Color(0xFF101014) else Color.White,
+            background = Color.Transparent,
+            onBackground = ink,
+            surface = Color.Transparent,
+            onSurface = ink,
+            onSurfaceVariant = ink.copy(alpha = 0.62f),
+            surfaceVariant = ink.copy(alpha = 0.10f),
+            surfaceContainer = ink.copy(alpha = 0.08f),
+            surfaceContainerHigh = ink.copy(alpha = 0.12f),
+            surfaceContainerHighest = ink.copy(alpha = 0.16f),
+            outline = ink.copy(alpha = 0.20f),
+            outlineVariant = ink.copy(alpha = 0.12f)
         ),
         typography = MaterialTheme.typography,
         content = content
@@ -379,8 +526,7 @@ fun PanelQueue(
             Spacer(Modifier.weight(1f))
             Box(
                 Modifier
-                    .clip(RoundedCornerShape(percent = 50))
-                    .background(Ink.copy(alpha = 0.10f))
+                    .panelQuiet(0.10f)
                     .clickable(onClick = onClear)
                     .padding(horizontal = 16.dp, vertical = 8.dp)
             ) {
@@ -498,11 +644,27 @@ fun PanelBookmarks(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Spacer(Modifier.weight(1f))
+            val tokens = com.glasscast.app.ui.seaglass.LocalSea.current
             Row(
                 Modifier
-                    .clip(RoundedCornerShape(percent = 50))
-                    .background(accent.copy(alpha = 0.22f))
-                    .clickable {
+                    .then(
+                        if (tokens != null) {
+                            Modifier.seaGlass(
+                                pigment = com.glasscast.app.ui.seaglass.rememberPigment(accent, tokens.dark),
+                                recipe = com.glasscast.app.ui.seaglass.GlassRecipe.Quiet,
+                                seed = 44,
+                                dark = tokens.dark
+                            )
+                        } else {
+                            Modifier
+                                .clip(RoundedCornerShape(percent = 50))
+                                .background(accent.copy(alpha = 0.22f))
+                        }
+                    )
+                    .clickable(
+                        interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                        indication = if (tokens != null) null else androidx.compose.foundation.LocalIndication.current
+                    ) {
                         haptics.play(Haptic.Select)
                         editing = onAdd()
                     }
@@ -758,8 +920,42 @@ fun SpeedPanel(
             Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
+            val tokens = com.glasscast.app.ui.seaglass.LocalSea.current
             SpeedPresets.forEach { preset ->
                 val active = kotlin.math.abs(preset - speed) < 0.001f
+                if (tokens != null) {
+                    // Sea Glass: the chosen speed is a pebble of the cover's
+                    // glass; the others quiet grooves.
+                    val glass = com.glasscast.app.ui.seaglass.rememberPigment(accent, tokens.dark)
+                    Box(
+                        Modifier
+                            .weight(1f)
+                            .height(44.dp)
+                            .then(
+                                if (active) {
+                                    Modifier.seaGlass(glass, com.glasscast.app.ui.seaglass.GlassRecipe.Pebble, seed = 40 + (preset * 10).roundToInt(), dark = tokens.dark)
+                                } else {
+                                    Modifier
+                                        .clip(RoundedCornerShape(percent = 50))
+                                        .background(com.glasscast.app.ui.seaglass.quietFill(tokens))
+                                        .border(0.75.dp, tokens.hairline, RoundedCornerShape(percent = 50))
+                                }
+                            )
+                            .clickable(
+                                interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                                indication = null
+                            ) { onSpeedChange(preset) },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = formatSpeed(preset),
+                            style = MaterialTheme.typography.titleSmall,
+                            color = if (active) glass.ink else Ink,
+                            maxLines = 1
+                        )
+                    }
+                    return@forEach
+                }
                 Box(
                     Modifier
                         .weight(1f)
@@ -821,9 +1017,10 @@ private fun PanelSwitchRow(
             if (detail != null) Text(detail, style = MaterialTheme.typography.bodySmall, color = InkDim)
         }
         Spacer(Modifier.width(12.dp))
-        Switch(
+        AppSwitch(
             checked = checked,
             onCheckedChange = onChange,
+            accent = accent,
             colors = SwitchDefaults.colors(
                 checkedTrackColor = accent,
                 checkedThumbColor = Color(0xFF16141A),
@@ -868,8 +1065,7 @@ fun TimerPanel(
             if (armed) {
                 Box(
                     Modifier
-                        .clip(RoundedCornerShape(percent = 50))
-                        .background(Ink.copy(alpha = 0.12f))
+                        .panelQuiet(0.12f)
                         .clickable { SleepTimer.cancel() }
                         .padding(horizontal = 18.dp, vertical = 10.dp)
                 ) {
@@ -904,9 +1100,10 @@ fun TimerPanel(
                 Text(tr("Shake to restart"), style = MaterialTheme.typography.titleSmall, color = Ink)
             }
             Spacer(Modifier.width(12.dp))
-            Switch(
+            AppSwitch(
                 checked = shakeToRestart,
                 onCheckedChange = onShakeToggle,
+                accent = accent,
                 colors = SwitchDefaults.colors(
                     checkedTrackColor = accent,
                     checkedThumbColor = Color.White,
@@ -923,15 +1120,14 @@ fun TimerPanel(
 private fun PanelChip(label: String, active: Boolean, accent: Color, onClick: () -> Unit) {
     Box(
         Modifier
-            .clip(RoundedCornerShape(percent = 50))
-            .background(if (active) accent else Ink.copy(alpha = 0.10f))
+            .then(if (active) Modifier.clip(RoundedCornerShape(percent = 50)).background(accent) else Modifier.panelQuiet(0.10f))
             .clickable(onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 10.dp)
     ) {
         Text(
             text = label,
             style = MaterialTheme.typography.titleSmall,
-            color = if (active && accent.luminance() > 0.62f) Color(0xFF101014) else Ink
+            color = if (active) (if (accent.luminance() > 0.62f) Color(0xFF101014) else Color.White) else Ink
         )
     }
 }
@@ -949,5 +1145,25 @@ fun formatSpeed(speed: Float): String {
 fun openOutputSwitcher(context: Context) {
     runCatching {
         androidx.mediarouter.app.SystemOutputSwitcherDialogController.showDialog(context)
+    }
+}
+
+/**
+ * A quiet capsule in the panel: a faint fill of the panel's ink, or in Sea
+ * Glass a groove in the paper with a hairline, as on every other page.
+ */
+@Composable
+private fun Modifier.panelQuiet(alpha: Float): Modifier {
+    val tokens = com.glasscast.app.ui.seaglass.LocalSea.current
+    val shape = RoundedCornerShape(percent = 50)
+    return if (tokens != null) {
+        this
+            .clip(shape)
+            .background(com.glasscast.app.ui.seaglass.quietFill(tokens))
+            .border(0.75.dp, tokens.hairline, shape)
+    } else {
+        this
+            .clip(shape)
+            .background(Ink.copy(alpha = alpha))
     }
 }

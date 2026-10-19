@@ -10,6 +10,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 
@@ -120,6 +121,93 @@ private val LightScheme = lightColorScheme(
     scrim = Color(0xFF000000)
 )
 
+/**
+ * Sea Glass's schemes: paper and ink by day, tide and foam by night, every
+ * role named (lesson 2 above). Containers here are paper laid on the ground,
+ * so they're lighter than it in the day, where the Original look's are a
+ * step darker. The accent is the brand glass's ink: deep on paper, pale at night.
+ */
+private fun seaScheme(t: com.glasscast.app.ui.seaglass.SeaTokens, accent: Color): androidx.compose.material3.ColorScheme =
+    if (!t.dark) {
+        lightColorScheme(
+            primary = accent,
+            onPrimary = Color(0xFFFFFFFF),
+            primaryContainer = t.brand.body,
+            onPrimaryContainer = t.brand.ink,
+            inversePrimary = t.brand.edge,
+            secondary = t.muted,
+            onSecondary = Color(0xFFFFFFFF),
+            secondaryContainer = Color(0xFFE9ECE4),
+            onSecondaryContainer = t.ink,
+            tertiary = accent,
+            onTertiary = Color(0xFFFFFFFF),
+            tertiaryContainer = Color(0xFFE9ECE4),
+            onTertiaryContainer = t.ink,
+            background = t.ground,
+            onBackground = t.ink,
+            surface = t.ground,
+            onSurface = t.ink,
+            surfaceVariant = Color(0xFFE9ECE4),
+            onSurfaceVariant = t.muted,
+            surfaceTint = accent,
+            surfaceContainerLowest = Color(0xFFFFFFFF),
+            surfaceContainerLow = Color(0xFFF8F8F3),
+            surfaceContainer = t.card,
+            surfaceContainerHigh = Color(0xFFFDFCF8),
+            surfaceContainerHighest = Color(0xFFE6EAE2),
+            surfaceBright = Color(0xFFFFFFFF),
+            surfaceDim = Color(0xFFE6EAE2),
+            inverseSurface = Color(0xFF16211F),
+            inverseOnSurface = Color(0xFFE8EEEA),
+            error = Color(0xFFB0412E),
+            onError = Color(0xFFFFFFFF),
+            errorContainer = Color(0xFFF8DDD5),
+            onErrorContainer = Color(0xFF4A1206),
+            outline = t.hairline,
+            outlineVariant = Color(0xFFE7ECE4),
+            scrim = Color(0xFF0E1716)
+        )
+    } else {
+        darkColorScheme(
+            primary = accent,
+            onPrimary = Color(0xFF0E1716),
+            primaryContainer = t.brand.body,
+            onPrimaryContainer = t.brand.ink,
+            inversePrimary = t.brand.body,
+            secondary = t.muted,
+            onSecondary = t.ground,
+            secondaryContainer = Color(0xFF23302D),
+            onSecondaryContainer = t.ink,
+            tertiary = accent,
+            onTertiary = t.ground,
+            tertiaryContainer = Color(0xFF23302D),
+            onTertiaryContainer = t.ink,
+            background = t.ground,
+            onBackground = t.ink,
+            surface = t.ground,
+            onSurface = t.ink,
+            surfaceVariant = Color(0xFF23302D),
+            onSurfaceVariant = t.muted,
+            surfaceTint = accent,
+            surfaceContainerLowest = Color(0xFF09100F),
+            surfaceContainerLow = Color(0xFF121C1A),
+            surfaceContainer = t.card,
+            surfaceContainerHigh = t.raised,
+            surfaceContainerHighest = Color(0xFF24312E),
+            surfaceBright = Color(0xFF2A3734),
+            surfaceDim = t.ground,
+            inverseSurface = Color(0xFFF4F5F0),
+            inverseOnSurface = Color(0xFF233C37),
+            error = Color(0xFFF2836F),
+            onError = Color(0xFF2A0A04),
+            errorContainer = Color(0xFF4A1C14),
+            onErrorContainer = Color(0xFFFFDAD2),
+            outline = t.hairline,
+            outlineVariant = Color(0xFF1F2A28),
+            scrim = Color(0xFF000000)
+        )
+    }
+
 /** True when the *in-app* theme setting resolves to dark, not the system's. */
 val LocalIsDark = compositionLocalOf { true }
 
@@ -131,6 +219,8 @@ fun GlassCastTheme(
     themeMode: com.glasscast.app.data.ThemeMode,
     /** Supplied when dynamic color is on and something is playing. */
     showAccent: Color? = null,
+    /** Original or Sea Glass (Settings > Appearance, on the phone and the TV). */
+    look: com.glasscast.app.data.Look = com.glasscast.app.data.Look.ORIGINAL,
     content: @Composable () -> Unit
 ) {
     val dark = when (themeMode) {
@@ -163,6 +253,23 @@ fun GlassCastTheme(
         )
     }
 
+    // Sea Glass: its own grounds and type, and glass in the accent's color
+    // (GlassCast's purple, the cover's, or the one picked).
+    val seaGlass = look == com.glasscast.app.data.Look.SEA_GLASS
+    val seaTokens = if (seaGlass) {
+        androidx.compose.runtime.remember(dark, showAccent) {
+            com.glasscast.app.ui.seaglass.seaTokens(dark, showAccent ?: if (dark) AccentPurple else AccentPurpleLight)
+        }
+    } else {
+        null
+    }
+    val finalScheme = if (seaTokens != null) {
+        // The accent is the brand glass's ink, so a button in it sits with the glass.
+        seaScheme(seaTokens, accent = if (dark) seaTokens.brand.edge else seaTokens.brand.ink)
+    } else {
+        scheme
+    }
+
     val view = LocalView.current
     if (!view.isInEditMode) {
         SideEffect {
@@ -172,16 +279,21 @@ fun GlassCastTheme(
                 isAppearanceLightStatusBars = !dark
                 isAppearanceLightNavigationBars = !dark
             }
+            // The window behind the app is the page's ground (lesson: window
+            // colors equal grounds). The resources hold the Original look's,
+            // for the launch screen; Sea Glass repaints it once it's running.
+            window.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(finalScheme.background.toArgb()))
         }
     }
 
     CompositionLocalProvider(
         LocalIsDark provides dark,
-        LocalBrandAccent provides (tinted ?: if (dark) AccentPurple else AccentPurpleLight)
+        LocalBrandAccent provides (if (seaTokens != null) finalScheme.primary else tinted ?: if (dark) AccentPurple else AccentPurpleLight),
+        com.glasscast.app.ui.seaglass.LocalSea provides seaTokens
     ) {
         MaterialTheme(
-            colorScheme = scheme,
-            typography = GlassType,
+            colorScheme = finalScheme,
+            typography = if (seaTokens != null) SeaType else GlassType,
             content = content
         )
     }
