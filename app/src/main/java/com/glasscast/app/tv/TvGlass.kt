@@ -29,9 +29,14 @@ fun Modifier.tvPanel(
     shape: Shape,
     container: Color,
     border: Boolean = true
-): Modifier = this
-    .clip(shape)
-    .background(container)
-    .then(
-        if (border) Modifier.border(1.dp, Color.White.copy(alpha = 0.10f), shape) else Modifier
-    )
+): Modifier = if (tvLiquid()) {
+    // Glass: a pane of the TV's drawn glass (TvClear.kt), its rim the border.
+    this.tvGlassPane(shape, container).clip(shape)
+} else {
+    this
+        .clip(shape)
+        .background(container)
+        .then(
+            if (border) Modifier.border(1.dp, Color.White.copy(alpha = 0.10f), shape) else Modifier
+        )
+}

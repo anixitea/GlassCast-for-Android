@@ -36,6 +36,38 @@ import androidx.compose.ui.unit.Dp
  * The one repeated container. Rounded 18dp, onBackground at 10%, accent-tinted
  * at 20% when active. Speed, timer, filters, secondary actions.
  */
+/**
+ * A field's ground (a search bar, the library filter): [fallback] in the
+ * other looks; in Frosted Glass a pane of frosted glass lifted off the page.
+ */
+@Composable
+fun Modifier.glassField(fallback: Color, corner: androidx.compose.ui.unit.Dp): Modifier {
+    val liquid = com.glasscast.app.ui.liquid.LocalLiquid.current
+    val shape = RoundedCornerShape(corner)
+    return if (liquid != null) {
+        with(com.glasscast.app.ui.liquid.FrostedGlass) {
+            this@glassField.frosted(
+                if (liquid.dark) Color.White.copy(alpha = 0.10f) else Color(0xFFF2F2F6).copy(alpha = 0.92f),
+                liquid.dark,
+                corner
+            )
+        }.clip(shape)
+    } else {
+        this.clip(shape).background(fallback)
+    }
+}
+
+/** An episode's length (or time left) on a row: a quiet pill, or in Liquid Glass, Apple's play capsule. */
+@Composable
+fun LengthPill(label: String, modifier: Modifier = Modifier) {
+    val liquid = com.glasscast.app.ui.liquid.LocalLiquid.current
+    if (liquid != null) {
+        com.glasscast.app.ui.liquid.LiquidLengthCapsule(label, liquid, modifier)
+    } else {
+        Pill(label = label, modifier = modifier)
+    }
+}
+
 @Composable
 fun Pill(
     label: String,
@@ -50,6 +82,37 @@ fun Pill(
     val tokens = com.glasscast.app.ui.seaglass.LocalSea.current
     if (tokens != null) {
         SeaPill(label, active, accent, contentPadding, modifier, onClick, tokens)
+        return
+    }
+    // Liquid Glass: Apple's capsules. The chosen one filled in the accent,
+    // the rest the faint system fill.
+    val liquid = com.glasscast.app.ui.liquid.LocalLiquid.current
+    if (liquid != null) {
+        // Frosted glass capsules: the chosen one glass in the accent.
+        Box(
+            modifier
+                .then(
+                    with(com.glasscast.app.ui.liquid.FrostedGlass) {
+                        Modifier.frosted(
+                            if (active) accent else if (liquid.dark) Color.White.copy(alpha = 0.10f) else Color.White.copy(alpha = 0.62f),
+                            liquid.dark
+                        )
+                    }
+                )
+                .clip(RoundedCornerShape(percent = 50))
+                .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+                .padding(contentPadding),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.titleSmall,
+                color = if (active) (if (accent.luminance() > 0.62f) Color(0xFF101014) else Color.White) else liquid.ink,
+                fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium,
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+            )
+        }
         return
     }
     val bg = if (active) accent.copy(alpha = 0.20f)
@@ -140,12 +203,21 @@ fun AppSwitch(
     accent: Color? = null
 ) {
     val tokens = com.glasscast.app.ui.seaglass.LocalSea.current
+    val liquid = com.glasscast.app.ui.liquid.LocalLiquid.current
     if (tokens != null) {
         com.glasscast.app.ui.seaglass.SeaSwitch(
             checked = checked,
             onCheckedChange = onCheckedChange,
             tokens = tokens,
             pigment = accent?.let { com.glasscast.app.ui.seaglass.rememberPigment(it, tokens.dark) } ?: tokens.brand,
+            modifier = modifier
+        )
+    } else if (liquid != null) {
+        com.glasscast.app.ui.liquid.LiquidSwitch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            tokens = liquid,
+            accent = accent ?: liquid.accent,
             modifier = modifier
         )
     } else {

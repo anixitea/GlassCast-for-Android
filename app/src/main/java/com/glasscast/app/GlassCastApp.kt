@@ -44,6 +44,9 @@ class GlassCastApp : Application() {
         private set
     lateinit var bookmarks: com.glasscast.app.data.BookmarkStore
         private set
+    /** What's been listened to, most recent first (Library > History). */
+    lateinit var history: com.glasscast.app.data.ListenHistory
+        private set
     lateinit var autoDownload: com.glasscast.app.data.AutoDownload
         private set
 
@@ -88,12 +91,24 @@ class GlassCastApp : Application() {
         feedStore = FeedStore(this)
         imageStore = ImageStore(this)
         settings = Settings(this)
+        followGlassFinish()
         queueStore = QueueStore(this)
         downloads = com.glasscast.app.data.Downloads(this)
         player = PlayerConnection(this, feedStore, queueStore, downloads)
         updates = com.glasscast.app.update.AppUpdater(this)
         gpodder = com.glasscast.app.data.GPodderSync(this, feedStore)
         bookmarks = com.glasscast.app.data.BookmarkStore(this)
+        history = com.glasscast.app.data.ListenHistory(this)
+        // The first run with history starts it from what's part way through.
+        background.launch {
+            feedStore.awaitLoaded()
+            history.seedIfNew {
+                val shows = feedStore.feeds.value.associateBy { it.url }
+                feedStore.inProgress(60).map {
+                    com.glasscast.app.data.HistoryEntry(it.guid, it.feedUrl, shows[it.feedUrl]?.lastPlayedAt ?: 0L)
+                }
+            }
+        }
         autoDownload = com.glasscast.app.data.AutoDownload(this, feedStore, downloads, settings)
         settings.alsoWantsBackground = { GOOGLE_SIGN_IN && account.state.value.signedIn }
         feedStore.onRefreshed = { background.launch { autoDownload.run() } }
@@ -113,6 +128,24 @@ class GlassCastApp : Application() {
         }
         // Cast starts with the playback service, off the main thread
         // (player/CastSupport).
+    }
+
+    /**
+     * The Glass look's finish (Frosted or Liquid) for every piece of glass
+     * (GlassFinish), on the phone and the TV: set before the first frame,
+     * then kept in step with the setting.
+     *
+     * It used to be set by a SideEffect in each activity that read the
+     * setting only inside the effect. An effect's reads aren't watched, so
+     * changing the setting never re-ran it: the finish stayed as it was when
+     * the app opened, and switching Frosted and Liquid changed nothing until
+     * the app was restarted (2.0's fifth and sixth rounds).
+     */
+    private fun followGlassFinish() {
+        com.glasscast.app.ui.liquid.GlassFinish.liquid = settings.glassLiquid.value
+        CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate).launch {
+            settings.glassLiquid.collect { com.glasscast.app.ui.liquid.GlassFinish.liquid = it }
+        }
     }
 
     /**

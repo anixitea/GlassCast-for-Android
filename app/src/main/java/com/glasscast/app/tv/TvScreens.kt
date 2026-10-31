@@ -183,7 +183,7 @@ fun TvLibraryScreen(
             item(key = "continue", span = { GridItemSpan(maxLineSpan) }, contentType = "continue") {
                 Column(Modifier.padding(bottom = 8.dp)) {
                     Text(
-                        text = tr("Continue listening"),
+                        text = tr("Continue Listening"),
                         style = MaterialTheme.typography.headlineSmall,
                         color = colors.content
                     )
@@ -1250,11 +1250,12 @@ fun TvSettingsScreen(
          * Every surface on TV takes its color from the artwork, so Dark and
          * Lights out had nothing left to change — which is exactly what you saw
          * when switching to Lights out did nothing at all. An option that
-         * visibly does nothing is worse than no option. Original and Sea
-         * Glass do change everything, so that choice is here.
+         * visibly does nothing is worse than no option. Original, Sea Glass
+         * and Glass do change everything, so that choice is here.
          */
         item {
             val look by settings.look.collectAsStateWithLifecycle()
+            val glassLiquid by settings.glassLiquid.collectAsStateWithLifecycle()
             TvSettingGroup(tr("APPEARANCE"), colors) {
                 TvPillButton(
                     label = tr("Original"),
@@ -1271,6 +1272,31 @@ fun TvSettingsScreen(
                     filled = look == com.glasscast.app.data.Look.SEA_GLASS,
                     onClick = { settings.setLook(com.glasscast.app.data.Look.SEA_GLASS) }
                 )
+                TvPillButton(
+                    label = tr("Glass"),
+                    icon = null,
+                    colors = colors,
+                    filled = look == com.glasscast.app.data.Look.LIQUID_GLASS,
+                    onClick = { settings.setLook(com.glasscast.app.data.Look.LIQUID_GLASS) }
+                )
+                // Glass's finish, beside it while Glass is on (the phone's setting too).
+                if (look == com.glasscast.app.data.Look.LIQUID_GLASS) {
+                    Spacer(Modifier.width(18.dp))
+                    TvPillButton(
+                        label = tr("Frosted"),
+                        icon = null,
+                        colors = colors,
+                        filled = !glassLiquid,
+                        onClick = { settings.setGlassLiquid(false) }
+                    )
+                    TvPillButton(
+                        label = tr("Liquid"),
+                        icon = null,
+                        colors = colors,
+                        filled = glassLiquid,
+                        onClick = { settings.setGlassLiquid(true) }
+                    )
+                }
             }
         }
 
@@ -1587,7 +1613,7 @@ fun TvPillButton(
 
     // Sea Glass: a pebble of the cover's glass when chosen or focused.
     val tokens = LocalSea.current
-    if (tokens != null) {
+    if (tokens != null || tvLiquid()) {
         TvGlass(
             tokens = tokens,
             accent = colors.chromeButton,
@@ -1630,7 +1656,7 @@ fun TvIconButton(
     onClick: () -> Unit
 ) {
     val tokens = LocalSea.current
-    if (tokens != null) {
+    if (tokens != null || tvLiquid()) {
         TvGlass(
             tokens = tokens,
             accent = colors.chromeButton,

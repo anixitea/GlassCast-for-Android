@@ -17,7 +17,7 @@ import android.view.KeyEvent
 import android.widget.RemoteViews
 import androidx.palette.graphics.Palette
 import com.glasscast.app.GlassCastApp
-import com.glasscast.app.MainActivity
+import com.glasscast.app.GlassCastActivity
 import com.glasscast.app.R
 import com.glasscast.app.Shortcuts
 import com.glasscast.app.player.PlaybackService
@@ -138,7 +138,7 @@ class NowPlayingWidget : AppWidgetProvider() {
         }
 
         private fun openPlayer(context: Context): PendingIntent {
-            val intent = Intent(context, MainActivity::class.java)
+            val intent = Intent(context, GlassCastActivity::class.java)
                 .setAction(Shortcuts.OPEN_PLAYER)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
             return PendingIntent.getActivity(

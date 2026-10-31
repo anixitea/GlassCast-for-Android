@@ -1,5 +1,6 @@
 package com.glasscast.app.ui
 
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
@@ -63,7 +64,8 @@ fun ButtonGroup(
         modifier
             .fillMaxWidth()
             .height(height),
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        // Frosted Glass: separate pieces of glass, with air between them.
+        horizontalArrangement = Arrangement.spacedBy(if (com.glasscast.app.ui.liquid.LocalLiquid.current != null) 10.dp else 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         content = content
     )
@@ -133,6 +135,41 @@ fun RowScope.GroupButton(
         animationSpec = spring(dampingRatio = 0.55f),
         label = "groupPress"
     )
+    // Frosted Glass: each part a capsule of frosted glass in its color.
+    val liquid = com.glasscast.app.ui.liquid.LocalLiquid.current
+    if (liquid != null) {
+        val glassDark = liquid.dark || container.alpha > 0.5f && container.luminance() < 0.5f
+        Box(
+            Modifier
+                .weight(weight)
+                .fillMaxHeight()
+                .graphicsLayer {
+                    scaleX = squash
+                    scaleY = squash
+                }
+                .then(
+                    with(com.glasscast.app.ui.liquid.FrostedGlass) {
+                        Modifier.frosted(if (enabled) container else container.copy(alpha = container.alpha * 0.5f), glassDark)
+                    }
+                )
+                .clip(RoundedCornerShape(percent = 50))
+                .clickable(
+                    enabled = enabled,
+                    interactionSource = interaction,
+                    indication = null,
+                    onClick = onClick
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            val tint = if (enabled) content else content.copy(alpha = 0.35f)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (icon != null) Icon(imageVector = icon, contentDescription = description, tint = tint, modifier = Modifier.size(iconSize))
+                if (icon != null && label != null) Spacer(Modifier.width(8.dp))
+                if (label != null) Text(text = label, style = MaterialTheme.typography.titleMedium, color = tint)
+            }
+        }
+        return
+    }
     val shape = cornerOverride?.let { RoundedCornerShape(it) }
         ?: groupShape(position, outerRadius, innerRadius)
 

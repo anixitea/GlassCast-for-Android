@@ -13,10 +13,12 @@ import java.util.concurrent.TimeUnit
  * Schedules the background check for new episodes (for notifications and
  * auto-download; see Settings.backgroundRefreshWanted).
  *
- * Every three hours, give or take — podcasts publish daily at most, and a
- * tighter interval only spends battery to notify you a little sooner about
- * something you'd listen to later anyway. Only on a network, and not when the
- * battery is low: a missed check just means the next one finds the episode.
+ * Every hour, give or take (2.0; it was three). Notifications came so long
+ * after an episode was out that people noticed. A check is cheap: each feed
+ * is asked whether it has changed since last time, and an unchanged one
+ * answers in a few bytes with nothing to parse. Only on a network, and not
+ * when the battery is low: a missed check just means the next one finds the
+ * episode.
  *
  * Unique and UPDATE-on-reschedule, so calling this on every launch never
  * stacks duplicate jobs, and a change to the schedule actually takes effect.
@@ -30,7 +32,7 @@ object BackgroundRefresh {
             work.cancelUniqueWork(NAME)
             return
         }
-        val request = PeriodicWorkRequestBuilder<RefreshWorker>(3, TimeUnit.HOURS, 45, TimeUnit.MINUTES)
+        val request = PeriodicWorkRequestBuilder<RefreshWorker>(1, TimeUnit.HOURS, 20, TimeUnit.MINUTES)
             .setConstraints(
                 Constraints.Builder()
                     .setRequiredNetworkType(NetworkType.CONNECTED)

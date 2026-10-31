@@ -1,5 +1,7 @@
 package com.glasscast.app.ui.seaglass
 
+import androidx.compose.ui.draw.drawWithContent
+
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -135,10 +137,26 @@ fun Modifier.seaCoverPool(url: String, corner: androidx.compose.ui.unit.Dp, stre
  * Original look, a capsule of clear glass in Sea Glass.
  */
 @Composable
-fun Modifier.chromePill(color: Color, seed: Int = 9): Modifier {
+fun Modifier.chromePill(
+    color: Color,
+    seed: Int = 9,
+    /** Frosted Glass: the page's own backdrop, when the pill floats over the page (rememberPageBackdrop). */
+    backdrop: com.glasscast.app.ui.liquid.LiquidBackdrop? = null
+): Modifier {
     val tokens = LocalSea.current
+    val liquid = com.glasscast.app.ui.liquid.LocalLiquid.current
     return if (tokens != null) {
         this.seaGlass(pigment = tokens.fog, recipe = GlassRecipe.Quiet, seed = seed, dark = tokens.dark)
+    } else if (liquid != null && backdrop != null) {
+        // Real glass over the page it floats on.
+        with(com.glasscast.app.ui.liquid.GlassPill) { this@chromePill.lens(backdrop, liquid.dark) }
+            .clip(CircleShape)
+    } else if (liquid != null) {
+        // A page's own bar buttons sit inside the page, so they can't refract
+        // it (see LiquidLens): frosted panes with the glass's rim.
+        this
+            .liquidPaneFor(liquid)
+            .clip(CircleShape)
     } else {
         this
             .clip(CircleShape)
@@ -156,6 +174,22 @@ fun Modifier.chromePill(color: Color, seed: Int = 9): Modifier {
 fun Modifier.rowCard(wash: Color, corner: androidx.compose.ui.unit.Dp = 20.dp): Modifier {
     val tokens = LocalSea.current
     val shape = androidx.compose.foundation.shape.RoundedCornerShape(corner)
+    val liquid = com.glasscast.app.ui.liquid.LocalLiquid.current
+    if (liquid != null) {
+        // Frosted Glass: each episode a card of frosted glass, a breath of
+        // the show's color in it, lifted off the page by its shadow, with
+        // the rim's light. (2.0's second build had plain list rows; glass
+        // was what was asked for.) Mostly opaque, so the swipe's reveal
+        // stays hidden behind it.
+        val body = androidx.compose.ui.graphics.lerp(liquid.card, wash.copy(alpha = 1f), if (liquid.dark) 0.16f else 0.10f)
+        return this
+            .then(
+                with(com.glasscast.app.ui.liquid.FrostedGlass) {
+                    Modifier.frosted(body.copy(alpha = if (liquid.dark) 0.86f else 0.90f), liquid.dark, corner)
+                }
+            )
+            .clip(shape)
+    }
     return if (tokens != null) {
         val glassWash = remember(wash, tokens.dark) { seaPigment(wash, tokens.dark).body }
         this
@@ -227,3 +261,7 @@ fun androidx.compose.ui.graphics.drawscope.DrawScope.drawSeaWash(
     wash.others.getOrNull(1)?.let { pool(it, androidx.compose.ui.geometry.Offset(size.width * 1.0f, center.y + reach * 0.28f), reach * 0.6f, a * 0.5f) }
     pool(wash.main, center, reach, a)
 }
+
+/** A Liquid Glass pane over a page: translucent ground color with the rim's light. */
+private fun Modifier.liquidPaneFor(t: com.glasscast.app.ui.liquid.LiquidTokens): Modifier =
+    with(com.glasscast.app.ui.liquid.Panes) { pane(t) }

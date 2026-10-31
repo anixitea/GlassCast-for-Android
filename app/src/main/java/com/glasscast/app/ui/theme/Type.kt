@@ -133,3 +133,70 @@ val SeaType: Typography = GlassType.let { t ->
         labelMedium = t.labelMedium.copy(letterSpacing = 0.12.em, fontWeight = FontWeight.SemiBold)
     )
 }
+
+/*
+ * Liquid Glass's type (2.0): Inter for everything, in two optical sizes.
+ *
+ * Apple's San Francisco is licensed for Apple platforms only, so it can't ship
+ * in an Android app. Inter (OFL; see INTER-OFL.txt) is the nearest open face:
+ * the same neutral grotesque shapes, tall lowercase and tight spacing at
+ * display sizes. It comes at two optical sizes, the way SF switches from Text
+ * to Display at 20 pt: opsz 16 for text and opsz 32 for titles.
+ *
+ * Static files, one per weight, cut from Inter 4.1's variable font and
+ * subset to Latin (about 64 KB each). 2.0's first build shipped the variable
+ * font and picked weights with variation settings, and on the Xiaomi every
+ * weight came out Regular: Compose applies them through a shared Paint, and
+ * that path isn't reliable everywhere. A static file per weight can't fail.
+ *
+ * Tracking follows Inter's own dynamic metrics (a + b·e^(c·size)), so large
+ * titles close up and small labels open slightly, as SF's do.
+ */
+private val InterText = FontFamily(
+    Font(R.font.inter_text_400, FontWeight.Normal),
+    Font(R.font.inter_text_500, FontWeight.Medium),
+    Font(R.font.inter_text_600, FontWeight.SemiBold),
+    Font(R.font.inter_text_700, FontWeight.Bold)
+)
+private val InterDisplay = FontFamily(
+    Font(R.font.inter_display_400, FontWeight.Normal),
+    Font(R.font.inter_display_600, FontWeight.SemiBold),
+    Font(R.font.inter_display_700, FontWeight.Bold)
+)
+
+/** Inter's dynamic tracking for a size in sp, in ems. */
+private fun interTracking(size: Float): Float = (-0.0223f + 0.185f * kotlin.math.exp(-0.1745f * size))
+
+private fun TextStyle.inter(display: Boolean): TextStyle {
+    val size = if (fontSize.isSp) fontSize.value else 15f
+    return copy(
+        fontFamily = if (display) InterDisplay else InterText,
+        letterSpacing = interTracking(size).em
+    )
+}
+
+/** GlassType's sizes, in Inter. Titles a weight up, as Apple sets them. */
+val LiquidType: Typography = GlassType.let { t ->
+    Typography(
+        displayLarge = t.displayLarge.inter(display = true),
+        displayMedium = t.displayMedium.inter(display = true),
+        displaySmall = t.displaySmall.copy(fontSize = 34.sp, lineHeight = 41.sp, fontWeight = FontWeight.Bold).inter(display = true),
+        headlineLarge = t.headlineLarge.inter(display = true),
+        headlineMedium = t.headlineMedium.copy(fontWeight = FontWeight.Bold).inter(display = true),
+        headlineSmall = t.headlineSmall.inter(display = true),
+        titleLarge = t.titleLarge.copy(fontWeight = FontWeight.SemiBold).inter(display = true),
+        titleMedium = t.titleMedium.inter(display = false),
+        titleSmall = t.titleSmall.inter(display = false),
+        bodyLarge = t.bodyLarge.inter(display = false),
+        bodyMedium = t.bodyMedium.inter(display = false),
+        bodySmall = t.bodySmall.inter(display = false),
+        labelLarge = t.labelLarge.inter(display = false),
+        // Labels in capitals (section names) sit at Apple's footnote: no
+        // extra spacing, which is how iOS sets them.
+        labelMedium = t.labelMedium.copy(fontSize = 13.sp, lineHeight = 18.sp, fontWeight = FontWeight.Normal).inter(display = false),
+        labelSmall = t.labelSmall.inter(display = false)
+    )
+}
+
+/** Inter's text cut, for a label that names Liquid Glass outside that look (its tile in Settings). */
+val LiquidSans: FontFamily get() = InterText

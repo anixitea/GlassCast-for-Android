@@ -51,12 +51,13 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.TextButton
-import androidx.compose.material.icons.outlined.SelectAll
-import androidx.compose.material.icons.outlined.Checklist
 import androidx.compose.material.icons.outlined.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DownloadForOffline
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.luminance
+import com.glasscast.app.ui.liquid.frostedGlass
 
 /**
  * Downloads: what's saved on the phone, and what's on its way.
@@ -148,21 +149,41 @@ fun DownloadsScreen(
                     )
                     if (selecting) {
                         HeaderIcon(
-                            icon = Icons.Outlined.SelectAll,
+                            icon = com.glasscast.app.ui.liquid.LiquidIcons.SelectAll,
                             description = tr("Select all"),
                             active = selected.size == doneGuids.size
                         ) { selected = if (selected.size == doneGuids.size) emptySet() else doneGuids }
                         Spacer(Modifier.width(8.dp))
                         HeaderIcon(
-                            icon = Icons.Outlined.DeleteOutline,
+                            icon = com.glasscast.app.ui.liquid.LiquidIcons.Trash,
                             description = tr("Delete"),
                             enabled = selected.isNotEmpty(),
                             tint = MaterialTheme.colorScheme.error
                         ) { confirming = true }
                         Spacer(Modifier.width(8.dp))
-                        HeaderIcon(icon = Icons.Outlined.Close, description = tr("Cancel")) { exitSelecting() }
+                        HeaderIcon(icon = com.glasscast.app.ui.liquid.LiquidIcons.Close, description = tr("Cancel")) { exitSelecting() }
                     } else if (done.isNotEmpty()) {
-                        HeaderIcon(icon = Icons.Outlined.Checklist, description = tr("Select")) { selecting = true }
+                        // ⋯: a small menu, Select or Select all.
+                        var menuOpen by remember { mutableStateOf(false) }
+                        Box {
+                            HeaderIcon(icon = com.glasscast.app.ui.liquid.LiquidIcons.More, description = tr("More")) {
+                                menuOpen = true
+                            }
+                            if (menuOpen) {
+                                HeaderMenu(
+                                    items = listOf(
+                                        HeaderMenuItem(com.glasscast.app.ui.liquid.LiquidIcons.Select, tr("Select")) {
+                                            selecting = true
+                                        },
+                                        HeaderMenuItem(com.glasscast.app.ui.liquid.LiquidIcons.SelectAll, tr("Select all")) {
+                                            selecting = true
+                                            selected = doneGuids
+                                        }
+                                    ),
+                                    onDismiss = { menuOpen = false }
+                                )
+                            }
+                        }
                     }
                 }
                 Text(
@@ -381,6 +402,102 @@ internal fun formatBytes(bytes: Long): String = when {
     else -> "0 MB"
 }
 
+private class HeaderMenuItem(
+    val icon: androidx.compose.ui.graphics.vector.ImageVector,
+    val label: String,
+    val onClick: () -> Unit
+)
+
+/**
+ * The ⋯ button's menu: a small card under the button, its right edge on the
+ * button's, opening from that corner. Frosted glass in the Glass look, the
+ * page's raised card in the others. Tapping outside or a choice closes it.
+ */
+@Composable
+private fun HeaderMenu(items: List<HeaderMenuItem>, onDismiss: () -> Unit) {
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val liquid = com.glasscast.app.ui.liquid.LocalLiquid.current
+    val dark = liquid?.dark ?: (MaterialTheme.colorScheme.surface.luminance() < 0.5f)
+    val haptics = rememberHaptics()
+    val shown = remember { androidx.compose.animation.core.Animatable(0f) }
+    LaunchedEffect(Unit) {
+        shown.animateTo(1f, androidx.compose.animation.core.spring(dampingRatio = 0.78f, stiffness = 520f))
+    }
+    androidx.compose.ui.window.Popup(
+        alignment = Alignment.TopEnd,
+        offset = with(density) { androidx.compose.ui.unit.IntOffset(0, 52.dp.roundToPx()) },
+        onDismissRequest = onDismiss,
+        properties = androidx.compose.ui.window.PopupProperties(focusable = true)
+    ) {
+        val shape = RoundedCornerShape(20.dp)
+        Column(
+            Modifier
+                .padding(4.dp)
+                .width(220.dp)
+                .graphicsLayer {
+                    val k = 0.82f + 0.18f * shown.value
+                    scaleX = k
+                    scaleY = k
+                    alpha = shown.value.coerceIn(0f, 1f)
+                    transformOrigin = androidx.compose.ui.graphics.TransformOrigin(1f, 0f)
+                }
+                // Solid in every finish: it floats over the list, and a pane
+                // that doesn't blur can't be see-through and still read
+                // (it was, in Liquid, sixth round).
+                .then(
+                    if (liquid != null) {
+                        Modifier.frostedGlass(
+                            if (dark) Color(0xFF2C2C2E) else Color.White,
+                            dark,
+                            20.dp,
+                            finish = false
+                        )
+                    } else {
+                        Modifier.frostedGlass(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 1f), dark, 20.dp, finish = false)
+                    }
+                )
+                .clip(shape)
+                .padding(vertical = 6.dp)
+        ) {
+            items.forEachIndexed { i, item ->
+                if (i > 0) {
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(start = 52.dp)
+                            .height(0.5.dp)
+                            .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f))
+                    )
+                }
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            haptics.play(Haptic.Tap)
+                            onDismiss()
+                            item.onClick()
+                        }
+                        .padding(horizontal = 16.dp, vertical = 13.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = item.icon,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.size(22.dp)
+                    )
+                    Spacer(Modifier.width(14.dp))
+                    Text(
+                        text = item.label,
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+            }
+        }
+    }
+}
+
 /** A round header button, as on the other pages' top bars. */
 @Composable
 private fun HeaderIcon(
@@ -412,12 +529,19 @@ private fun HeaderIcon(
         }
         return
     }
+    // Liquid Glass: Apple's toolbar glass (a pane lifted off the page).
+    val liquid = com.glasscast.app.ui.liquid.LocalLiquid.current
     Box(
         Modifier
             .size(44.dp)
+            .then(
+                if (liquid != null && !active) with(com.glasscast.app.ui.liquid.Panes) { Modifier.pane(liquid) }
+                else Modifier
+            )
             .clip(CircleShape)
             .background(
                 if (active) MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)
+                else if (liquid != null) Color.Transparent
                 else MaterialTheme.colorScheme.onBackground.copy(alpha = 0.08f)
             )
             .clickable(enabled = enabled, onClick = onClick),

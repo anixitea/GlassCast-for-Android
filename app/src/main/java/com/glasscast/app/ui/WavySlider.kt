@@ -44,6 +44,11 @@ import androidx.compose.ui.graphics.drawscope.translate
  * Played portion: a sine stroke. Remaining: a thinner flat line with a small
  * end dot. Between them, a vertical bar marks the playhead and is what the
  * finger grabs.
+ *
+ * Glass ([glassLine], the Glass look's player): no wave. A rod of glass
+ * instead, filled as far as you've listened, with light along its top and a
+ * shade along its foot. It swells while a finger is on it, the way Apple's
+ * scrubbers magnify, and settles back when let go.
  */
 @Composable
 fun WavySlider(
@@ -75,7 +80,11 @@ fun WavySlider(
     ticks: List<Float> = emptyList(),
     /** Sea Glass: the playhead is a bead of this glass instead of a bar. */
     thumbGlass: com.glasscast.app.ui.seaglass.Pigment? = null,
-    thumbGlassDark: Boolean = false
+    thumbGlassDark: Boolean = false,
+    /** The Glass look: a still rod of glass that swells under the finger, instead of the wave. */
+    glassLine: Boolean = false,
+    /** Swells the rod as if held: the TV's, while it's focused. */
+    held: Boolean = false
 ) {
     val bead = remember { com.glasscast.app.ui.seaglass.GlassPainter(com.glasscast.app.ui.seaglass.GlassRecipe.Pebble, seed = 4) }
     var dragging by remember { mutableStateOf(false) }
@@ -97,7 +106,13 @@ fun WavySlider(
      * something playing isn't redrawn 144 times a second for a slow wave;
      * the full player leaves it uncapped.
      */
-    val clock = rememberFrameClock(running = playing, fps = frameRate)
+    val clock = rememberFrameClock(running = playing && !glassLine, fps = frameRate)
+    // The glass rod's swell while it's held: quick to grow, softer to settle.
+    val swell by animateFloatAsState(
+        targetValue = if ((dragging || held) && glassLine) 1f else 0f,
+        animationSpec = spring(dampingRatio = 0.7f, stiffness = if (dragging || held) 900f else 420f),
+        label = "glassLineSwell"
+    )
 
     Canvas(
         modifier
@@ -131,6 +146,10 @@ fun WavySlider(
                 }
             }
     ) {
+        if (glassLine) {
+            drawGlassLine(shown, color, strokeWidth.toPx(), swell, marks, markColor, ticks)
+            return@Canvas
+        }
         val w = size.width
         val cy = size.height / 2f
         val stroke = strokeWidth.toPx()
@@ -223,6 +242,95 @@ fun WavySlider(
                 strokeWidth = 4.dp.toPx(),
                 cap = StrokeCap.Round
             )
+        }
+    }
+}
+
+/**
+ * The Glass look's scrubber: a rod of glass. The rest of the episode is clear
+ * glass (a faint fill of the ink), what's been heard is filled with it, and
+ * over both run a band of light along the top, a shade along the foot and a
+ * thin bright rim, which is what makes it read as glass rather than a line.
+ * [swell] (0 to 1) magnifies it while it's held: about twice as thick, and
+ * the light on it brighter.
+ */
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawGlassLine(
+    shown: Float,
+    color: Color,
+    stroke: Float,
+    swell: Float,
+    marks: List<ClosedFloatingPointRange<Float>>,
+    markColor: Color,
+    ticks: List<Float>
+) {
+    val w = size.width
+    val cy = size.height / 2f
+    val thick = (stroke * (1.25f + 1.05f * swell)).coerceAtMost(size.height)
+    val top = cy - thick / 2f
+    val r = thick / 2f
+    val corner = androidx.compose.ui.geometry.CornerRadius(r)
+    val rod = androidx.compose.ui.geometry.Size(w, thick)
+    val head = (w * shown).coerceIn(0f, w)
+
+    // A soft shadow under the rod, so it stands off the picture.
+    drawRoundRect(
+        color = Color.Black.copy(alpha = 0.16f + 0.08f * swell),
+        topLeft = Offset(0f, top + thick * 0.18f),
+        size = rod,
+        cornerRadius = corner
+    )
+    // The glass, and what's been heard.
+    drawRoundRect(color.copy(alpha = 0.24f), topLeft = Offset(0f, top), size = rod, cornerRadius = corner)
+    if (head > 0f) {
+        drawRoundRect(
+            color.copy(alpha = 0.95f),
+            topLeft = Offset(0f, top),
+            size = androidx.compose.ui.geometry.Size(head.coerceAtLeast(thick), thick),
+            cornerRadius = corner
+        )
+    }
+    // Ad breaks, in their own color, inside the rod.
+    marks.forEach { m ->
+        val left = (m.start * w).coerceIn(0f, w)
+        val right = (m.endInclusive * w).coerceIn(0f, w)
+        if (right - left < 1f) return@forEach
+        clipRect(left = left, top = 0f, right = right, bottom = size.height) {
+            drawRoundRect(markColor.copy(alpha = 0.85f), topLeft = Offset(0f, top), size = rod, cornerRadius = corner)
+        }
+    }
+    // Light along the top, a shade along the foot.
+    drawRoundRect(
+        brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+            0f to Color.White.copy(alpha = 0.55f + 0.2f * swell),
+            0.45f to Color.White.copy(alpha = 0f),
+            0.7f to Color.Black.copy(alpha = 0f),
+            1f to Color.Black.copy(alpha = 0.16f),
+            startY = top,
+            endY = top + thick
+        ),
+        topLeft = Offset(0f, top),
+        size = rod,
+        cornerRadius = corner
+    )
+    // The rim: bright at the top, fading round to the foot.
+    drawRoundRect(
+        brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+            0f to Color.White.copy(alpha = 0.5f + 0.25f * swell),
+            1f to Color.White.copy(alpha = 0.08f),
+            startY = top,
+            endY = top + thick
+        ),
+        topLeft = Offset(0f, top),
+        size = rod,
+        cornerRadius = corner,
+        style = Stroke(width = 1.dp.toPx())
+    )
+    // Bookmarks: a dot under the rod at each.
+    if (ticks.isNotEmpty()) {
+        val dot = 2.dp.toPx()
+        val y = (top + thick + dot + 2.dp.toPx()).coerceAtMost(size.height - dot)
+        ticks.forEach { t ->
+            if (t in 0f..1f) drawCircle(color.copy(alpha = 0.75f), radius = dot, center = Offset(t * w, y))
         }
     }
 }

@@ -109,8 +109,7 @@ fun LibrarySearchSheet(
                     .padding(horizontal = 20.dp)
                     .fillMaxWidth()
                     .height(50.dp)
-                    .clip(RoundedCornerShape(25.dp))
-                    .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                    .glassField(MaterialTheme.colorScheme.surfaceContainerHigh, 25.dp)
                     .padding(horizontal = 18.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {

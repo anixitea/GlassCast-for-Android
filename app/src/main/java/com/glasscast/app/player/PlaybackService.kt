@@ -23,7 +23,7 @@ import androidx.media3.session.MediaSessionService
 import com.glasscast.app.GlassCastApp
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
-import com.glasscast.app.MainActivity
+import com.glasscast.app.GlassCastActivity
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.common.MediaItem
 import com.glasscast.app.data.usable
@@ -61,6 +61,9 @@ class PlaybackService : MediaLibraryService() {
     private val carButtons = CarButtons {
         (application as GlassCastApp).settings.skipSeconds.value
     }
+
+    /** The browse tree for the car, and the session's callback (see AutoLibrary). */
+    private var library: AutoLibrary? = null
 
     private companion object {
         const val FADE_MS = 15_000L
@@ -190,12 +193,21 @@ class PlaybackService : MediaLibraryService() {
             ) {
                 savePosition(force = true)
             }
+
+            // The queue moved on or changed: keep it when the app isn't
+            // here to (see keepQueue), and the car's Home and Up Next follow.
+            override fun onEvents(eventPlayer: Player, events: Player.Events) {
+                if (eventPlayer !== player) return
+                if (!events.containsAny(Player.EVENT_TIMELINE_CHANGED, Player.EVENT_MEDIA_ITEM_TRANSITION)) return
+                keepQueue(eventPlayer, moved = events.contains(Player.EVENT_MEDIA_ITEM_TRANSITION))
+                session?.let { library?.queueChanged(it) }
+            }
         }
         exo.addListener(listener)
 
         val activityIntent = PendingIntent.getActivity(
             this, 0,
-            Intent(this, MainActivity::class.java).apply {
+            Intent(this, GlassCastActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
             },
             PendingIntent.FLAG_IMMUTABLE
@@ -203,8 +215,11 @@ class PlaybackService : MediaLibraryService() {
 
         // A library session: the same session, plus a browsable library for
         // Android Auto and other media browsers (see AutoLibrary).
-        session = MediaLibraryService.MediaLibrarySession.Builder(this, skipping(exo), AutoLibrary(this, effectsScope, carButtons))
+        val callback = AutoLibrary(this, effectsScope, carButtons).also { library = it }
+        session = MediaLibraryService.MediaLibrarySession.Builder(this, skipping(exo), callback)
             .setSessionActivity(activityIntent)
+            // The car's episode actions: Up Next and played (see AutoLibrary).
+            .setCommandButtonsForMediaItems(AutoLibrary.itemButtons(this))
             .build()
             .also { carButtons.attach(it) }
         effectsScope.launch {
@@ -292,6 +307,38 @@ class PlaybackService : MediaLibraryService() {
         session?.player = skipping(target)
     }
 
+    /**
+     * The queue, kept when the app isn't connected: a drive with the phone in
+     * a pocket, or only the notification. While the app is open its player
+     * connection does this (PlayerConnection.syncQueue), and doing it from
+     * both sides at once would race: each would drop what it thinks is behind
+     * the playhead. So the service steps in only when no controller of the
+     * app's own is connected besides the media notification.
+     *
+     * Same rules as the app's: what's playing is first, and anything the
+     * playhead has moved past is dropped. Before 2.0 nothing was kept without
+     * the app, so after a drive the app came back to what had played before.
+     * Never saves an empty player, which would wipe the queue being restored.
+     */
+    private fun keepQueue(p: Player, moved: Boolean) {
+        if (p.mediaItemCount == 0 || appConnected()) return
+        if (moved) {
+            val behind = p.currentMediaItemIndex
+            if (behind > 0) {
+                p.removeMediaItems(0, behind)
+                return // The removal comes back here as a timeline change.
+            }
+        }
+        val current = p.currentMediaItemIndex.coerceAtLeast(0)
+        val ids = (current until p.mediaItemCount).map { p.getMediaItemAt(it).mediaId }
+        (application as GlassCastApp).queueStore.save(ids, 0)
+    }
+
+    private fun appConnected(): Boolean {
+        val s = session ?: return false
+        return s.connectedControllers.any { it.packageName == packageName && !s.isMediaNotificationController(it) }
+    }
+
     /** [target] as the session sees it: back and forward follow the skip setting (see SkipPlayer). */
     private fun skipping(target: Player): Player {
         val settings = (application as GlassCastApp).settings
@@ -316,6 +363,7 @@ class PlaybackService : MediaLibraryService() {
     override fun onUnbind(intent: Intent?): Boolean {
         if (intent?.action == android.service.media.MediaBrowserService.SERVICE_INTERFACE) {
             carButtons.carGone()
+            library?.carGone()
             super.onUnbind(intent)
             return true
         }
@@ -370,6 +418,8 @@ class PlaybackService : MediaLibraryService() {
         castPlayer?.release()
         localPlayer?.release()
         carButtons.detach()
+        library?.carGone()
+        library = null
         session?.release()
         session = null
         player = null
@@ -402,7 +452,9 @@ class PlaybackService : MediaLibraryService() {
         if (!force && kotlin.math.abs(pos - lastSavedPositionMs) < 5_000) return
         lastSavedPositionMs = pos
         val duration = if (p.duration > 0 && p.duration != C.TIME_UNSET) p.duration else 0L
-        (application as GlassCastApp).feedStore.savePosition(guid, pos, duration)
+        val app = application as GlassCastApp
+        app.feedStore.savePosition(guid, pos, duration)
+        app.history.stamp(guid) { app.feedStore.episodeByGuid(guid)?.feedUrl.orEmpty() }
     }
 
     /** Cheap wall-clock write-back so a crash or a kill doesn't lose the place. */

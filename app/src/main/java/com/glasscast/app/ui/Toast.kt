@@ -1,5 +1,6 @@
 package com.glasscast.app.ui
 
+import com.glasscast.app.ui.liquid.liquidGlass
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -76,7 +77,12 @@ class ToastState {
 val LocalToast = staticCompositionLocalOf { ToastState() }
 
 @Composable
-fun ToastHost(state: ToastState, modifier: Modifier = Modifier) {
+fun ToastHost(
+    state: ToastState,
+    modifier: Modifier = Modifier,
+    /** Frosted Glass: the page, for the pill to be real glass over it. */
+    backdrop: com.glasscast.app.ui.liquid.LiquidBackdrop? = null
+) {
     val message = state.current
     // Held separately so the pill keeps its content while it animates out.
     var shown by remember { mutableStateOf<ToastMessage?>(null) }
@@ -99,12 +105,18 @@ fun ToastHost(state: ToastState, modifier: Modifier = Modifier) {
         val m = shown ?: return@AnimatedVisibility
         // Sea Glass: a sliver of clear glass with ink on it, not a dark pill.
         val tokens = com.glasscast.app.ui.seaglass.LocalSea.current
-        val ink = tokens?.ink ?: Color.White
+        // Frosted Glass: a capsule of glass over the page, Apple's way.
+        val liquid = com.glasscast.app.ui.liquid.LocalLiquid.current
+        val ink = tokens?.ink ?: if (liquid != null && !liquid.dark) Color.Black else Color.White
         Row(
             Modifier
                 .widthIn(max = 340.dp)
                 .then(
-                    if (tokens != null) {
+                    if (liquid != null) {
+                        Modifier
+                            .liquidGlass(backdrop, com.glasscast.app.ui.liquid.LiquidMaterial.regular(liquid.dark), dark = liquid.dark)
+                            .clip(RoundedCornerShape(percent = 50))
+                    } else if (tokens != null) {
                         Modifier.seaGlass(
                             pigment = tokens.fog,
                             recipe = com.glasscast.app.ui.seaglass.GlassRecipe.Quiet,

@@ -23,6 +23,17 @@ val localProperties = Properties().apply {
     if (file.exists()) file.inputStream().use { load(it) }
 }
 
+// Said at build time, so a build without the TV client isn't mistaken for a
+// sign-in that doesn't work: without it the TV has no Sign in with Google.
+if (localProperties.getProperty("glasscast.tvClientId").isNullOrBlank() ||
+    localProperties.getProperty("glasscast.tvClientSecret").isNullOrBlank()
+) {
+    logger.warn(
+        "GlassCast: glasscast.tvClientId / glasscast.tvClientSecret aren't both set in local.properties. " +
+            "This build's TV won't offer Sign in with Google."
+    )
+}
+
 android {
     namespace = "com.glasscast.app"
     compileSdk = 35
@@ -31,10 +42,12 @@ android {
         applicationId = "com.glasscast.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 21
-        versionName = "1.9"
-        manifestPlaceholders["tvClientId"] = localProperties.getProperty("glasscast.tvClientId", "")
-        manifestPlaceholders["tvClientSecret"] = localProperties.getProperty("glasscast.tvClientSecret", "")
+        versionCode = 22
+        versionName = "2.0"
+        // Trimmed of spaces and quotes: a value pasted in quotes would reach
+        // Google with them, and Google says the client doesn't exist.
+        manifestPlaceholders["tvClientId"] = localProperties.getProperty("glasscast.tvClientId", "").trim().trim('"', '\'').trim()
+        manifestPlaceholders["tvClientSecret"] = localProperties.getProperty("glasscast.tvClientSecret", "").trim().trim('"', '\'').trim()
     }
 
     buildTypes {

@@ -15,11 +15,14 @@ import kotlinx.coroutines.flow.asStateFlow
 enum class ThemeMode { SYSTEM, LIGHT, DARK }
 
 /**
- * How the app is drawn, apart from brightness: GlassCast's own look, or Sea
- * Glass (paper grounds, serif titles, controls made of frosted glass pebbles).
- * Brightness and the accent sit on top of either.
+ * How the app is drawn, apart from brightness: GlassCast's own look, Sea
+ * Glass (paper grounds, serif titles, controls made of frosted glass pebbles),
+ * or Glass (2.0: Apple's grounds and layout, Inter, and chrome made of
+ * refracting glass, frosted or liquid; still LIQUID_GLASS in code and in the
+ * stored setting). Brightness and the accent sit on top of any of them.
+ * Stored by name, so the order here can change.
  */
-enum class Look { ORIGINAL, SEA_GLASS }
+enum class Look { ORIGINAL, SEA_GLASS, LIQUID_GLASS }
 enum class EpisodeSort { NEWEST_FIRST, OLDEST_FIRST }
 enum class ShowSort { RECENTLY_UPDATED, RECENTLY_PLAYED }
 
@@ -57,6 +60,19 @@ class Settings(context: Context) {
     fun setLook(look: Look) {
         _look.value = look
         prefs.edit().putString(KEY_LOOK, look.name).apply()
+    }
+
+    private val _glassLiquid = MutableStateFlow(prefs.getBoolean(KEY_GLASS_LIQUID, false))
+    /**
+     * The Glass look's finish (2.0): frosted (the default, the glass well
+     * blurred and tinted so anything on it reads) or liquid (clear glass,
+     * barely blurred, the page showing through, as Apple's clear option).
+     */
+    val glassLiquid: StateFlow<Boolean> = _glassLiquid.asStateFlow()
+
+    fun setGlassLiquid(on: Boolean) {
+        _glassLiquid.value = on
+        prefs.edit().putBoolean(KEY_GLASS_LIQUID, on).apply()
     }
 
     private val _dynamicColor = MutableStateFlow(
@@ -344,6 +360,7 @@ class Settings(context: Context) {
     private companion object {
         const val KEY_THEME = "theme"
         const val KEY_LOOK = "look"
+        const val KEY_GLASS_LIQUID = "glass_liquid"
         const val KEY_DYNAMIC = "dynamic_color"
         const val KEY_NEW_EPISODES = "new_episode_notifications"
         const val KEY_SKIP_SILENCE = "skip_silence"

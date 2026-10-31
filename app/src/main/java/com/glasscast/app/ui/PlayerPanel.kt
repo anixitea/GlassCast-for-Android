@@ -26,6 +26,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.wrapContentSize
+import com.glasscast.app.ui.liquid.liquidGlass
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -134,6 +137,8 @@ fun PlayerPanel(
     ink: Color = Color.White,
     /** Sea Glass: the cover's glass, for the capsule of buttons. */
     glass: com.glasscast.app.ui.seaglass.Pigment? = null,
+    /** Liquid Glass: the player's picture, for the panel to be glass over. */
+    glassBackdrop: com.glasscast.app.ui.liquid.LiquidBackdrop? = null,
     onTab: (PanelTab) -> Unit,
     onDrag: (Float) -> Unit,
     onDragEnd: (Float) -> Unit,
@@ -141,7 +146,220 @@ fun PlayerPanel(
     body: @Composable (PanelTab) -> Unit
 ) {
     androidx.compose.runtime.CompositionLocalProvider(LocalPanelInk provides ink) {
-        PanelContent(expand, tab, art, upNextCount, bookmarkCount, speed, timerArmed, surface, accent, glass, onTab, onDrag, onDragEnd, modifier, body)
+        if (glassBackdrop != null) {
+            LiquidPanelContent(expand, tab, upNextCount, bookmarkCount, speed, timerArmed, accent, glassBackdrop, onTab, onDrag, onDragEnd, modifier, body)
+        } else {
+            PanelContent(expand, tab, art, upNextCount, bookmarkCount, speed, timerArmed, surface, accent, glass, onTab, onDrag, onDragEnd, modifier, body)
+        }
+    }
+}
+
+/** The panel's title for a tab, and the line under it. */
+@Composable
+private fun panelTitle(shown: PanelTab?): String = when (shown) {
+    PanelTab.INFO -> tr("Episode info")
+    PanelTab.BOOKMARKS -> tr("Bookmarks")
+    PanelTab.SPEED -> tr("Speed & sound")
+    PanelTab.TIMER -> tr("Sleep timer")
+    else -> tr("Playing Next")
+}
+
+@Composable
+private fun panelSubtitle(shown: PanelTab?, upNextCount: Int, bookmarkCount: Int, speed: Float, timerArmed: Boolean): String = when {
+    shown == PanelTab.INFO -> tr("Notes, chapters and transcript")
+    shown == PanelTab.BOOKMARKS -> when (bookmarkCount) {
+        0 -> tr("No bookmarks")
+        1 -> tr("1 bookmark")
+        else -> tr("{0} bookmarks", bookmarkCount)
+    }
+    shown == PanelTab.SPEED -> formatSpeed(speed)
+    shown == PanelTab.TIMER -> if (timerArmed) tr("Running") else tr("Off")
+    upNextCount == 0 -> tr("Nothing queued")
+    upNextCount == 1 -> tr("1 episode")
+    else -> tr("{0} episodes", upNextCount)
+}
+
+/**
+ * Liquid Glass's panel. At rest it's a capsule of glass floating over the
+ * foot of the player, the five buttons spread along it. Pulled up, the
+ * capsule grows out to the edges and up into a sheet of the same glass, the
+ * buttons gather to the right and the tab's title comes in at the left. It
+ * refracts the player's picture ([backdrop]) all the way, so the cover's
+ * color carries on through it.
+ */
+@Composable
+private fun LiquidPanelContent(
+    expand: Float,
+    tab: PanelTab,
+    upNextCount: Int,
+    bookmarkCount: Int,
+    speed: Float,
+    timerArmed: Boolean,
+    accent: Color,
+    backdrop: com.glasscast.app.ui.liquid.LiquidBackdrop,
+    onTab: (PanelTab) -> Unit,
+    onDrag: (Float) -> Unit,
+    onDragEnd: (Float) -> Unit,
+    modifier: Modifier,
+    body: @Composable (PanelTab) -> Unit
+) {
+    val e = expand.coerceIn(0f, 1f)
+    val open = e > 0.5f
+    // The capsule: in from the sides and off the top edge at rest, the
+    // height of the header strip less its margins.
+    val capsule = PanelHeaderHeight - 14.dp
+    androidx.compose.foundation.layout.BoxWithConstraints(modifier) {
+        val inset = 12.dp * (1f - e)
+        val top = 6.dp * (1f - e)
+        val shapeH = capsule + (maxHeight - capsule) * e
+        val shape = RoundedCornerShape(34.dp)
+        // Pulled up, the glass reaches a little past the screen's sides and
+        // foot (2% wider), so the lines of light along its rim are out of
+        // sight there; only the top edge, rounded, keeps them. At the screen's
+        // edge they read as stray white lines.
+        val overhang = maxWidth * 0.01f * e
+        Box(
+            Modifier
+                .offset(inset - overhang, top)
+                // Allowed past the panel's bounds. A plain size can't be wider
+                // than the screen: it was cut back to the screen's width while
+                // still shifted left, which left a gap down the right side.
+                .wrapContentSize(Alignment.TopStart, unbounded = true)
+                .size(maxWidth - inset * 2 + overhang * 2, shapeH + 24.dp * e)
+                .liquidGlass(backdrop, com.glasscast.app.ui.liquid.LiquidMaterial.panel(), corner = 34.dp, dark = true)
+        )
+        Column(
+            Modifier
+                .offset(inset, top)
+                .size(maxWidth - inset * 2, maxHeight - top)
+                .clip(shape)
+                // The panel owns every touch that lands on it.
+                .pointerInput(Unit) {}
+        ) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .height(capsule)
+                    .pointerInput(Unit) {
+                        var velocity = 0f
+                        detectVerticalDragGestures(
+                            onDragStart = { velocity = 0f },
+                            onVerticalDrag = { change, amount ->
+                                change.consume()
+                                velocity = amount
+                                onDrag(amount)
+                            },
+                            onDragEnd = { onDragEnd(velocity * 60f) },
+                            onDragCancel = { onDragEnd(0f) }
+                        )
+                    }
+                    .padding(top = 7.dp)
+            ) {
+                Box(
+                    Modifier
+                        .align(Alignment.CenterHorizontally)
+                        .size(width = 32.dp, height = 4.dp)
+                        .clip(CircleShape)
+                        .background(Ink.copy(alpha = 0.36f))
+                )
+                Spacer(Modifier.height(5.dp))
+                androidx.compose.foundation.layout.BoxWithConstraints(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(44.dp)
+                        .padding(horizontal = 10.dp)
+                ) {
+                    // Spread along the capsule at rest; gathered into a
+                    // pill at the right once it's open.
+                    val packed = 46.dp * 5 + 8.dp
+                    val rowW = maxWidth + (packed - maxWidth) * e
+                    val titleShown = ((e - 0.35f) / 0.5f).coerceIn(0f, 1f)
+                    if (titleShown > 0f) {
+                        Column(
+                            Modifier
+                                .align(Alignment.CenterStart)
+                                .width((maxWidth - rowW - 10.dp).coerceAtLeast(0.dp))
+                                .padding(start = 8.dp)
+                                .graphicsLayer { alpha = titleShown }
+                        ) {
+                            val shown = if (open) tab else null
+                            Text(
+                                text = panelTitle(shown),
+                                style = MaterialTheme.typography.titleMedium,
+                                color = Ink,
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = panelSubtitle(shown, upNextCount, bookmarkCount, speed, timerArmed),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = InkDim,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                    // Gathered, the buttons sit in a pill of glass set into
+                    // the panel; each open tab (or a press) is a lighter
+                    // drop of glass under its button.
+                    Box(
+                        Modifier
+                            .align(Alignment.CenterEnd)
+                            .width(rowW)
+                    ) {
+                        if (e > 0.01f) {
+                            Box(
+                                Modifier
+                                    .matchParentSize()
+                                    .graphicsLayer { alpha = e }
+                                    .liquidGlass(backdrop, com.glasscast.app.ui.liquid.LiquidMaterial.inset(), corner = 20.dp, dark = true)
+                            )
+                        }
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(4.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            PanelTabButton(open && tab == PanelTab.UP_NEXT, { onTab(PanelTab.UP_NEXT) }, backdrop) {
+                                Icon(Icons.AutoMirrored.Filled.QueueMusic, tr("Up Next"), Modifier.size(21.dp), tint = Ink)
+                            }
+                            PanelTabButton(open && tab == PanelTab.INFO, { onTab(PanelTab.INFO) }, backdrop) {
+                                Icon(Icons.Outlined.Info, tr("Episode info"), Modifier.size(21.dp), tint = Ink)
+                            }
+                            PanelTabButton(open && tab == PanelTab.BOOKMARKS, { onTab(PanelTab.BOOKMARKS) }, backdrop) {
+                                Icon(
+                                    if (bookmarkCount > 0) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder,
+                                    tr("Bookmarks"),
+                                    Modifier.size(21.dp),
+                                    tint = Ink
+                                )
+                            }
+                            PanelTabButton(open && tab == PanelTab.SPEED, { onTab(PanelTab.SPEED) }, backdrop) {
+                                Text(formatSpeed(speed), style = MaterialTheme.typography.titleSmall, color = Ink)
+                            }
+                            PanelTabButton((open && tab == PanelTab.TIMER) || timerArmed, { onTab(PanelTab.TIMER) }, backdrop) {
+                                Icon(
+                                    Icons.Filled.Bedtime,
+                                    tr("Sleep timer"),
+                                    Modifier.size(20.dp),
+                                    tint = if (timerArmed) accent else Ink
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .graphicsLayer { alpha = ((e - 0.2f) / 0.5f).coerceIn(0f, 1f) }
+            ) {
+                PanelColors(accent) { body(tab) }
+            }
+        }
     }
 }
 
@@ -254,13 +472,7 @@ private fun PanelContent(
                 ) { shown ->
                     Column {
                         Text(
-                            text = when (shown) {
-                                PanelTab.INFO -> tr("Episode info")
-                                PanelTab.BOOKMARKS -> tr("Bookmarks")
-                                PanelTab.SPEED -> tr("Speed & sound")
-                                PanelTab.TIMER -> tr("Sleep timer")
-                                else -> tr("Playing Next")
-                            },
+                            text = panelTitle(shown),
                             // Sea Glass's serif runs wider: a size down, and an
                             // ellipsis rather than losing the second word.
                             style = if (tokens != null) com.glasscast.app.ui.seaglass.rowTitleStyle() else MaterialTheme.typography.titleMedium,
@@ -270,19 +482,7 @@ private fun PanelContent(
                             overflow = TextOverflow.Ellipsis
                         )
                         Text(
-                            text = when {
-                                shown == PanelTab.INFO -> tr("Notes, chapters and transcript")
-                                shown == PanelTab.BOOKMARKS -> when (bookmarkCount) {
-                                    0 -> tr("No bookmarks")
-                                    1 -> tr("1 bookmark")
-                                    else -> tr("{0} bookmarks", bookmarkCount)
-                                }
-                                shown == PanelTab.SPEED -> formatSpeed(speed)
-                                shown == PanelTab.TIMER -> if (timerArmed) tr("Running") else tr("Off")
-                                upNextCount == 0 -> tr("Nothing queued")
-                                upNextCount == 1 -> tr("1 episode")
-                                else -> tr("{0} episodes", upNextCount)
-                            },
+                            text = panelSubtitle(shown, upNextCount, bookmarkCount, speed, timerArmed),
                             style = MaterialTheme.typography.bodySmall,
                             color = InkDim,
                             maxLines = 1,
@@ -364,7 +564,51 @@ private fun PanelContent(
 }
 
 @Composable
-private fun PanelTabButton(active: Boolean, onClick: () -> Unit, content: @Composable () -> Unit) {
+private fun PanelTabButton(
+    active: Boolean,
+    onClick: () -> Unit,
+    glass: com.glasscast.app.ui.liquid.LiquidBackdrop? = null,
+    content: @Composable () -> Unit
+) {
+    // Frosted Glass: a drop of clear glass under the open tab, which also
+    // comes up under a finger and swells a little while it's held, as the
+    // switches' knobs do.
+    if (glass != null) {
+        val interaction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+        val pressed by interaction.collectIsPressedAsState()
+        val lit by androidx.compose.animation.core.animateFloatAsState(
+            targetValue = if (active || pressed) 1f else 0f,
+            animationSpec = androidx.compose.animation.core.tween(if (pressed) 110 else 260),
+            label = "panelDrop"
+        )
+        val swell by androidx.compose.animation.core.animateFloatAsState(
+            targetValue = if (pressed) 1.1f else 1f,
+            animationSpec = androidx.compose.animation.core.spring(dampingRatio = 0.62f, stiffness = 700f),
+            label = "panelDropSwell"
+        )
+        Box(
+            Modifier
+                .size(width = 46.dp, height = 40.dp)
+                .clickable(interactionSource = interaction, indication = null, onClick = onClick),
+            contentAlignment = Alignment.Center
+        ) {
+            if (lit > 0.01f) {
+                Box(
+                    Modifier
+                        .size(width = 44.dp, height = 36.dp)
+                        .graphicsLayer {
+                            alpha = lit
+                            val k = (0.84f + 0.16f * lit) * swell
+                            scaleX = k
+                            scaleY = k
+                        }
+                        .liquidGlass(glass, com.glasscast.app.ui.liquid.LiquidMaterial.disc(), corner = 18.dp, dark = true)
+                )
+            }
+            content()
+        }
+        return
+    }
     // Sea Glass: no rectangle of ripple on a pebble. The button gives a
     // little under the finger, and the open tab is a small, clearer pebble
     // set into the capsule.

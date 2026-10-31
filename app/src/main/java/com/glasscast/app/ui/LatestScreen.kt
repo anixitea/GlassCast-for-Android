@@ -187,7 +187,9 @@ fun LatestScreen(
                     onAddToQueue = { onAddToQueue(episode) },
                     played = episode.effectivelyPlayed,
                     onTogglePlayed = { onTogglePlayed(episode) },
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 3.dp)
+                    // Frosted Glass: a little more air, for the cards' shadows.
+                    modifier = if (com.glasscast.app.ui.liquid.LocalLiquid.current != null) Modifier.padding(horizontal = 14.dp, vertical = 5.dp)
+                    else Modifier.padding(horizontal = 12.dp, vertical = 3.dp)
                 ) {
                     LatestRow(
                         episode = episode,
@@ -244,7 +246,7 @@ private fun LatestRow(
     ) {
         // Cover on every row, unlike the show page — here the list spans shows,
         // so the artwork is what tells you which one you're looking at.
-        Artwork(url = art, sizeDp = 56.dp, corner = 11.dp)
+        Artwork(url = art, sizeDp = 56.dp, corner = if (com.glasscast.app.ui.liquid.LocalLiquid.current != null) 9.dp else 11.dp)
 
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -277,7 +279,7 @@ private fun LatestRow(
             )
             Spacer(Modifier.height(8.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Pill(
+                LengthPill(
                     label = if (started) {
                         tr("{0} left", formatCompact(episode.durationMs - episode.positionMs))
                     } else {

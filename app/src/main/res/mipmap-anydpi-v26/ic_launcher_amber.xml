@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  A 2.0 app icon (Settings > Appearance > App icon), picked in the app and
+  switched by enabling its launcher alias (data/AppIcons). The whole picture
+  is the background layer, drawn on the original's keyline: the same glyph at
+  the same size and place, so no icon looks bigger or smaller than the others.
+  Themed icons still get the one glyph. No night variant (see ic_launcher.xml).
+-->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@drawable/icon_amber" />
+    <foreground android:drawable="@android:color/transparent" />
+    <monochrome android:drawable="@drawable/ic_launcher_foreground" />
+</adaptive-icon>

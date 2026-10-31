@@ -68,10 +68,13 @@ class TvActivity : ComponentActivity() {
              * too.
              *
              * The look does apply: Sea Glass on the TV is its night side, the
-             * tide (see TvSea.kt). It's set in the TV's Settings, and it's
-             * the same setting as the phone's.
+             * tide (see TvSea.kt), and Glass is drawn glass (TvClear.kt).
+             * It's set in the TV's Settings, and it's the same setting as
+             * the phone's.
              */
             CompositionLocalProvider(LocalImageStore provides app.imageStore) {
+                // Every look, Glass included (2.0, fifth round): the TV's
+                // glass is drawn, not a lens (see TvClear.kt).
                 GlassCastTheme(ThemeMode.DARK, look = look) {
                     ProvideTv {
                         TvRoot(
@@ -92,6 +95,7 @@ class TvActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         if (GOOGLE_SIGN_IN) lifecycleScope.launch(Dispatchers.IO) { app.account.syncSoon() }
+        lifecycleScope.launch { runCatching { app.feedStore.refreshIfStale() } }
     }
 
     override fun onStop() {

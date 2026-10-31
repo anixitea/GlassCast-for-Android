@@ -219,7 +219,7 @@ fun GlassCastTheme(
     themeMode: com.glasscast.app.data.ThemeMode,
     /** Supplied when dynamic color is on and something is playing. */
     showAccent: Color? = null,
-    /** Original or Sea Glass (Settings > Appearance, on the phone and the TV). */
+    /** Original, Sea Glass or Glass (Settings > Appearance, on the phone and the TV). */
     look: com.glasscast.app.data.Look = com.glasscast.app.data.Look.ORIGINAL,
     content: @Composable () -> Unit
 ) {
@@ -263,11 +263,19 @@ fun GlassCastTheme(
     } else {
         null
     }
-    val finalScheme = if (seaTokens != null) {
-        // The accent is the brand glass's ink, so a button in it sits with the glass.
-        seaScheme(seaTokens, accent = if (dark) seaTokens.brand.edge else seaTokens.brand.ink)
+    // Liquid Glass: Apple's grounds and labels, Inter, and the accent as it is
+    // (GlassCast's purple, the cover's, or the one picked).
+    val liquidTokens = if (look == com.glasscast.app.data.Look.LIQUID_GLASS) {
+        val accent = tinted ?: if (dark) AccentPurple else AccentPurpleLight
+        androidx.compose.runtime.remember(dark, accent) { com.glasscast.app.ui.liquid.liquidTokens(dark, accent) }
     } else {
-        scheme
+        null
+    }
+    val finalScheme = when {
+        // The accent is the brand glass's ink, so a button in it sits with the glass.
+        seaTokens != null -> seaScheme(seaTokens, accent = if (dark) seaTokens.brand.edge else seaTokens.brand.ink)
+        liquidTokens != null -> androidx.compose.runtime.remember(liquidTokens) { com.glasscast.app.ui.liquid.liquidScheme(liquidTokens) }
+        else -> scheme
     }
 
     val view = LocalView.current
@@ -289,11 +297,16 @@ fun GlassCastTheme(
     CompositionLocalProvider(
         LocalIsDark provides dark,
         LocalBrandAccent provides (if (seaTokens != null) finalScheme.primary else tinted ?: if (dark) AccentPurple else AccentPurpleLight),
-        com.glasscast.app.ui.seaglass.LocalSea provides seaTokens
+        com.glasscast.app.ui.seaglass.LocalSea provides seaTokens,
+        com.glasscast.app.ui.liquid.LocalLiquid provides liquidTokens
     ) {
         MaterialTheme(
             colorScheme = finalScheme,
-            typography = if (seaTokens != null) SeaType else GlassType,
+            typography = when {
+                seaTokens != null -> SeaType
+                liquidTokens != null -> LiquidType
+                else -> GlassType
+            },
             content = content
         )
     }

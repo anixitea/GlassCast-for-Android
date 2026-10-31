@@ -12,7 +12,7 @@ import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
-import com.glasscast.app.MainActivity
+import com.glasscast.app.GlassCastActivity
 import com.glasscast.app.R
 import com.glasscast.app.data.Episode
 import com.glasscast.app.data.Feed
@@ -96,7 +96,7 @@ object NewEpisodeNotifier {
     }
 
     private fun openShow(context: Context, feedUrl: String?): PendingIntent {
-        val intent = Intent(context, MainActivity::class.java).apply {
+        val intent = Intent(context, GlassCastActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
             if (feedUrl != null) putExtra(EXTRA_OPEN_FEED, feedUrl)
         }

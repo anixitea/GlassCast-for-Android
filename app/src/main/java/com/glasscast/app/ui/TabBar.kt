@@ -120,48 +120,12 @@ fun GlassTabBar(
     /** Icons and labels: light on the dark bar, dark on the pale one. */
     content: () -> Color = { BarContentLight }
 ) {
-    val haptics = rememberHaptics()
     val shape = RoundedCornerShape(percent = 50)
     // Sea Glass: the bar is a long piece of clear glass, and the selection a
     // pebble in the accent's glass traveling along it.
     val tokens = com.glasscast.app.ui.seaglass.LocalSea.current
     val selectionGlass = remember { com.glasscast.app.ui.seaglass.GlassPainter(com.glasscast.app.ui.seaglass.GlassRecipe.Pebble, seed = 21) }
     val barInk: () -> Color = if (tokens != null) ({ tokens.ink }) else content
-
-    /*
-     * Everything that moves here is driven by two animated numbers, read only
-     * while measuring and drawing — the bar never recomposes to animate.
-     *
-     * It used to: each tab wrote its position into state after layout, the
-     * pill read those positions during composition and chased them with
-     * springs, and each tab's width was its own spring read the same way. Any
-     * change of size ran layout → positions written → recompose → springs
-     * restarted → layout again, frame after frame until it settled. The morph
-     * narrows the bar on every frame of a collapse, which kept that loop going
-     * on every scroll.
-     *
-     * [pill] is the selected tab as a traveling index — 1.4 is forty percent
-     * of the way from tab 1 to tab 2 — so the pill glides between tabs and the
-     * widths hand over between them from the same value. [labeled] is how much
-     * the selected tab's label is showing (0 while compact).
-     */
-    val pill = remember { Animatable(selectedIndex.toFloat()) }
-    LaunchedEffect(selectedIndex) { pill.animateTo(selectedIndex.toFloat(), barSpring()) }
-    val labeled = remember { Animatable(if (compact) 0f else 1f) }
-    LaunchedEffect(compact) { labeled.animateTo(if (compact) 0f else 1f, barSpring()) }
-
-    // The tab being left keeps its label while it narrows, fading with the
-    // room it has left. It used to vanish the moment another tab was tapped,
-    // a frame before anything else moved.
-    val lastSelected = remember { intArrayOf(selectedIndex) }
-    val leaving = remember(selectedIndex) { lastSelected[0].also { lastSelected[0] = selectedIndex } }
-
-    // Each tab's x and width, written during placement and read while drawing
-    // the pill. Plain floats, not state: nothing should recompose from them.
-    val slots = remember(tabs.size) { FloatArray(tabs.size * 2) }
-    // Each tab's room for its label once settled as the selection, written
-    // while measuring (below) and read by the tab as it measures.
-    val labelRoom = remember(tabs.size) { IntArray(tabs.size) }
 
     Box(
         modifier
@@ -198,102 +162,181 @@ fun GlassTabBar(
             )
             .padding(6.dp)
     ) {
-        Layout(
-            content = {
-                tabs.forEachIndexed { index, tab ->
-                    val selected = index == selectedIndex
-                    TabItem(
-                        tab = tab,
-                        selected = selected,
-                        // How much of the selected tab's label is showing:
-                        // the same number that gives it its extra width
-                        // (below), so the label and the room for it grow and
-                        // shrink together. Tabs the pill only passes over
-                        // widen for it but keep their labels hidden.
-                        reveal = {
-                            if (!selected && index != leaving) 0f
-                            else (labeled.value.coerceIn(0f, 1f) *
-                                (1f - kotlin.math.abs(pill.value - index)).coerceAtLeast(0f)).coerceIn(0f, 1f)
-                        },
-                        room = { labelRoom.getOrElse(index) { 0 } },
-                        content = if (tokens != null && selected) ({ tokens.brand.ink }) else barInk,
-                        dimmed = tokens != null && !selected,
-                        modifier = Modifier,
-                        onClick = {
-                            if (!selected) haptics.play(Haptic.Select)
-                            onTabSelected(index)
-                        }
+        TabStrip(
+            tabs = tabs,
+            selectedIndex = selectedIndex,
+            onTabSelected = onTabSelected,
+            compact = compact,
+            ink = barInk,
+            selectedInk = if (tokens != null) ({ tokens.brand.ink }) else barInk,
+            restAlpha = if (tokens != null) 0.62f else 0.66f,
+            drawPill = { x, w ->
+                if (tokens != null) {
+                    translate(left = x) { selectionGlass.draw(this, w, size.height, tokens.brand) }
+                } else {
+                    drawRoundRect(
+                        color = content().copy(alpha = 0.16f),
+                        topLeft = Offset(x, 0f),
+                        size = Size(w, size.height),
+                        cornerRadius = CornerRadius(size.height / 2f)
                     )
                 }
             },
             modifier = Modifier
                 .fillMaxWidth()
                 .height(48.dp)
-                .drawBehind {
-                    val last = (tabs.size - 1).coerceAtLeast(0)
-                    val p = pill.value.coerceIn(0f, last.toFloat())
-                    val i = p.toInt().coerceAtMost(last)
-                    val j = (i + 1).coerceAtMost(last)
-                    val f = p - i
-                    val x = slots[i * 2] + (slots[j * 2] - slots[i * 2]) * f
-                    val w = slots[i * 2 + 1] + (slots[j * 2 + 1] - slots[i * 2 + 1]) * f
-                    if (tokens != null) {
-                        translate(left = x) { selectionGlass.draw(this, w, size.height, tokens.brand) }
-                    } else {
-                        drawRoundRect(
-                            color = content().copy(alpha = 0.16f),
-                            topLeft = Offset(x, 0f),
-                            size = Size(w, size.height),
-                            cornerRadius = CornerRadius(size.height / 2f)
-                        )
+        )
+    }
+}
+
+/**
+ * The tabs themselves, shared by every look's bar (Liquid Glass's too): the
+ * icons, the selected one widened to show its whole label beside its icon,
+ * and the selection drawn under it by [drawPill] as it travels. The sizing is
+ * the bar's long-settled answer to labels that didn't fit ("Downlo…"): only
+ * the selected tab has a label, and it gets exactly the room its label needs
+ * when the bar has it (see the measuring below).
+ *
+ * [compact] puts the label away (icons only). Everything that moves is driven
+ * by two animated numbers read only while measuring and drawing, so the strip
+ * never recomposes to animate.
+ */
+@Composable
+internal fun TabStrip(
+    tabs: List<GlassTab>,
+    selectedIndex: Int,
+    onTabSelected: (Int) -> Unit,
+    compact: Boolean,
+    ink: () -> Color,
+    selectedInk: () -> Color,
+    /** How strong the tabs not chosen are, against the chosen one. */
+    restAlpha: Float,
+    drawPill: androidx.compose.ui.graphics.drawscope.DrawScope.(x: Float, w: Float) -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true
+) {
+    val haptics = rememberHaptics()
+
+    /*
+     * Everything that moves here is driven by two animated numbers, read only
+     * while measuring and drawing — the bar never recomposes to animate.
+     *
+     * It used to: each tab wrote its position into state after layout, the
+     * pill read those positions during composition and chased them with
+     * springs, and each tab's width was its own spring read the same way. Any
+     * change of size ran layout → positions written → recompose → springs
+     * restarted → layout again, frame after frame until it settled. The morph
+     * narrows the bar on every frame of a collapse, which kept that loop going
+     * on every scroll.
+     *
+     * [pill] is the selected tab as a traveling index — 1.4 is forty percent
+     * of the way from tab 1 to tab 2 — so the pill glides between tabs and the
+     * widths hand over between them from the same value. [labeled] is how much
+     * the selected tab's label is showing (0 while compact).
+     */
+    val pill = remember { Animatable(selectedIndex.toFloat()) }
+    LaunchedEffect(selectedIndex) { pill.animateTo(selectedIndex.toFloat(), barSpring()) }
+    val labeled = remember { Animatable(if (compact) 0f else 1f) }
+    LaunchedEffect(compact) { labeled.animateTo(if (compact) 0f else 1f, barSpring()) }
+
+    // The tab being left keeps its label while it narrows, fading with the
+    // room it has left. It used to vanish the moment another tab was tapped,
+    // a frame before anything else moved.
+    val lastSelected = remember { intArrayOf(selectedIndex) }
+    val leaving = remember(selectedIndex) { lastSelected[0].also { lastSelected[0] = selectedIndex } }
+
+    // Each tab's x and width, written during placement and read while drawing
+    // the pill. Plain floats, not state: nothing should recompose from them.
+    val slots = remember(tabs.size) { FloatArray(tabs.size * 2) }
+    // Each tab's room for its label once settled as the selection, written
+    // while measuring (below) and read by the tab as it measures.
+    val labelRoom = remember(tabs.size) { IntArray(tabs.size) }
+
+    Layout(
+        content = {
+            tabs.forEachIndexed { index, tab ->
+                val selected = index == selectedIndex
+                TabItem(
+                    tab = tab,
+                    selected = selected,
+                    // How much of the selected tab's label is showing:
+                    // the same number that gives it its extra width
+                    // (below), so the label and the room for it grow and
+                    // shrink together. Tabs the pill only passes over
+                    // widen for it but keep their labels hidden.
+                    reveal = {
+                        if (!selected && index != leaving) 0f
+                        else (labeled.value.coerceIn(0f, 1f) *
+                            (1f - kotlin.math.abs(pill.value - index)).coerceAtLeast(0f)).coerceIn(0f, 1f)
+                    },
+                    room = { labelRoom.getOrElse(index) { 0 } },
+                    content = if (selected) selectedInk else ink,
+                    restAlpha = restAlpha,
+                    enabled = enabled,
+                    modifier = Modifier,
+                    onClick = {
+                        if (!selected) haptics.play(Haptic.Select)
+                        onTabSelected(index)
                     }
-                }
-        ) { measurables, constraints ->
-            val total = constraints.maxWidth
-            val height = constraints.maxHeight
-            val n = measurables.size
-            if (n == 0) return@Layout layout(total, height) {}
-            val p = pill.value
-            val lab = labeled.value.coerceIn(0f, 1f)
-            // What each tab needs: its icon alone (min intrinsic), and what its
-            // label adds (max minus min; see TabItem). It used to be a fixed
-            // share, 1.4 tabs' worth, which left "Downloads" as "Downlo…".
-            val bare = IntArray(n) { measurables[it].minIntrinsicWidth(height) }
-            val need = IntArray(n) { (measurables[it].maxIntrinsicWidth(height) - bare[it]).coerceAtLeast(0) }
-            // Every tab keeps room for an icon; a label gets the rest, all it
-            // needs if the bar has it, or the same fraction for every label on
-            // a bar too narrow. The fraction comes from the widths alone, so it
-            // holds still while the pill moves.
-            val floor = bare.max()
-            val spare = (total - floor * n).coerceAtLeast(0)
-            val fit = (spare.toFloat() / need.max().coerceAtLeast(1)).coerceAtMost(1f)
-            // The tab the pill sits on gets its label's room, shared between
-            // two tabs while the pill travels.
-            val extra = FloatArray(n) { i ->
-                need[i] * fit * lab * (1f - kotlin.math.abs(p - i)).coerceAtLeast(0f)
+                )
             }
-            val base = (total - extra.sum()) / n
-            var used = 0
-            val placeables = measurables.mapIndexed { index, measurable ->
-                if (index < labelRoom.size) labelRoom[index] = (need[index] * fit).roundToInt()
-                val w = if (index == measurables.lastIndex) {
-                    (total - used).coerceAtLeast(0)
-                } else {
-                    (base + extra[index]).roundToInt().coerceAtLeast(0)
-                }
-                used += w
-                measurable.measure(Constraints.fixed(w, height))
+        },
+        modifier = modifier
+            .drawBehind {
+                val last = (tabs.size - 1).coerceAtLeast(0)
+                val p = pill.value.coerceIn(0f, last.toFloat())
+                val i = p.toInt().coerceAtMost(last)
+                val j = (i + 1).coerceAtMost(last)
+                val f = p - i
+                val x = slots[i * 2] + (slots[j * 2] - slots[i * 2]) * f
+                val w = slots[i * 2 + 1] + (slots[j * 2 + 1] - slots[i * 2 + 1]) * f
+                drawPill(x, w)
             }
-            layout(total, height) {
-                var x = 0
-                placeables.forEachIndexed { index, placeable ->
-                    placeable.place(x, 0)
-                    if (index * 2 + 1 < slots.size) {
-                        slots[index * 2] = x.toFloat()
-                        slots[index * 2 + 1] = placeable.width.toFloat()
-                    }
-                    x += placeable.width
+    ) { measurables, constraints ->
+        val total = constraints.maxWidth
+        val height = constraints.maxHeight
+        val n = measurables.size
+        if (n == 0) return@Layout layout(total, height) {}
+        val p = pill.value
+        val lab = labeled.value.coerceIn(0f, 1f)
+        // What each tab needs: its icon alone (min intrinsic), and what its
+        // label adds (max minus min; see TabItem). It used to be a fixed
+        // share, 1.4 tabs' worth, which left "Downloads" as "Downlo…".
+        val bare = IntArray(n) { measurables[it].minIntrinsicWidth(height) }
+        val need = IntArray(n) { (measurables[it].maxIntrinsicWidth(height) - bare[it]).coerceAtLeast(0) }
+        // Every tab keeps room for an icon; a label gets the rest, all it
+        // needs if the bar has it, or the same fraction for every label on
+        // a bar too narrow. The fraction comes from the widths alone, so it
+        // holds still while the pill moves.
+        val floor = bare.max()
+        val spare = (total - floor * n).coerceAtLeast(0)
+        val fit = (spare.toFloat() / need.max().coerceAtLeast(1)).coerceAtMost(1f)
+        // The tab the pill sits on gets its label's room, shared between
+        // two tabs while the pill travels.
+        val extra = FloatArray(n) { i ->
+            need[i] * fit * lab * (1f - kotlin.math.abs(p - i)).coerceAtLeast(0f)
+        }
+        val base = (total - extra.sum()) / n
+        var used = 0
+        val placeables = measurables.mapIndexed { index, measurable ->
+            if (index < labelRoom.size) labelRoom[index] = (need[index] * fit).roundToInt()
+            val w = if (index == measurables.lastIndex) {
+                (total - used).coerceAtLeast(0)
+            } else {
+                (base + extra[index]).roundToInt().coerceAtLeast(0)
+            }
+            used += w
+            measurable.measure(Constraints.fixed(w, height))
+        }
+        layout(total, height) {
+            var x = 0
+            placeables.forEachIndexed { index, placeable ->
+                placeable.place(x, 0)
+                if (index * 2 + 1 < slots.size) {
+                    slots[index * 2] = x.toFloat()
+                    slots[index * 2 + 1] = placeable.width.toFloat()
                 }
+                x += placeable.width
             }
         }
     }
@@ -325,8 +368,9 @@ private fun TabItem(
     room: () -> Int,
     content: () -> Color,
     modifier: Modifier,
-    /** Sea Glass: the tabs not chosen sit back a little further. */
-    dimmed: Boolean = false,
+    /** How strong the tab is when it isn't the chosen one. */
+    restAlpha: Float = 0.66f,
+    enabled: Boolean = true,
     onClick: () -> Unit
 ) {
     val interaction = remember { MutableInteractionSource() }
@@ -340,7 +384,7 @@ private fun TabItem(
     )
     // Read here, so a fade recomposes the tab, not the bar.
     val ink = content()
-    val tint = if (selected) ink else ink.copy(alpha = if (dimmed) 0.62f else 0.66f)
+    val tint = if (selected) ink else ink.copy(alpha = restAlpha)
 
     val policy = remember(reveal, room) {
         object : MeasurePolicy {
@@ -398,7 +442,7 @@ private fun TabItem(
                 scaleY = squash
             }
             .clip(RoundedCornerShape(percent = 50))
-            .clickable(interactionSource = interaction, indication = null, onClick = onClick),
+            .clickable(enabled = enabled, interactionSource = interaction, indication = null, onClick = onClick),
         measurePolicy = policy
     )
 }

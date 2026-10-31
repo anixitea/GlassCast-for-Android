@@ -11,6 +11,8 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -261,15 +263,46 @@ class FeedStore(context: Context) {
         }
     }
 
-    suspend fun refreshAll() = withContext(Dispatchers.IO) {
-        _refreshing.value = true
+    @Volatile
+    private var lastRefreshAt = 0L
+
+    /**
+     * Refreshes the library if it hasn't been in the last [maxAgeMs]. Called
+     * as the app comes to the front (2.0): until then nothing checked for new
+     * episodes on opening, so they waited for a pull to refresh or the
+     * background check, which only runs for notifications and auto-download.
+     */
+    suspend fun refreshIfStale(maxAgeMs: Long = 15 * 60_000L) {
+        awaitLoaded()
+        if (_refreshing.value || System.currentTimeMillis() - lastRefreshAt < maxAgeMs) return
+        // Quietly: no spinner over the library every time the app opens.
+        refreshAll(quiet = true)
+    }
+
+    /*
+     * Every show at once, six at a time. This went one show after another,
+     * so a library of twenty waited out twenty round trips in a row, and a
+     * slow server held up everything behind it. Each show's new episodes
+     * appear as soon as its own feed is in; the spinner stops when the last
+     * one is. Six keeps a big library from opening dozens of connections.
+     */
+    suspend fun refreshAll(quiet: Boolean = false) = withContext(Dispatchers.IO) {
+        if (!quiet) _refreshing.value = true
+        lastRefreshAt = System.currentTimeMillis()
         try {
-            _feeds.value.forEach { feed ->
-                val result = RssParser.fetch(feed.url, feed.etag, feed.lastModified) ?: return@forEach
-                if (!result.notModified) merge(feed.url, result)
+            val gate = kotlinx.coroutines.sync.Semaphore(REFRESH_AT_ONCE)
+            kotlinx.coroutines.coroutineScope {
+                _feeds.value.forEach { feed ->
+                    launch {
+                        val result = gate.withPermit {
+                            RssParser.fetch(feed.url, feed.etag, feed.lastModified)
+                        } ?: return@launch
+                        if (!result.notModified) merge(feed.url, result)
+                    }
+                }
             }
         } finally {
-            _refreshing.value = false
+            if (!quiet) _refreshing.value = false
             onRefreshed?.invoke()
         }
     }
@@ -289,25 +322,34 @@ class FeedStore(context: Context) {
         }
     }
 
-    /** New episodes get added; existing ones keep their position and played state. */
+    /**
+     * New episodes get added; existing ones keep their position and played
+     * state. Several shows' feeds can arrive at once now (refreshAll), so
+     * each change is made with update {}, which retries if another got in
+     * first, rather than a read and a write that could lose one of them.
+     */
     private fun merge(feedUrl: String, result: FeedFetch) {
-        val existing = _episodes.value[feedUrl].orEmpty().associateBy { it.guid }
-        val merged = result.episodes.map { fresh ->
-            val old = existing[fresh.guid]
-            if (old == null) fresh
-            else fresh.copy(
-                positionMs = old.positionMs,
-                played = old.played,
-                // Trust a reconciled duration over the feed's claim (lesson 4).
-                durationMs = if (old.durationMs > 0) old.durationMs else fresh.durationMs
-            )
+        _episodes.update { all ->
+            val existing = all[feedUrl].orEmpty().associateBy { it.guid }
+            val merged = result.episodes.map { fresh ->
+                val old = existing[fresh.guid]
+                if (old == null) fresh
+                else fresh.copy(
+                    positionMs = old.positionMs,
+                    played = old.played,
+                    // Trust a reconciled duration over the feed's claim (lesson 4).
+                    durationMs = if (old.durationMs > 0) old.durationMs else fresh.durationMs
+                )
+            }
+            all + (feedUrl to merged)
         }
-        _episodes.value = _episodes.value + (feedUrl to merged)
-        _feeds.value = _feeds.value.map {
-            if (it.url == feedUrl) {
-                result.feed.copy(addedAt = it.addedAt, lastPlayedAt = it.lastPlayedAt)
-            } else {
-                it
+        _feeds.update { list ->
+            list.map {
+                if (it.url == feedUrl) {
+                    result.feed.copy(addedAt = it.addedAt, lastPlayedAt = it.lastPlayedAt)
+                } else {
+                    it
+                }
             }
         }
         markFeedsDirty()
@@ -356,10 +398,12 @@ class FeedStore(context: Context) {
     }
 
     fun updateEpisode(updated: Episode) {
-        val list = _episodes.value[updated.feedUrl] ?: return
-        _episodes.value = _episodes.value + (updated.feedUrl to list.map {
-            if (it.guid == updated.guid) updated else it
-        })
+        if (_episodes.value[updated.feedUrl] == null) return
+        // update {}, as merge does: a refresh may be landing at the same moment.
+        _episodes.update { all ->
+            val list = all[updated.feedUrl] ?: return@update all
+            all + (updated.feedUrl to list.map { if (it.guid == updated.guid) updated else it })
+        }
         // Only this show's file — a position save used to rewrite the library.
         markEpisodesDirty(updated.feedUrl)
     }
@@ -467,6 +511,8 @@ class FeedStore(context: Context) {
     }
 
     private companion object {
+        /** Feeds fetched at once in a refresh. */
+        const val REFRESH_AT_ONCE = 6
         const val KEY_FEEDS = "feeds"
         const val KEY_EPISODES = "episodes"
     }

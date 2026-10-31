@@ -84,6 +84,7 @@ internal fun ArtworkColors.forSea(tokens: SeaTokens): ArtworkColors {
 /** A panel's color (the side panel, the menus, the rail): the cover's dark chrome, or in Sea Glass a card of the tide tinted with its glass. */
 @Composable
 internal fun tvPanelColor(colors: ArtworkColors): Color {
+    if (com.glasscast.app.ui.liquid.LocalLiquid.current != null) return remember(colors) { tvGlassPanelColor(colors.meshAccent) }
     val tokens = LocalSea.current ?: return colors.chromeSurface
     return remember(colors, tokens) { lerp(tokens.card, seaPigment(colors.meshAccent, dark = true).body, 0.24f) }
 }
@@ -110,7 +111,8 @@ internal fun glassSeed(of: String): Int = (of.hashCode() and 0x7FFF) + 1
  */
 @Composable
 internal fun TvGlass(
-    tokens: SeaTokens,
+    /** Sea Glass's tokens; null in the Glass look, which draws its own glass (TvClear.kt). */
+    tokens: SeaTokens?,
     accent: Color,
     modifier: Modifier = Modifier,
     filled: Boolean = false,
@@ -129,6 +131,14 @@ internal fun TvGlass(
     onClick: () -> Unit,
     content: @Composable BoxScope.(ink: Color) -> Unit
 ) {
+    if (tokens == null) {
+        TvClearControl(
+            accent = accent, modifier = modifier, filled = filled, rest = rest, bare = bare,
+            focusLights = focusLights, corner = corner, grow = grow, enabled = enabled,
+            focusRequester = focusRequester, onLongClick = onLongClick, onClick = onClick, content = content
+        )
+        return
+    }
     val lit = remember(accent) { seaPigment(accent, dark = true) }
     val clear = remember(tokens, lit) { tokens.clearGlass(lit) }
     val interaction = remember { MutableInteractionSource() }
@@ -200,5 +210,83 @@ internal object SeaBubbleShape : Shape {
         val path = Path()
         seaBubbleOutline(path, size.width, size.height, density.density, e = 1f, cornerDp = 0f, turn = 0f)
         return Outline.Generic(path)
+    }
+}
+
+/**
+ * [TvGlass] in the Glass look: the same states (lit when chosen or focused,
+ * [rest] part lit, [bare] nothing until focused, [focusLights] off where lit
+ * already means chosen), drawn as the TV's glass (see TvClear.kt) in a
+ * capsule ([corner] 1) or a rounded square.
+ */
+@Composable
+private fun TvClearControl(
+    accent: Color,
+    modifier: Modifier,
+    filled: Boolean,
+    rest: Float,
+    bare: Boolean,
+    focusLights: Boolean,
+    corner: Float,
+    grow: Float,
+    enabled: Boolean,
+    focusRequester: FocusRequester?,
+    onLongClick: (() -> Unit)?,
+    onClick: () -> Unit,
+    content: @Composable BoxScope.(ink: Color) -> Unit
+) {
+    val interaction = remember { MutableInteractionSource() }
+    val focused by interaction.collectIsFocusedAsState()
+    val pressed by interaction.collectIsPressedAsState()
+    val focus = animateFloatAsState(if (focused) 1f else 0f, tween(170), label = "clearFocus")
+    val squash = animateFloatAsState(
+        if (pressed) 0.94f else 1f,
+        spring(dampingRatio = 0.8f, stiffness = 700f),
+        label = "clearSquash"
+    )
+    val glow = animateFloatAsState(
+        when {
+            pressed -> 1f
+            focused && (filled || !focusLights) -> 0.6f
+            else -> 0f
+        },
+        tween(if (pressed) 90 else 240),
+        label = "clearGlow"
+    )
+    val ink = remember(accent) { inkOn(accent) }
+    val amountOf = {
+        when {
+            filled -> 1f
+            focusLights -> rest + (1f - rest) * focus.value
+            else -> rest
+        }
+    }
+    val shape = androidx.compose.foundation.shape.RoundedCornerShape(percent = (50f * corner.coerceIn(0f, 1f)).toInt())
+    // The ink is chosen in composition only when lit-ness changes enough to
+    // flip it, not every frame of the focus animation.
+    val lit by remember(filled, focusLights, rest) { androidx.compose.runtime.derivedStateOf { amountOf() > 0.5f } }
+    Box(
+        modifier
+            .graphicsLayer {
+                val s = (1f + (grow - 1f) * focus.value) * squash.value
+                scaleX = s
+                scaleY = s
+                alpha = if (enabled) 1f else 0.4f
+            }
+            .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
+            .then(if (onLongClick != null && enabled) Modifier.holdSelect(onClick, onLongClick) else Modifier)
+            .tvClearGlass(
+                shape = shape,
+                accent = accent,
+                amount = amountOf,
+                glow = { glow.value },
+                lift = { focus.value },
+                visible = { if (filled || !bare) 1f else focus.value }
+            )
+            .focusable(enabled = enabled, interactionSource = interaction)
+            .clickable(enabled = enabled, interactionSource = interaction, indication = null, onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        content(if (lit) ink else Color.White)
     }
 }

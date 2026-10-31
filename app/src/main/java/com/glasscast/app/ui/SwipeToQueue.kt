@@ -27,6 +27,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material3.MaterialTheme
 
@@ -61,42 +62,47 @@ fun SwipeToQueue(
     val haptics = rememberHaptics()
     val latestAdd by rememberUpdatedState(onAddToQueue)
     val latestToggle by rememberUpdatedState(onTogglePlayed)
+    val pull = rememberDeliberatePull()
 
     val state = rememberSwipeToDismissBoxState(
         confirmValueChange = { value ->
-            when (value) {
-                SwipeToDismissBoxValue.EndToStart -> {
-                    haptics.play(Haptic.ToggleOn)
-                    latestAdd()
+            // Only a real pull counts, not a flick or a scroll that drifted
+            // sideways (see rememberDeliberatePull).
+            if (pull.far()) {
+                when (value) {
+                    SwipeToDismissBoxValue.EndToStart -> {
+                        haptics.play(Haptic.ToggleOn)
+                        latestAdd()
+                    }
+                    SwipeToDismissBoxValue.StartToEnd -> {
+                        haptics.play(Haptic.ToggleOn)
+                        latestToggle?.invoke()
+                    }
+                    else -> Unit
                 }
-                SwipeToDismissBoxValue.StartToEnd -> {
-                    haptics.play(Haptic.ToggleOn)
-                    latestToggle?.invoke()
-                }
-                else -> Unit
             }
             false
         },
-        // A quarter of the row: this is a flick, not a dismissal.
-        positionalThreshold = { distance -> distance * 0.25f }
+        positionalThreshold = { distance -> distance * DeliberatePull }
     )
+    pull.state = state
 
     SwipeToDismissBox(
         state = state,
-        modifier = modifier,
+        modifier = modifier.onSizeChanged { pull.width = it.width.toFloat() },
         enableDismissFromStartToEnd = enabled && onTogglePlayed != null,
         enableDismissFromEndToStart = enabled,
         backgroundContent = {
             when (state.dismissDirection) {
                 SwipeToDismissBoxValue.EndToStart -> RevealTile(
-                    state = state,
+                    pull = pull,
                     alignment = Alignment.CenterEnd,
                     accent = accent,
                     icon = Icons.AutoMirrored.Filled.PlaylistAdd,
                     description = tr("Add to Up Next")
                 )
                 SwipeToDismissBoxValue.StartToEnd -> RevealTile(
-                    state = state,
+                    pull = pull,
                     alignment = Alignment.CenterStart,
                     accent = accent,
                     icon = if (played) Icons.Filled.RemoveDone else Icons.Filled.Done,
@@ -111,7 +117,7 @@ fun SwipeToQueue(
 
 /**
  * Swipe left to delete — the Downloads list's version of swipe-to-queue: the
- * same quarter-row flick, the same tile growing in from the edge, in the
+ * same deliberate pull, the same tile growing in from the edge, in the
  * error color with a bin. The row snaps back and is then removed.
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -124,25 +130,27 @@ fun SwipeToDelete(
 ) {
     val haptics = rememberHaptics()
     val latestDelete by rememberUpdatedState(onDelete)
+    val pull = rememberDeliberatePull()
     val state = rememberSwipeToDismissBoxState(
         confirmValueChange = { value ->
-            if (value == SwipeToDismissBoxValue.EndToStart) {
+            if (value == SwipeToDismissBoxValue.EndToStart && pull.far()) {
                 haptics.play(Haptic.ToggleOn)
                 latestDelete()
             }
             false
         },
-        positionalThreshold = { distance -> distance * 0.25f }
+        positionalThreshold = { distance -> distance * DeliberatePull }
     )
+    pull.state = state
     SwipeToDismissBox(
         state = state,
-        modifier = modifier,
+        modifier = modifier.onSizeChanged { pull.width = it.width.toFloat() },
         enableDismissFromStartToEnd = false,
         enableDismissFromEndToStart = enabled,
         backgroundContent = {
             if (state.dismissDirection == SwipeToDismissBoxValue.EndToStart) {
                 RevealTile(
-                    state = state,
+                    pull = pull,
                     alignment = Alignment.CenterEnd,
                     accent = MaterialTheme.colorScheme.error,
                     icon = Icons.Outlined.DeleteOutline,
@@ -154,10 +162,46 @@ fun SwipeToDelete(
     )
 }
 
+/**
+ * How far a row has to be pulled before a swipe does anything: 40% of its
+ * width. It was a quarter, and the box also takes a fast flick as a swipe at
+ * any distance, so scrolling a list with a little sideways drift queued
+ * episodes and marked them played (2.0, from Jonathan's testing). Now the
+ * row has to have actually traveled that far when it's let go, flick or not.
+ */
+private const val DeliberatePull = 0.40f
+
 @OptIn(ExperimentalMaterial3Api::class)
+private class DeliberatePullState {
+    var width = 0f
+    var state: SwipeToDismissBoxState? = null
+    fun far(): Boolean = reach() >= 1f
+
+    /**
+     * How far the row is out, 0 at rest to 1 at the pull that counts, from
+     * where it actually is. Read in a graphics layer, so the tile follows the
+     * row back in and is gone with it (see RevealTile).
+     */
+    fun reach(): Float {
+        val offset = runCatching { state?.requireOffset() ?: 0f }.getOrDefault(0f)
+        if (width <= 0f) return 0f
+        return (kotlin.math.abs(offset) / (width * DeliberatePull)).coerceIn(0f, 1f)
+    }
+}
+
+@Composable
+private fun rememberDeliberatePull() = androidx.compose.runtime.remember { DeliberatePullState() }
+
+/**
+ * The tile behind a swiped row. It grows and fades with how far the row is
+ * out, not with the swipe's progress: once a swipe is let go the box's
+ * progress jumps to complete, so the tile used to sit there full size while
+ * the row sprang back, and through the frosted cards of the glass look it
+ * stayed visible until the spring had fully settled (2.0).
+ */
 @Composable
 private fun RevealTile(
-    state: SwipeToDismissBoxState,
+    pull: DeliberatePullState,
     alignment: Alignment,
     accent: Color,
     icon: ImageVector,
@@ -169,10 +213,13 @@ private fun RevealTile(
                 .fillMaxHeight()
                 .width(84.dp)
                 .graphicsLayer {
-                    // Grows toward full size as the drag nears the threshold.
-                    val grow = 0.55f + 0.45f * (state.progress * 4f).coerceIn(0f, 1f)
+                    // Grows toward full size as the row nears the pull that
+                    // counts, and fades out as it comes back.
+                    val reach = pull.reach()
+                    val grow = 0.55f + 0.45f * reach
                     scaleX = grow
                     scaleY = grow
+                    alpha = (reach * 2.5f).coerceIn(0f, 1f)
                 }
                 .clip(RoundedCornerShape(22.dp))
                 .background(accent.copy(alpha = 0.30f)),

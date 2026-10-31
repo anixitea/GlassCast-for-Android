@@ -42,11 +42,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Tune
-import androidx.compose.material.icons.outlined.GridView
-import androidx.compose.material.icons.outlined.Explore
-import androidx.compose.material.icons.outlined.Inbox
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -97,11 +92,11 @@ private enum class TvTab(val label: String, val icon: ImageVector) {
      * same place, is the whole interaction.
      */
     PLAYING(tr("Playing"), Icons.Filled.PlayArrow),
-    LIBRARY(tr("Library"), Icons.Outlined.GridView),
-    LATEST(tr("Latest"), Icons.Outlined.Inbox),
-    DISCOVER(tr("Discover"), Icons.Outlined.Explore),
-    SEARCH(tr("Search"), Icons.Filled.Search),
-    SETTINGS(tr("Settings"), Icons.Filled.Tune)
+    LIBRARY(tr("Library"), com.glasscast.app.ui.liquid.LiquidIcons.Library),
+    LATEST(tr("Latest"), com.glasscast.app.ui.liquid.LiquidIcons.Latest),
+    DISCOVER(tr("Discover"), com.glasscast.app.ui.liquid.LiquidIcons.Discover),
+    SEARCH(tr("Search"), com.glasscast.app.ui.liquid.LiquidIcons.Search),
+    SETTINGS(tr("Settings"), com.glasscast.app.ui.liquid.LiquidIcons.Settings)
 }
 
 /**
@@ -258,8 +253,9 @@ fun TvRoot(
     val ground = remember(colors) { artworkGround(colors) }
     // The rail is the phone tab bar's counterpart: a floating panel in the
     // cover's hue, a step darker than the page.
+    val glassLook = tvLiquid()
     val railSurface by animateColorAsState(
-        if (seaTokens != null) tvPanelColor(colors) else colors.chromeBar,
+        if (seaTokens != null || glassLook) tvPanelColor(colors) else colors.chromeBar,
         tween(600),
         label = "railSurface"
     )
@@ -492,8 +488,14 @@ fun TvRoot(
                     .align(Alignment.CenterStart)
                     .padding(start = 16.dp)
                     .width(railWidth - 24.dp)
-                    .clip(RoundedCornerShape(32.dp))
-                    .background(railSurface.copy(alpha = 0.96f))
+                    // Glass: a pane of glass the cover shows through.
+                    .then(
+                        if (glassLook) {
+                            Modifier.tvGlassPane(RoundedCornerShape(32.dp), railSurface.copy(alpha = 0.88f)).clip(RoundedCornerShape(32.dp))
+                        } else {
+                            Modifier.clip(RoundedCornerShape(32.dp)).background(railSurface.copy(alpha = 0.96f))
+                        }
+                    )
                     .focusGroup()
                     .onFocusChanged { railFocused = it.hasFocus }
                     // Right always leads back to the page. requestFocus() doesn't
@@ -717,7 +719,7 @@ private fun TvRailItem(
     // Sea Glass: the current tab is a piece of the cover's glass; focus
     // brings up clear glass, so the two never look alike.
     val tokens = com.glasscast.app.ui.seaglass.LocalSea.current
-    if (tokens != null) {
+    if (tokens != null || tvLiquid()) {
         TvGlass(
             tokens = tokens,
             accent = accent,
@@ -845,6 +847,8 @@ private fun TvRailNowPlaying(
         // Sea Glass: the phone's pebble bubble, held still, the line tracing
         // the pebble's edge.
         val sea = com.glasscast.app.ui.seaglass.LocalSea.current != null
+        // Glass: the phone's Glass bubble, a circle with the time round it.
+        val round = tvLiquid()
         Box(
             Modifier
                 .size(48.dp)
@@ -857,6 +861,14 @@ private fun TvRailNowPlaying(
                                 e = 1f, cornerDp = 0f, turn = 0f
                             )
                             it.translate(androidx.compose.ui.geometry.Offset(strokePx / 2f, strokePx / 2f))
+                        }
+                    } else if (round) {
+                        Path().also {
+                            it.addOval(
+                                androidx.compose.ui.geometry.Rect(
+                                    strokePx / 2f, strokePx / 2f, size.width - strokePx / 2f, size.height - strokePx / 2f
+                                )
+                            )
                         }
                     } else {
                         cookiePath(size.width, size.height, inset = strokePx / 2f)
@@ -882,7 +894,7 @@ private fun TvRailNowPlaying(
                 Modifier
                     .padding(6.dp)
                     .fillMaxSize()
-                    .clip(if (sea) SeaBubbleShape else CookieShape())
+                    .clip(if (sea) SeaBubbleShape else if (round) CircleShape else CookieShape())
             ) {
                 Artwork(url = artworkUrl, sizeDp = 48.dp, corner = 0.dp, fill = true)
             }

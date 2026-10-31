@@ -116,9 +116,7 @@ fun TvToastHost(state: TvToastState, accent: Color, modifier: Modifier = Modifie
             Row(
                 Modifier
                     .padding(bottom = TvSpacing.overscanV + 12.dp)
-                    .clip(RoundedCornerShape(30.dp))
-                    .background(Color(0xF01C1A22))
-                    .border(1.dp, Color.White.copy(alpha = 0.10f), RoundedCornerShape(30.dp))
+                    .tvPanel(RoundedCornerShape(30.dp), Color(0xF01C1A22))
                     .padding(start = 10.dp, end = 26.dp, top = 10.dp, bottom = 10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -343,7 +341,7 @@ fun TvConfirmDialog(
 @Composable
 internal fun TvDialogButton(label: String, accent: Color, filled: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
     val tokens = com.glasscast.app.ui.seaglass.LocalSea.current
-    if (tokens != null) {
+    if (tokens != null || tvLiquid()) {
         TvGlass(
             tokens = tokens,
             accent = accent,

@@ -144,6 +144,8 @@ internal fun TvSignInOverlay(colors: ArtworkColors, onDone: () -> Unit, onDismis
     val account = (context.applicationContext as GlassCastApp).account
     var code by remember { mutableStateOf<TvSignIn.DeviceCode?>(null) }
     var status by remember { mutableStateOf<String?>(null) }
+    // Google's own words for a failure, small under the message (see TvSignIn.lastError).
+    var detail by remember { mutableStateOf<String?>(null) }
     var expired by remember { mutableStateOf(false) }
     var attempt by remember { mutableIntStateOf(0) }
     var granted by remember { mutableStateOf(false) }
@@ -155,9 +157,11 @@ internal fun TvSignInOverlay(colors: ArtworkColors, onDone: () -> Unit, onDismis
         code = null
         expired = false
         status = null
+        detail = null
         val device = account.tv.start()
         if (device == null) {
             status = tr("Couldn't sign in with Google")
+            detail = account.tv.lastError
             expired = true
             return@LaunchedEffect
         }
@@ -186,6 +190,7 @@ internal fun TvSignInOverlay(colors: ArtworkColors, onDone: () -> Unit, onDismis
                 is TvSignIn.Poll.Failed -> {
                     android.util.Log.w("GlassCast", "TV sign-in: ${result.message}")
                     status = tr("Couldn't sign in with Google")
+                    detail = result.message
                     expired = true
                     return@LaunchedEffect
                 }
@@ -266,6 +271,15 @@ internal fun TvSignInOverlay(colors: ArtworkColors, onDone: () -> Unit, onDismis
                 status?.let {
                     Spacer(Modifier.height(14.dp))
                     Text(it, style = MaterialTheme.typography.bodyMedium, color = Color.White.copy(alpha = 0.75f))
+                }
+                detail?.let {
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        it,
+                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                        color = Color.White.copy(alpha = 0.5f),
+                        maxLines = 3
+                    )
                 }
                 Spacer(Modifier.height(26.dp))
                 val accent = colors.chromeButton

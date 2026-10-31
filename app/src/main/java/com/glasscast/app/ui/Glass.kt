@@ -110,7 +110,11 @@ fun TopGlassFade(
     // the strip would blur the page's own still header, which reads the same
     // unblurred — so it costs nothing until you scroll.
     if (!active) return
-    val sea = com.glasscast.app.ui.seaglass.LocalSea.current != null
+    // Sea Glass and Liquid Glass: the page also fades back into its ground
+    // under the status bar, so titles scrolling up don't run crisp under the
+    // clock (and Liquid Glass's bar title, which has no pill, stays readable).
+    val sea = com.glasscast.app.ui.seaglass.LocalSea.current != null ||
+        com.glasscast.app.ui.liquid.LocalLiquid.current != null
     Box(
         modifier
             .fillMaxWidth()
@@ -130,14 +134,17 @@ fun TopGlassFade(
         // Sea Glass: the page fades back into paper under the status bar, so
         // titles scrolling up don't run crisp under the clock.
         if (sea) {
+            // Frosted Glass reaches lower and holds more: its bar title has
+            // no pill, and the page's own type ran under it.
+            val liquid = com.glasscast.app.ui.liquid.LocalLiquid.current != null
             Box(
                 Modifier
                     .fillMaxWidth()
-                    .height(statusInset + 72.dp)
+                    .height(statusInset + if (liquid) 88.dp else 72.dp)
                     .background(
                         Brush.verticalGradient(
-                            0f to pageColor.copy(alpha = 0.96f),
-                            0.5f to pageColor.copy(alpha = 0.82f),
+                            0f to pageColor.copy(alpha = if (liquid) 0.98f else 0.96f),
+                            (if (liquid) 0.62f else 0.5f) to pageColor.copy(alpha = if (liquid) 0.93f else 0.82f),
                             1f to pageColor.copy(alpha = 0f)
                         )
                     )
@@ -195,5 +202,9 @@ data class GlassTab(val label: String, val icon: ImageVector)
 @Composable
 fun glassBottomInset(miniPlayerVisible: Boolean): androidx.compose.ui.unit.Dp {
     val navInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    // Liquid Glass: the capsule and the accessory above it, and the gaps.
+    if (com.glasscast.app.ui.liquid.LocalLiquid.current != null) {
+        return navInset + 8.dp + com.glasscast.app.ui.liquid.liquidChromeHeight(miniPlayerVisible) + 6.dp
+    }
     return navInset + 66.dp + if (miniPlayerVisible) 78.dp else 0.dp
 }

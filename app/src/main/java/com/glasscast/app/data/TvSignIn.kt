@@ -41,8 +41,10 @@ class TvSignIn(context: Context, private val prefs: SharedPreferences) {
         val meta = runCatching {
             context.packageManager.getApplicationInfo(context.packageName, PackageManager.GET_META_DATA).metaData
         }.getOrNull()
-        clientId = meta?.getString(META_CLIENT_ID).orEmpty().trim()
-        clientSecret = meta?.getString(META_CLIENT_SECRET).orEmpty().trim()
+        // Spaces and quotes off, in case they came with the value pasted
+        // into local.properties: Google would say the client doesn't exist.
+        clientId = meta?.getString(META_CLIENT_ID).orEmpty().trim().trim('"', '\'').trim()
+        clientSecret = meta?.getString(META_CLIENT_SECRET).orEmpty().trim().trim('"', '\'').trim()
     }
 
     /** Whether this build has a client to sign in with. */
@@ -50,6 +52,16 @@ class TvSignIn(context: Context, private val prefs: SharedPreferences) {
 
     /** Signed in this way (a refresh token is kept). */
     val signedIn: Boolean get() = prefs.getString(KEY_REFRESH, null) != null
+
+    /**
+     * What Google said the last time a step failed ("invalid_client: …", or
+     * the connection's error), shown small under the TV's message so a
+     * failure can be told apart: a wrong client, a blocked account, no
+     * network. Not translated; it's Google's text.
+     */
+    @Volatile
+    var lastError: String? = null
+        private set
 
     private val tokenLock = Mutex()
     private var accessToken: String? = null
@@ -73,11 +85,16 @@ class TvSignIn(context: Context, private val prefs: SharedPreferences) {
         data class Failed(val message: String) : Poll
     }
 
-    /** Asks Google for a code to show. */
+    /** Asks Google for a code to show. Null on failure, with [lastError] saying why. */
     suspend fun start(): DeviceCode? = withContext(Dispatchers.IO) {
+        lastError = null
+        if (clientSecret.isEmpty()) lastError = "no client secret in this build"
         runCatching {
             val (code, body) = post(DEVICE_CODE_URL, mapOf("client_id" to clientId, "scope" to SCOPE))
-            if (code !in 200..299) return@runCatching null
+            if (code !in 200..299) {
+                lastError = describe(code, body)
+                return@runCatching null
+            }
             val o = JSONObject(body)
             DeviceCode(
                 deviceCode = o.getString("device_code"),
@@ -86,7 +103,18 @@ class TvSignIn(context: Context, private val prefs: SharedPreferences) {
                 expiresAt = System.currentTimeMillis() + o.optLong("expires_in", 1800) * 1000L,
                 intervalMs = o.optLong("interval", 5).coerceAtLeast(1) * 1000L
             )
-        }.getOrNull()
+        }.getOrElse { e ->
+            lastError = e.message ?: e.javaClass.simpleName
+            null
+        }
+    }
+
+    /** Google's error and its description, or the status code. */
+    private fun describe(code: Int, body: String): String {
+        val o = runCatching { JSONObject(body) }.getOrNull()
+        val error = o?.optString("error").orEmpty()
+        val description = o?.optString("error_description").orEmpty()
+        return listOf(error, description).filter { it.isNotBlank() }.joinToString(": ").ifBlank { "HTTP $code" }
     }
 
     /** Asks once whether the person has finished on their phone. */
@@ -118,7 +146,7 @@ class TvSignIn(context: Context, private val prefs: SharedPreferences) {
                     "slow_down" -> Poll.Waiting(intervalMs + 5_000L)
                     "access_denied" -> Poll.Denied
                     "expired_token" -> Poll.Expired
-                    else -> Poll.Failed(o.optString("error_description").ifBlank { o.optString("error").ifBlank { "HTTP $code" } })
+                    else -> Poll.Failed(describe(code, body).also { lastError = it })
                 }
             }
         }.getOrElse { Poll.Waiting(intervalMs) }

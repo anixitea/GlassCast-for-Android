@@ -359,7 +359,9 @@ class GoogleAccount(private val app: GlassCastApp) {
                     error = when (e) {
                         is NeedsSignIn -> null
                         is AuthFailed -> e.message
-                        else -> tr("Couldn't sync")
+                        // With what went wrong ("Drive 403", "Token 400"),
+                        // so a failure on the TV can be told apart.
+                        else -> tr("Couldn't sync") + (e?.message?.takeIf { it.isNotBlank() }?.let { " ($it)" } ?: "")
                     }
                 )
             }

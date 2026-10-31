@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android Auto: a tab or browse-action icon (white; the car tints it). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M6.6,8.6H17.4C19.28,8.6 20.8,10.12 20.8,12V17.8C20.8,19.68 19.28,21.2 17.4,21.2H6.6C4.72,21.2 3.2,19.68 3.2,17.8V12C3.2,10.12 4.72,8.6 6.6,8.6Z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M5.6,6.45L18.4,6.45A0.85,0.85 0 0 0 18.4,4.75L5.6,4.75A0.85,0.85 0 0 0 5.6,6.45Z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M8.4,3.55L15.6,3.55A0.85,0.85 0 0 0 15.6,1.85L8.4,1.85A0.85,0.85 0 0 0 8.4,3.55Z" />
+</vector>

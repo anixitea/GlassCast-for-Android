@@ -20,8 +20,8 @@ import androidx.compose.material.icons.filled.Done
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.material.icons.outlined.Explore
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideInHorizontally
@@ -52,19 +52,16 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.outlined.GridView
-import androidx.compose.material.icons.outlined.Inbox
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -84,6 +81,7 @@ import com.glasscast.app.data.ShowSort
 import com.glasscast.app.player.PlayerConnection
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeSource
+import com.glasscast.app.ui.liquid.liquidBackdrop
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.first
 import androidx.lifecycle.repeatOnLifecycle
@@ -369,6 +367,13 @@ fun GlassCastRoot(
         label = "chromeCollapse"
     )
     var barBounds by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
+    // Frosted Glass: on the same scroll the mini player becomes a bubble
+    // beside the bar, which narrows for it (only while something's playing).
+    val liquidMinimize = animateFloatAsState(
+        targetValue = if (chromeCollapsed && currentEpisode != null) 1f else 0f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 380f),
+        label = "liquidMinimize"
+    )
 
     var actionEpisode by remember { mutableStateOf<Episode?>(null) }
 
@@ -380,11 +385,17 @@ fun GlassCastRoot(
     var previewingUrl by remember { mutableStateOf<String?>(null) }
     var searchAutoFocus by remember { mutableStateOf(false) }
     var librarySearchOpen by remember { mutableStateOf(false) }
+    var historyOpen by remember { mutableStateOf(false) }
+    val history by glassCastApp.history.entries.collectAsStateWithLifecycle()
     var opmlOpen by remember { mutableStateOf(false) }
 
     // Everything the glass samples from. Only the scrolling page is tagged —
     // tagging the chrome too would have the panels blurring each other.
     val hazeState = remember { HazeState() }
+    // Liquid Glass: the page, recorded for the chrome's glass to refract.
+    val liquidLook = com.glasscast.app.ui.liquid.LocalLiquid.current
+    val liquidBackdrop = remember { com.glasscast.app.ui.liquid.LiquidBackdrop() }
+    liquidBackdrop.ground = MaterialTheme.colorScheme.background
     var addingUrl by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
 
@@ -411,6 +422,14 @@ fun GlassCastRoot(
         animationSpec = tween(450),
         label = "chromeMix"
     )
+    // Read as a yes or no, so the crossfade above doesn't recompose the app.
+    val liquidPageDark by remember { derivedStateOf { chromeMix.value > 0.5f } }
+
+    // Library's Continue listening: part way through, not the one playing.
+    val playingGuidNow = currentEpisode?.guid
+    val continueListening = remember(episodeMap, feeds, playingGuidNow) {
+        feedStore.inProgress(13).filter { it.guid != playingGuidNow }.take(12)
+    }
 
     val orderedFeeds = remember(feeds, episodeMap, showSort) {
         when (showSort) {
@@ -436,7 +455,19 @@ fun GlassCastRoot(
         )
     }
 
-    // Also provided above the theme in MainActivity, for show-colors mode.
+    // A tab tapped, from either look's bar. Re-tapping Library leaves a show;
+    // re-tapping Discover or Search leaves a show opened from it.
+    fun selectTab(target: Tab) {
+        when (target) {
+            Tab.LIBRARY -> if (tab == Tab.LIBRARY) selectedFeedUrl = null
+            Tab.DISCOVER -> if (tab == Tab.DISCOVER && previewTab == Tab.DISCOVER) preview = null
+            Tab.SEARCH -> if (tab == Tab.SEARCH && previewTab == Tab.SEARCH) preview = null
+            else -> Unit
+        }
+        tab = target
+    }
+
+    // Also provided above the theme in GlassCastActivity, for show-colors mode.
     // Providing it again here keeps this composable usable on its own.
     CompositionLocalProvider(LocalImageStore provides imageStore, LocalToast provides toast) {
         Box(Modifier.fillMaxSize()) {
@@ -456,6 +487,7 @@ fun GlassCastRoot(
                                 .fillMaxSize()
                                 .nestedScroll(collapseOnScroll)
                                 .hazeSource(hazeState)
+                                .liquidBackdrop(if (liquidLook != null) liquidBackdrop else null)
                         ) {
                         val dest: Dest = when {
                             tab == Tab.LIBRARY && selectedFeed != null -> Dest.Show(selectedFeed.url)
@@ -559,7 +591,15 @@ fun GlassCastRoot(
                                 bottomInset = bottomInset,
                                 onOpenFeed = { selectedFeedUrl = it.url },
                                 onSearch = { librarySearchOpen = true },
-                                hazeState = hazeState
+                                hazeState = hazeState,
+                                continueListening = continueListening,
+                                feedFor = { feedStore.feedFor(it) },
+                                onResume = { episode ->
+                                    player.play(episode, feedStore.feedFor(episode))
+                                    playerOpen = true
+                                },
+                                onEpisodeActions = { actionEpisode = it },
+                                onOpenHistory = { historyOpen = true }
                             )
 
                             Dest.Latest -> LatestScreen(
@@ -724,6 +764,51 @@ fun GlassCastRoot(
                         // frosted page above the bar with nothing in front of it.
                         val navInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
                         val miniVisible = currentEpisode != null && !playerOpen
+                        if (liquidLook != null) {
+                            // Adaptive tab bar, in Liquid Glass: the glass takes
+                            // the page under it (a show's dark cover color turns
+                            // it dark) rather than the app's light or dark.
+                            val liquidBarDark = if (adaptiveTabBar) liquidPageDark else liquidLook.dark
+                            LiquidChromeHost(
+                                hazeState = hazeState,
+                                backdrop = liquidBackdrop,
+                                navInset = navInset,
+                                hasAccessory = currentEpisode != null,
+                                minimize = liquidMinimize,
+                                minimized = chromeCollapsed && currentEpisode != null,
+                                dark = liquidBarDark,
+                                tab = tab,
+                                onSelect = { selectTab(it) },
+                                accessory = {
+                                    currentEpisode?.let { episode ->
+                                        AnimatedVisibility(
+                                            visible = !playerOpen,
+                                            enter = fadeIn(tween(180)),
+                                            exit = fadeOut(tween(140))
+                                        ) {
+                                            CompositionLocalProvider(LocalPlayerScope provides this) {
+                                                WithPosition(player) { positionMs ->
+                                                    com.glasscast.app.ui.liquid.LiquidAccessory(
+                                                        episode = episode,
+                                                        feed = currentFeed,
+                                                        isPlaying = isPlaying,
+                                                        positionMs = positionMs,
+                                                        durationMs = durationMs,
+                                                        skipSeconds = skipSeconds,
+                                                        minimize = liquidMinimize,
+                                                        dark = liquidBarDark,
+                                                        onPlayPause = player::togglePlayPause,
+                                                        onSkipForward = { player.seekBy(skipSeconds * 1_000L) },
+                                                        onOpen = { playerOpen = true }
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                },
+                                modifier = Modifier.align(Alignment.BottomCenter)
+                            )
+                        } else {
                         BottomGlassFade(
                             hazeState = hazeState,
                             pageColor = MaterialTheme.colorScheme.background,
@@ -808,13 +893,14 @@ fun GlassCastRoot(
                                             barBounds = bounds
                                         }
                                     },
+                                // The 2.0 glyphs, in every look (see LiquidIcons).
                                 tabs = listOf(
-                                    GlassTab(tr("Library"), Icons.Outlined.GridView),
-                                    GlassTab(tr("Latest"), Icons.Outlined.Inbox),
-                                    GlassTab(tr("Downloads"), Icons.Outlined.DownloadForOffline),
-                                    GlassTab(tr("Discover"), Icons.Outlined.Explore),
-                                    GlassTab(tr("Search"), Icons.Filled.Search),
-                                    GlassTab(tr("Settings"), Icons.Outlined.Settings)
+                                    GlassTab(tr("Library"), com.glasscast.app.ui.liquid.LiquidIcons.Library),
+                                    GlassTab(tr("Latest"), com.glasscast.app.ui.liquid.LiquidIcons.Latest),
+                                    GlassTab(tr("Downloads"), com.glasscast.app.ui.liquid.LiquidIcons.Downloads),
+                                    GlassTab(tr("Discover"), com.glasscast.app.ui.liquid.LiquidIcons.Discover),
+                                    GlassTab(tr("Search"), com.glasscast.app.ui.liquid.LiquidIcons.Search),
+                                    GlassTab(tr("Settings"), com.glasscast.app.ui.liquid.LiquidIcons.Settings)
                                 ),
                                 selectedIndex = tab.ordinal,
                                 // Dark, as Cider's. With Adaptive tab bar on
@@ -829,27 +915,7 @@ fun GlassCastRoot(
                                     else BarContentLight
                                 },
                                 hazeState = hazeState,
-                                onTabSelected = { index ->
-                                    when (index) {
-                                        0 -> {
-                                            if (tab == Tab.LIBRARY) selectedFeedUrl = null
-                                            tab = Tab.LIBRARY
-                                        }
-                                        1 -> tab = Tab.LATEST
-                                        2 -> tab = Tab.DOWNLOADS
-                                        3 -> {
-                                            // Re-tapping Discover while in a show
-                                            // it opened goes back to the shelves.
-                                            if (tab == Tab.DISCOVER && previewTab == Tab.DISCOVER) preview = null
-                                            tab = Tab.DISCOVER
-                                        }
-                                        4 -> {
-                                            if (tab == Tab.SEARCH && previewTab == Tab.SEARCH) preview = null
-                                            tab = Tab.SEARCH
-                                        }
-                                        else -> tab = Tab.SETTINGS
-                                    }
-                                }
+                                onTabSelected = { index -> selectTab(Tab.entries[index]) }
                             )
 
                                 // The room the bar gives up for the bubble: its width
@@ -888,11 +954,13 @@ fun GlassCastRoot(
                                 }
                             }
                         }
+                        }
 
                         // At the top, clear of the mini player: a confirmation
                         // about the queue shouldn't cover the thing it's about.
                         ToastHost(
                             state = toast,
+                            backdrop = if (liquidLook != null) liquidBackdrop else null,
                             modifier = Modifier
                                 .align(Alignment.TopCenter)
                                 .statusBarsPadding()
@@ -1022,6 +1090,20 @@ fun GlassCastRoot(
             )
         }
 
+        if (historyOpen) {
+            HistorySheet(
+                entries = history,
+                episodeMap = episodeMap,
+                feeds = feeds,
+                onPlay = { episode ->
+                    player.play(episode, feedStore.feedFor(episode))
+                    playerOpen = true
+                },
+                onClear = { glassCastApp.history.clear() },
+                onDismiss = { historyOpen = false }
+            )
+        }
+
         if (librarySearchOpen) {
             LibrarySearchSheet(
                 feeds = feeds,
@@ -1082,4 +1164,76 @@ private fun WithPosition(
 ) {
     val position by player.positionMs.collectAsStateWithLifecycle()
     content(position)
+}
+
+/**
+ * Liquid Glass's chrome over the page (see LiquidChrome): the tab capsule
+ * with every tab in it, Search included, and the mini player riding above it,
+ * all glass that refracts the page ([backdrop]). Under them the same
+ * progressive blur as the other looks, reaching as high as the chrome does
+ * as it minimizes, so the page softens on its way under it.
+ */
+@Composable
+private fun LiquidChromeHost(
+    hazeState: HazeState,
+    backdrop: com.glasscast.app.ui.liquid.LiquidBackdrop,
+    navInset: androidx.compose.ui.unit.Dp,
+    hasAccessory: Boolean,
+    minimize: androidx.compose.runtime.State<Float>,
+    minimized: Boolean,
+    dark: Boolean,
+    tab: Tab,
+    onSelect: (Tab) -> Unit,
+    accessory: @Composable () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Box(modifier.fillMaxWidth()) {
+        BottomGlassFade(
+            hazeState = hazeState,
+            pageColor = MaterialTheme.colorScheme.background,
+            height = {
+                val m = minimize.value.coerceIn(0f, 1f)
+                val full = com.glasscast.app.ui.liquid.liquidChromeHeight(hasAccessory)
+                val low = com.glasscast.app.ui.liquid.LiquidChromeMinimizedHeight
+                navInset + 8.dp + full + (low - full) * m + 12.dp
+            },
+            modifier = Modifier.align(Alignment.BottomCenter)
+        )
+        CompositionLocalProvider(com.glasscast.app.ui.liquid.LocalLiquidBackdrop provides backdrop) {
+            Column(
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .widthIn(max = 640.dp)
+                    .fillMaxWidth()
+            ) {
+                // Tab order matches Tab's, so a tab's index is its ordinal.
+                com.glasscast.app.ui.liquid.LiquidChrome(
+                    tabs = listOf(
+                        GlassTab(tr("Library"), com.glasscast.app.ui.liquid.LiquidIcons.Library),
+                        GlassTab(tr("Latest"), com.glasscast.app.ui.liquid.LiquidIcons.Latest),
+                        GlassTab(tr("Downloads"), com.glasscast.app.ui.liquid.LiquidIcons.Downloads),
+                        GlassTab(tr("Discover"), com.glasscast.app.ui.liquid.LiquidIcons.Discover),
+                        GlassTab(tr("Search"), com.glasscast.app.ui.liquid.LiquidIcons.Search),
+                        GlassTab(tr("Settings"), com.glasscast.app.ui.liquid.LiquidIcons.Settings)
+                    ),
+                    selected = tab.ordinal,
+                    onSelect = { onSelect(Tab.entries[it]) },
+                    minimize = minimize,
+                    minimized = minimized,
+                    dark = dark,
+                    hasAccessory = hasAccessory,
+                    accessory = accessory
+                )
+                // The gesture area and the margin under the chrome are its
+                // too (see the Original bar).
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .pointerInput(Unit) {}
+                        .navigationBarsPadding()
+                        .height(8.dp)
+                )
+            }
+        }
+    }
 }

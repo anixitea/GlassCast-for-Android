@@ -28,11 +28,26 @@ There's more about it, in English and Korean, at
 The player takes its colors from the cover of whatever you're listening to, and
 so do the mini player and the tab bar.
 
-There are two looks to choose from in Settings. The original one, and Sea
-Glass, where the pages are paper, the titles are set in a serif, and the
-buttons are pieces of frosted glass in the colors of your shows.
+There are three looks to choose from in Settings. Besides the original one,
+there's Sea Glass, where the pages are paper, the titles are set in a serif,
+and the buttons are pieces of frosted glass in the colors of your shows.
 
 ![Sea Glass, the second look](docs/images/sea-glass-screens.jpg)
+
+And there's Glass. The tab bar, the mini player, the player's controls and the
+buttons on your pages are made of glass that bends what's behind it, and the
+pages take on Apple's layout. You can have it frosted, or liquid, which is
+clearer. When you scroll, the mini player shrinks into a bubble beside the tab
+bar.
+
+![Glass, the third look](docs/images/glass-screens.jpg)
+
+You can also pick your own app icon in Settings. There are fifteen, in three
+sets that match the looks.
+
+Your library opens with Continue Listening, the episodes you're part way
+through with the time you have left, and the clock button above it shows
+everything you've listened to, day by day.
 
 You can queue episodes by swiping them, read show notes, jump between chapters,
 follow along with transcripts, change the speed, skip silences, boost quiet
@@ -54,16 +69,22 @@ mine), or save them to a backup file instead. There's a home screen widget, and
 long-pressing the icon gets you straight to Resume, Latest, Search or Downloads.
 
 The same APK installs on Google TV, where it has its own interface made for the
-remote. You can sign in with Google there too, by scanning a QR code with your
-phone, and the TV picks up where your phone left off.
+remote, in all three looks. You can sign in with Google there too, by scanning
+a QR code with your phone, and the TV picks up where your phone left off.
 
 It's free, and there are no ads. If you'd like to support it, you can
 [buy me a coffee](https://buymeacoffee.com/theglassmaker).
 
 ## Android Auto
 
-GlassCast works in Android Auto. Since it's installed from GitHub and not the
-Play Store, Android Auto hides it until you allow unknown sources. Open Android
+GlassCast works in Android Auto. In the car there are four tabs: Home, with
+Continue Listening and Up Next; Library, with your shows and your history;
+Latest; and Downloads. Episodes show how far in you are, and you can add one
+to Up Next or mark it played from the list. What you play in the car is still
+there when you open the app afterwards.
+
+Since it's installed from GitHub and not the Play Store, Android Auto hides it
+until you allow unknown sources. Open Android
 Auto's settings, tap the version number about ten times to unlock developer
 settings, then open the menu in the top corner, choose Developer settings, and
 turn on Unknown sources.
@@ -103,6 +124,12 @@ license with its source available. The full text is in [LICENSE](LICENSE).
 
 The typeface is [Figtree](https://github.com/erikdkennedy/figtree) by Erik
 Kennedy, used under the SIL Open Font License (see FIGTREE-OFL.txt).
+
+The Glass look is set in [Inter](https://github.com/rsms/inter) by Rasmus
+Andersson, also under the SIL Open Font License (see INTER-OFL.txt). The way
+its glass bends what's behind it is adapted from
+[Liquid-Glass-Android](https://github.com/QWEA0/Liquid-Glass-Android), used
+under the MIT License (see LIQUID-GLASS-ANDROID-LICENSE.txt).
 
 The Sea Glass look sets its titles in
 [Newsreader](https://github.com/productiontype/Newsreader) by Production Type,

@@ -205,7 +205,7 @@ fun TvPlayerScreen(
     val glyph = if (accent.luminance() > 0.5f) Color(0xFF15121A) else Color.White
     val playFocus = remember { FocusRequester() }
     // Sea Glass draws each button as its own pebble, so they stand apart.
-    val groupGap = if (LocalSea.current != null) 12.dp else 4.dp
+    val groupGap = if (LocalSea.current != null || tvLiquid()) 12.dp else 4.dp
     var panel by remember { mutableStateOf<TvPanel?>(null) }
     var shownPanel by remember { mutableStateOf(TvPanel.UP_NEXT) }
     val progress = if (durationMs > 0) (positionMs.toFloat() / durationMs).coerceIn(0f, 1f) else 0f
@@ -550,6 +550,61 @@ private fun TvGroupButton(
     // restart and next ([bare]) are just their icons until focused. Focus
     // lights a piece in the cover's color. The panel bar's slots stay
     // capsules.
+    // Glass: each button its own piece of the TV's glass, laid out as Sea
+    // Glass lays them out (round skips, restart and next bare until focused),
+    // except play, which keeps the Original's shape (round while paused, a
+    // rounded square while playing) as a slab of the cover's glass, part lit
+    // at rest.
+    if (tvLiquid()) {
+        androidx.compose.foundation.layout.BoxWithConstraints(
+            modifier.height(height),
+            contentAlignment = Alignment.Center
+        ) {
+            val round = !primary && height >= 70.dp
+            val glassShape = if (primary) {
+                RoundedCornerShape(
+                    topStart = corners.topStart, topEnd = corners.topEnd,
+                    bottomEnd = corners.bottomEnd, bottomStart = corners.bottomStart
+                )
+            } else {
+                RoundedCornerShape(percent = 50)
+            }
+            val interaction = remember { MutableInteractionSource() }
+            val focused by interaction.collectIsFocusedAsState()
+            val pressed by interaction.collectIsPressedAsState()
+            val focus = animateFloatAsState(if (focused) 1f else 0f, tween(170), label = "glassGroupFocus")
+            val squash = animateFloatAsState(
+                if (pressed) 0.93f else 1f,
+                spring(dampingRatio = 0.6f),
+                label = "glassGroupPress"
+            )
+            val rest = if (primary) 0.45f else 0f
+            Box(
+                (if (round) Modifier.size(minOf(maxWidth, height)) else Modifier.fillMaxSize())
+                    .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
+                    .graphicsLayer {
+                        val s = (1f + (if (round) 0.08f else 0.05f) * focus.value) * squash.value
+                        scaleX = s
+                        scaleY = s
+                        alpha = if (enabled) 1f else 0.4f
+                    }
+                    .tvClearGlass(
+                        shape = glassShape,
+                        accent = accent,
+                        amount = { rest + (1f - rest) * focus.value },
+                        glow = { if (pressed) 1f else 0f },
+                        lift = { focus.value },
+                        visible = { if (bare) focus.value else 1f }
+                    )
+                    .focusable(enabled = enabled, interactionSource = interaction)
+                    .clickable(enabled = enabled, interactionSource = interaction, indication = null, onClick = onClick),
+                contentAlignment = Alignment.Center
+            ) {
+                content(if (focused || primary && rest > 0.5f) glyph else Color.White)
+            }
+        }
+        return
+    }
     val tokens = LocalSea.current
     if (tokens != null) {
         androidx.compose.foundation.layout.BoxWithConstraints(
@@ -630,6 +685,7 @@ private fun TvScrubber(
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
     val lit by animateFloatAsState(if (focused) 1f else 0f, tween(180), label = "scrubLit")
+    val glassRod = tvLiquid()
     Box(
         Modifier
             .fillMaxWidth()
@@ -660,7 +716,10 @@ private fun TvScrubber(
             showThumb = focused,
             voice = { VoiceLevel.current() },
             marks = marks,
-            markColor = markColor
+            markColor = markColor,
+            // Glass: the phone's rod of glass, which swells while it's focused.
+            glassLine = glassRod,
+            held = glassRod && focused
         )
     }
 }
@@ -1074,7 +1133,7 @@ private fun TvChip(
     onClick: () -> Unit
 ) {
     val tokens = LocalSea.current
-    if (tokens != null) {
+    if (tokens != null || tvLiquid()) {
         TvGlass(
             tokens = tokens,
             accent = accent,

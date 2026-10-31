@@ -17,7 +17,7 @@ import com.glasscast.app.ui.tr
  * set each time the app opens, so they appear from the first launch on, and
  * a language change is picked up on the next one.
  *
- * Each is an action on MainActivity (handled in MainActivity.handleIncoming,
+ * Each is an action on GlassCastActivity (handled in GlassCastActivity.handleIncoming,
  * then by GlassCastRoot).
  */
 object Shortcuts {
@@ -32,21 +32,26 @@ object Shortcuts {
 
     /** Off the main thread: the shortcut service is a binder call and a disk write. */
     fun publish(context: Context) {
+        // Pinned to whichever launcher entry is on (the app icon picked in
+        // Settings), so they hang off the icon on the home screen; a shortcut
+        // belonging to a disabled alias would vanish with it.
+        val entry = com.glasscast.app.data.AppIcons.current(context).component(context)
         val list = listOf(
-            shortcut(context, "resume", RESUME, tr("Resume"), R.drawable.ic_shortcut_resume, rank = 0),
-            shortcut(context, "latest", LATEST, tr("Latest"), R.drawable.ic_shortcut_latest, rank = 1),
-            shortcut(context, "search", SEARCH, tr("Search"), R.drawable.ic_shortcut_search, rank = 2),
-            shortcut(context, "downloads", DOWNLOADS, tr("Downloads"), R.drawable.ic_shortcut_downloads, rank = 3)
+            shortcut(context, entry, "resume", RESUME, tr("Resume"), R.drawable.ic_shortcut_resume, rank = 0),
+            shortcut(context, entry, "latest", LATEST, tr("Latest"), R.drawable.ic_shortcut_latest, rank = 1),
+            shortcut(context, entry, "search", SEARCH, tr("Search"), R.drawable.ic_shortcut_search, rank = 2),
+            shortcut(context, entry, "downloads", DOWNLOADS, tr("Downloads"), R.drawable.ic_shortcut_downloads, rank = 3)
         )
         runCatching { ShortcutManagerCompat.setDynamicShortcuts(context, list) }
     }
 
-    private fun shortcut(context: Context, id: String, action: String, label: String, icon: Int, rank: Int) =
+    private fun shortcut(context: Context, entry: android.content.ComponentName, id: String, action: String, label: String, icon: Int, rank: Int) =
         ShortcutInfoCompat.Builder(context, id)
             .setShortLabel(label)
             .setLongLabel(label)
             .setIcon(IconCompat.createWithResource(context, icon))
             .setRank(rank)
-            .setIntent(Intent(context, MainActivity::class.java).setAction(action))
+            .setActivity(entry)
+            .setIntent(Intent(context, GlassCastActivity::class.java).setAction(action))
             .build()
 }

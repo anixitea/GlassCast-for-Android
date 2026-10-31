@@ -13,6 +13,7 @@ UP NEXT || 다음 재생 || ALS NÄCHSTES || A CONTINUACIÓN || HIERNA
 Playing Next || 다음 재생 || Als Nächstes || A continuación || Hierna
 Playing next || 다음에 재생 || Wird als Nächstes gespielt || Se reproducirá a continuación || Speelt hierna af
 Nothing queued || 대기 중인 에피소드 없음 || Nichts in der Warteschlange || Nada en cola || Niets in de wachtrij
+Next episode || 다음 에피소드 || Nächste Folge || Siguiente episodio || Volgende aflevering
 Info || 정보 || Info || Información || Info
 Episode info || 에피소드 정보 || Folgeninfo || Información del episodio || Afleveringsinfo
 Notes || 노트 || Notizen || Notas || Notities
@@ -62,6 +63,7 @@ Bluetooth and other outputs || 블루투스 및 기타 출력 || Bluetooth und a
 Looking for TVs and speakers on your Wi-Fi… || Wi-Fi에서 TV와 스피커를 찾는 중… || Suche nach Fernsehern und Lautsprechern im WLAN … || Buscando televisores y altavoces en tu wifi… || Zoeken naar tv's en speakers op je wifi…
 Add to Up Next || 다음 재생에 추가 || Zu „Als Nächstes“ hinzufügen || Añadir a A continuación || Toevoegen aan Hierna
 Added to Up Next || 다음 재생에 추가됨 || Zu „Als Nächstes“ hinzugefügt || Añadido a A continuación || Toegevoegd aan Hierna
+Removed from Up Next || 다음 재생에서 제거됨 || Aus „Als Nächstes“ entfernt || Quitado de A continuación || Verwijderd uit Hierna
 Remove from Up Next || 다음 재생에서 제거 || Aus „Als Nächstes“ entfernen || Quitar de A continuación || Verwijderen uit Hierna
 Mark as played || 재생함으로 표시 || Als gespielt markieren || Marcar como reproducido || Markeren als afgespeeld
 Mark as unplayed || 재생 안 함으로 표시 || Als ungespielt markieren || Marcar como no reproducido || Markeren als niet afgespeeld
@@ -311,7 +313,11 @@ Original || 오리지널 || Original || Original || Origineel
 Sea Glass || 씨글라스 || Meerglas || Vidrio marino || Zeeglas
 {0} hr || {0}시간 || {0} Std. || {0} h || {0} u
 {0} hr {1} min || {0}시간 {1}분 || {0} Std. {1} Min. || {0} h {1} min || {0} u {1} min
-Continue listening || 이어 듣기 || Weiterhören || Seguir escuchando || Verder luisteren
+Continue Listening || 이어 듣기 || Weiterhören || Seguir escuchando || Verder luisteren
+More || 더보기 || Mehr || Más || Meer
+History || 기록 || Verlauf || Historial || Geschiedenis
+Clear history || 기록 지우기 || Verlauf löschen || Borrar historial || Geschiedenis wissen
+Earlier || 이전 || Früher || Antes || Eerder
 Speed {0} || 속도 {0} || Tempo {0} || Velocidad {0} || Snelheid {0}
 GOOGLE ACCOUNT || GOOGLE 계정 || GOOGLE-KONTO || CUENTA DE GOOGLE || GOOGLE-ACCOUNT
 Go to {0} and enter this code || {0}에 접속해 이 코드를 입력하세요 || Öffne {0} und gib diesen Code ein || Ve a {0} e introduce este código || Ga naar {0} en voer deze code in
@@ -320,3 +326,20 @@ Get a new code || 새 코드 받기 || Neuen Code anfordern || Obtener un códig
 Signed in || 로그인됨 || Angemeldet || Sesión iniciada || Ingelogd
 {0} left || {0} 남음 || noch {0} || quedan {0} || nog {0}
 Move || 이동 || Verschieben || Mover || Verplaatsen
+Glass || 글라스 || Glas || Cristal || Glas
+Frosted || 프로스티드 || Matt || Esmerilado || Mat
+Liquid || 리퀴드 || Liquid || Líquido || Liquid
+App icon || 앱 아이콘 || App-Symbol || Icono de la app || App-icoon
+Midnight || 미드나잇 || Mitternacht || Medianoche || Middernacht
+Paper || 페이퍼 || Papier || Papel || Papier
+Pebble || 조약돌 || Kiesel || Guijarro || Kiezel
+Shore || 해변 || Ufer || Orilla || Kust
+Tide || 물결 || Gezeiten || Marea || Getij
+Lagoon || 라군 || Lagune || Laguna || Lagune
+Rose || 로즈 || Rosé || Rosa || Roze
+Amber || 앰버 || Bernstein || Ámbar || Amber
+Mint || 민트 || Minze || Menta || Munt
+Prism || 프리즘 || Prisma || Prisma || Prisma
+Clear Glass || 클리어 글라스 || Klarglas || Vidrio claro || Helder glas
+Home || 홈 || Start || Inicio || Home
+Episodes || 에피소드 || Folgen || Episodios || Afleveringen

@@ -1,5 +1,603 @@
 # GlassCast — developer notes
 
+## 2.0, seventh round: the finish switch actually switching
+
+Still 2.0 (versionCode 22). From Jonathan's screenshots of the sixth round
+(October 30): Frosted and Liquid still identical, the bar looking worse
+than before, and the Downloads menu see-through.
+
+**The real bug.** The finish never changed while the app was open. Each
+activity set `GlassFinish.liquid` in a `SideEffect` that read the setting
+only inside the effect, and reads inside an effect aren't watched: changing
+the setting didn't re-run it. The finish stayed whatever it was when the app
+opened. Jonathan had picked Liquid while testing the fifth round, so the
+sixth round opened in Liquid and stayed there, whichever segment was
+chosen. Both of his screenshots were Liquid, and that was also the bar that
+looked worse. The finish is now set by the app itself
+(`GlassCastApp.followGlassFinish`): once before the first frame, then from
+the setting's flow on the main thread, for the phone and the TV.
+
+**Liquid, tuned down.** The sixth round's Liquid (adaptive tint, a sheen
+over the glass, refraction 1.35, a third of the blur) read as a milky wash
+with smeared color at the bar's ends. Liquid is now close to the first
+round's glass, which read as glass, a step clearer: about two thirds of
+Frosted's tint, a little over half its blur (6.5dp on the bar, still enough
+that text underneath doesn't read through the mini player), the edge
+bending a touch further (1.1) with a little color (dispersion 0.14), a
+brighter rim, more saturation. No sheen and no adaptive tint on real glass
+(the sheen field is gone).
+
+**Drawn panes follow gently.** Halving a pane's body was too much: the
+Downloads menu floats over the list and became unreadable. `PaneFinish`
+now takes a tenth off a nearly solid pane and a quarter off a see-through
+one, with rims 1.4 times as bright; panes that float over content opt out
+(`frostedGlass(finish = false)`), and the Downloads menu is solid in every
+finish. Sheets in Liquid are a little clearer than in Frosted, over a
+slightly lighter blur.
+
+## 2.0, sixth round: Liquid you can see, Glass on the TV
+
+Still 2.0 (versionCode 22). From Jonathan's screenshots of the fifth round
+(October 30).
+
+**Frosted and Liquid looked the same.** The setting worked, but over his
+dark Settings page the two finishes were the same dark gray: they differed
+only in tint and blur, and over a flat page there's nothing for blur to
+show, while the drawn panes (cards, sections, fields) didn't change at all.
+Liquid now has things of its own that show over anything:
+- **Real glass** (`LiquidMaterial`, two new fields): `refraction` bends the
+  edge further (1.25 to 1.35 of the lens), more `dispersion` (color at the
+  rim), brighter `spec`, more saturation, `adaptive` on the bars (lighter
+  over dark, darker over light, so labels still read with half the tint),
+  and `sheen`, light lying on the glass (a glare in the top left and a sheen
+  along the top), drawn so it shows over a flat page too. Tint and blur sit
+  between the frosted values and the clear first round. (All of this was
+  too much, and none of it could be compared live: see the seventh round.)
+- **Drawn panes** (`frostedGlass`, `liquidPane`, the tab bar's selection,
+  sheets) follow the finish through `PaneFinish`: half the body (a solid
+  colored button keeps most of its), the same sheen and glare, and rims
+  1.7 times as bright and a little heavier. Read while drawing, so changing
+  the finish only redraws.
+
+**Downloads' button was a dot.** The edit glyphs were drawn as outlines
+whose holes need evenOdd; `LiquidIcons` gave them nonZero, so the Select
+ring filled in solid. Fixed (all four), and the header button is now **⋯**
+(`LiquidIcons.More`), opening a small menu (`HeaderMenu`: a Popup card under
+the button's right edge, frosted in Glass): Select, Select all.
+
+### Glass on the TV
+
+The TV takes every look now (`TvActivity` no longer maps Glass to
+Original), and the TV's Settings offer Original, Sea Glass and Glass, with
+Frosted and Liquid beside Glass while it's on (the phone's settings).
+
+The TV's glass is drawn, not the phone's lens (`tv/TvClear.kt`): the lens
+reads back the page every frame, which the Streamer can't afford (the same
+reason the TV dropped Haze). A body the living cover shows through, light
+along its top and a rim of light; the finish makes the resting glass
+clearer and its light brighter.
+- **Controls**: `TvGlass` takes null tokens in Glass and draws
+  `TvClearControl`, with Sea Glass's states and layout: clear at rest, lit
+  in the cover's color when focused or chosen, raised with a soft shadow,
+  swelling under a press. Pills, icon buttons, dialog buttons, chips and the
+  rail's tabs all go through it.
+- **The player**: separate pieces of glass as in Sea Glass (round skips,
+  restart and next bare until focused); play keeps the Original's shape
+  (round paused, rounded square playing) as a slab of the cover's glass,
+  part lit at rest. The scrubber is the phone's glass rod, swelling while
+  focused (`WavySlider(held = …)`).
+- **Focus on covers, cards and rows** (`FocusIndicationNode.drawGlass`): no
+  ring. A row lights a pane of glass under it; a cover rises with a soft
+  shadow and catches the light (a sheen, a glare, a bright rim), as tvOS
+  lifts a poster.
+- **Panels** (`tvPanel`: the side panel, menus, dialogs, the toast) and the
+  rail are panes of glass (`tvGlassPane`) in a charcoal with a breath of the
+  cover's color (`tvGlassPanelColor`). The rail's now playing is the phone's
+  Glass bubble, a circle with the time round it.
+- Type is Inter, as on the phone (the theme's `LiquidType`).
+
+**TV sign-in.** Jonathan remembers the QR code not loading with something
+about a client missing: Google's answer when the client ID it gets isn't
+one it knows. The likeliest cause is the value as pasted into
+local.properties (in quotes, or with a space), so both the build and
+`TvSignIn` now strip spaces and quotes. If it still fails, the overlay
+shows Google's own words (fifth round).
+
+## 2.0, fifth round: Android Auto done properly, Glass with a finish
+
+Still 2.0 (versionCode 22). From Jonathan's questions about the TV and the
+car, and his notes from testing the fourth round (October 30).
+
+### Android Auto
+
+An audit, then a rework (`player/AutoLibrary.kt`, `PlaybackService`).
+
+**Four tabs.** Auto shows the root's children as tabs, and only as many as
+its root hints allow (`EXTRAS_KEY_ROOT_CHILDREN_LIMIT`, four in practice);
+past the limit they're dropped. Since 1.9 the root had five whenever
+Continue Listening had something in it, so Library could go missing. The
+root is now **Home, Library, Latest, Downloads**, cut to the hint if a car
+asks for fewer, each with an icon (`res/drawable/car_tab_*`: the tab glyphs
+as vector drawables, and a house for Home, addressed as
+`android.resource://package/drawable/name`, the form Auto's own test app
+uses).
+
+- **Home**: Continue Listening (ten), then Up Next, under group headings
+  (`EXTRAS_KEY_CONTENT_STYLE_GROUP_TITLE`). The episode loaded in the
+  player isn't repeated in Continue Listening, as on the phone.
+- **Library**: a History row (a list item in the grid,
+  `EXTRAS_KEY_CONTENT_STYLE_SINGLE_ITEM`) above the shows' grid, where the
+  History button sits on the phone. History is grouped by day (`historyDay`,
+  shared with the phone's sheet).
+- **Latest**: grouped by day. **Downloads** as before.
+- The old `glasscast:continue` and `glasscast:upnext` ids still answer, for
+  a car that remembered one.
+
+**Rows.** Played marks as before, plus a progress bar part way through
+(`EXTRAS_KEY_COMPLETION_PERCENTAGE`) and the download badge
+(`EXTRAS_KEY_DOWNLOAD_STATUS`). The second line is the show and, part way
+through, the time left; inside a show, the date and the length.
+
+**Episode actions** (custom browse actions): Add to / Remove from Up Next
+and Mark as played / unplayed, from the row's menu on cars that have it.
+Declared once with `MediaLibrarySession.Builder.setCommandButtonsForMediaItems`
+(icons `car_queue_add`, `car_queue_remove`, `car_played`, `car_unplayed`),
+named per row with `MediaMetadata.setSupportedCommands`, and allowed to
+every controller in `onConnect`. They arrive in `onCustomCommand` with the
+row's id in `MediaConstants.EXTRA_KEY_MEDIA_ID`; the reply carries a message
+for the car to show (`KEY_CUSTOM_BROWSER_ACTION_RESULT_MESSAGE`). Add to Up
+Next works as the app's: at the end, or playing if nothing is loaded.
+
+**Lists that keep up.** While a car is connected (`follow`, stopped from
+`onUnbind` as the car buttons are), each open list is boiled down to what
+the car draws (which episodes, played or not, progress in 5% steps,
+downloaded or not), worked out off the main thread, and when that changes
+the car is told to reload it (`notifyChildrenChanged`), at most once a
+second. Positions saved every few seconds don't reload anything until a
+progress bar would move. The queue isn't a flow: the service calls
+`queueChanged` from its player listener, and Home and Up Next reload once
+for a burst of changes. After an action every list the episode could be in
+reloads, so its menu flips (add to remove, played to unplayed).
+
+**Search** shows matching shows first (browsable, under Podcasts), then
+episodes.
+
+**The queue without the app.** The queue was only ever saved by the app's
+player connection, which exists only once the app has been opened. On a
+drive with the phone in a pocket nothing was saved, so afterwards the app
+came back to what had played before. The service now keeps it
+(`keepQueue`) when no controller of the app's own is connected (the media
+notification's doesn't count): the playing episode first, anything behind
+the playhead dropped, never an empty player saved. Not while the app is
+connected, where its connection does the same: both dropping "what's behind
+the playhead" at once could remove the playing episode.
+
+Not changed, and deliberately: the now-playing artwork (bitmaps, which
+worked on the Desktop Head Unit), the skip and speed buttons.
+
+### The look is Glass, frosted or liquid
+
+The third look is called **Glass** (code: still `Look.LIQUID_GLASS`), with a
+finish in Settings > Appearance under the looks, shown only when Glass is
+picked: **Frosted** (as before) or **Liquid**, clear glass as Apple's clear
+option (`Settings.glassLiquid`, `GlassFinish.liquid`, a snapshot state the
+activity sets). Liquid is about half the tint, a third of the blur and more
+light on the rims for every real piece of glass: the bars and the mini
+player (`regular`), buttons over pages (`button`), the player's glass
+(`media`, `panel`, `inset`, `disc`), and sheets (more translucent, less blur
+behind). The drawn panes (cards, Settings sections, fields) don't change:
+they don't blur what's under them, so clearer would only be harder to read.
+
+### From the fourth round's testing
+
+- **The swipe tile lingered.** It grew with the box's `progress`, which
+  jumps to complete once a swipe is let go, so the tile sat at full size
+  while the row sprang back, and through the glass look's frosted cards it
+  stayed visible until the spring had quite settled. It grows and fades
+  with how far the row actually is now (`DeliberatePullState.reach`).
+- **A white line at the top of the screen** when History (or any sheet)
+  opened in Glass. The sheet's rim of light was drawn by a modifier on the
+  sheet, which sits outside the sheet's slide, so it stayed at the top of
+  the screen. It's drawn on the grabber's row now, the sheet's real top.
+- **The cover changed size in the bubble** as it landed from the full
+  player. Once in the bubble it became a lens, which bends the picture's
+  edges, so the cover seemed to shrink the moment the lens took over. It's
+  the same plain picture all the way now, with a rim of light round it as
+  it drops in; the bubble is the glass.
+- **Downloads' edit buttons** are new glyphs in the tab glyphs' manner
+  (`LiquidIcons.Select`, `SelectAll`, `Trash`, `Close`), in every look.
+- **The player's pull-up panel** reads as glass: more light on its rim and
+  a little less blur (`LiquidMaterial.panel`), the gathered buttons in a
+  pill of glass set into it (`inset`), and a drop of clear glass under the
+  open tab, which also comes up under a finger and swells while held.
+- **The Glass player has no wave.** The scrubber is a rod of glass
+  (`WavySlider(glassLine = true)`): filled as far as you've listened, light
+  along its top, a shade along its foot, and it swells to about twice its
+  thickness while held.
+- **Prism** (app icon) lost its diagonal stripes; they were there to give
+  the lens something to bend and read as lines through the icon.
+
+### TV
+
+- **Glass wasn't on the TV yet** (it is from the sixth round).
+- **TV sign-in**: no change to the flow, which follows Google's device flow
+  as documented, but failures now say why. The overlay shows Google's own
+  error under the message (`TvSignIn.lastError`: `invalid_client`,
+  `access_denied`, no network…), sync failures say what failed ("Couldn't
+  sync (Drive 403)"), and the build warns when local.properties lacks the TV
+  client (without it the TV has no Sign in with Google at all).
+
+## 2.0, fourth round: glass on everything, a steadier swipe
+
+Still 2.0 (versionCode 22). From Jonathan's second screen recording
+(October 30).
+
+**The bubble's path.** The mini player now goes into the bubble the way the
+Original's card does, in two steps (`liquidSlide`, `liquidDrop`): over the
+first 55% it draws in toward its right end, the cover gliding along inside
+it, until it's a circle there; then it drops into the bubble beside the
+bar. Before, every edge moved at once, which read as a diagonal. The ring
+comes in at the end of the drop.
+
+**The player's panel overhang** had a gap down the right side: a plain
+`size` can't be wider than its parent, so the 2%-wider glass was cut back to
+the screen's width while still shifted left by its overhang. It's
+`wrapContentSize(unbounded = true)` now, so it reaches past both sides.
+
+**Library's covers** have 18dp corners in every look (about a ninth of the
+cover, Discover's share); 12dp read as nearly square.
+
+**Continue Listening** is columns of three rows, taller, and the room goes
+to how far in you are: a short line with the played part in the accent, and
+the time left beside it. With four rows a long show name pushed the time off
+the end.
+
+**Swipes need a real pull** (`SwipeToQueue`, `SwipeToDelete`). A row now
+has to have traveled 40% of its width when it's let go, flick or not
+(`rememberDeliberatePull` checks the offset in `confirmValueChange`). It was
+a quarter, and the box also took a fast flick at any distance as a swipe,
+so scrolling a list with a little sideways drift queued episodes and marked
+them played.
+
+**Glass on everything**, in Frosted Glass:
+- Episodes are cards of frosted glass again (`rowCard`, the show page's
+  `EpisodeRow`): the body in the card's color with the page showing a
+  little through it, a soft shadow, light gathered along the top and the
+  rim's two lines (`frostedGlass`). Latest and Downloads are cards, not the
+  second build's plain list.
+- An episode's length is a little capsule of the accent's glass.
+- Sheets are frosted glass over the app: their window blurs what's behind
+  it (`FLAG_BLUR_BEHIND`, Android 12+, only where the phone has cross-window
+  blur on) and the sheet is translucent over the blur; without the blur
+  they stay solid.
+- The switch's knob is glass, and swells into a wider, clearer drop while
+  held, as Apple's does; the track has light along its top.
+- Search fields (Library, Search, the library filter) are frosted panes
+  (`glassField`).
+- The segmented control's chosen segment and every Settings section are
+  frosted glass; the tab bar's selection is a frosted drop with its rim.
+- The toast is real lens glass over the page.
+
+## 2.0, third round: Frosted Glass
+
+Still 2.0 (versionCode 22). From Jonathan's screen recording of the second
+build (October 30).
+
+**The name.** The look is **Frosted Glass** in the app now (Settings, the
+icon picker; 프로스티드 글라스, Milchglas, Vidrio esmerilado, Matglas): what we
+built is frosted glass more than Apple's. The code keeps its Liquid names
+(`Look.LIQUID_GLASS`, which is also what's stored, `ui/liquid/`), and these
+notes use either.
+
+**Only the player becomes the bubble.** In the second build the bar and the
+mini player both minimized (the bar to a circle). Now it's the Original
+look's move: scrolling down, the mini player becomes the bubble at the
+bar's right end, the bar's own height (62dp; the cover grows to 46dp in
+it, under the lens, the time as a ring), and the bar narrows by the
+bubble's width and the gap, its names folding to icons (`TabStrip`'s
+compact). With nothing playing nothing changes. The mini player's cover
+sits 11dp in from the capsule's end (it was 7dp, almost on the rounded end).
+
+**More real glass on the pages.** `rememberPageBackdrop` gives a page its
+own backdrop, recorded from its list (`liquidBackdrop` on the LazyColumn or
+grid), so buttons floating over the page, drawn beside the list rather than
+in it, are lens glass too: the show page's back and info buttons
+(`LiquidGlassButton`) and Library's bar buttons (`chromePill(backdrop =)`).
+Nested inside the root's recording, which is fine: nothing records itself.
+Controls inside a page are `frostedGlass`: a body in their color, a soft
+shadow, light gathered along the top, the rim's lines. The show page's
+Add / Play / Refresh are separate capsules of it with air between them, and
+every pill is one (the chosen one in the accent). The bar title's fade
+reaches lower and holds more, since the page's own type ran under it.
+
+**The player's panel, pulled up,** reaches 1% past each side of the screen
+and past its foot, so the rim's lines of light are out of sight there; at
+the screen's edge they read as stray white lines.
+
+**Continue Listening** (capital L, everywhere, the TV and the car too) is
+laid out like an Apple Music shelf of songs: columns of four rows paging
+sideways with the next peeking in, each row the cover, the episode, its
+show and the time left, and a menu button for the episode's actions, a
+hairline between rows. The heading is in the shelves' bold
+(`headlineMedium`, Discover's). Up to twelve episodes.
+
+## 2.0, second round: Liquid Glass through the app, history, faster refresh
+
+Still 2.0 (versionCode 22). From Jonathan's screenshots of the first build
+(October 30), a listener's request, and his notes while it was being built.
+
+**Inter's weights.** On the Xiaomi every Inter weight came out Regular: the
+large titles weren't bold, and nothing in the look was. The variable font's
+weights were picked with variation settings, which Compose applies through a
+shared Paint (`TypefaceCompatApi26`), and that path didn't hold there.
+`res/font/` now has static files cut from Inter 4.1 with fontTools'
+instancer, subset to Latin (about 64 KB each): text (opsz 16) at 400, 500,
+600 and 700, display (opsz 32) at 400, 600 and 700. `inter.ttf` is gone.
+
+**The Appearance tiles are one design** (`AppearanceTile`, SettingsScreen).
+Each look drew its own tiles, so they changed size and style as you picked
+between looks (Liquid Glass had radio buttons under narrower screens). Now
+every tile is the same frame at 0.70, ringed in the accent with a check when
+chosen, the name under it. The screens are drawn as the app looks right
+now: the look tiles each show their own look, the brightness tiles show the
+look you're in, and all of them take the accent (Dynamic or Custom color),
+follow light and dark, and use the real tab glyphs. In the Original look's
+mini, the bar and card turn pale on the dark screens when Adaptive tab bar
+is on, as the app's do. Each look's name is in its own typeface whichever
+look you're in. Sea Glass's play pebble is still real glass. The screens
+were laid out in the scratchpad first (`lg20/minis.py`, skia) and ported
+call for call.
+
+**New tab glyphs, in every look** (`ui/liquid/LiquidIcons.kt`). Drawn for
+GlassCast in the manner of Apple's filled symbols (SF Symbols can only be
+used on Apple's platforms): a stack of tiles for Library, a tray for Latest,
+a circle with the arrow cut out for Downloads, a compass with its needle cut
+out for Discover, the magnifier, and an eight-tooth gear. Filled shapes
+with even-odd cut-outs on a 24 grid, as path data (`addPathNodes`). Jonathan
+liked them enough to have them in the Original and Sea Glass bars and the
+TV's rail too.
+
+**The Liquid tab bar** (`LiquidChrome`). Search is back in the bar, which
+now has all six tabs. The tabs are laid out by the same `TabStrip` as the
+other looks' bars (split out of `GlassTabBar` for this): icons, the
+selected one widened to show its whole name beside its icon, which was the
+answer there to names that didn't fit. The first build's names under every
+icon clipped ("ownloads"). The selection is a quiet capsule of the system
+fill, and the selected tab is in the accent.
+
+**It minimizes on scroll**, as iOS 26's does, from the same nested-scroll
+signal as the Original look's card-to-bubble (`chromeCollapsed`): the
+capsule draws in to a circle with the tab you're on, the names fold away
+first, and the mini player shrinks into a bubble of glass at the other end
+of the row. Scrolling up, or a tap on the circle, brings it back. One
+animated number (`liquidMinimize`) read only while placing and drawing.
+
+**The mini player.** Fully out it's the accessory capsule: the cover, the
+title and show, and a progress line the full width of the text (the first
+build's 96dp piece of wave barely moved). Minimized it's the bubble Jonathan
+asked for: the cover as a circle with a lens of glass over it
+(`Modifier.liquidLens`, the lens shader run on an element's own content, so
+it's safe anywhere) and the time as a ring round it. No dot at the ring's
+head, in Liquid Glass or Sea Glass (he pointed out the Original never had
+one: the color says where you are).
+
+**Legibility.** The first build's bar glass (white at a third, 7dp of blur,
+colors pushed 40%) let a red cover come through as red, and at night the
+labels sank into it. `LiquidMaterial.regular` is now a heavier blur (11dp),
+a tint past half (light #FAFAFC at 60%, dark #1C1C1E at 64%), and only a
+little vibrancy (1.2). Accents on glass go through `legibleAccent`, which
+moves a color toward white (dark glass) or black (light glass) just far
+enough to read. Checked over real screenshots in the scratchpad with the
+app's own shader (`lg20/chrome_preview.py`, `chrome2.py`).
+
+**Adaptive tab bar, in Liquid Glass**, makes the glass take the page under
+it (a show's dark cover color turns it dark) rather than the app's light or
+dark, which is what the setting means in the Original look.
+
+**The player in glass.** The picture (the cover dissolving into its blur,
+the scrims, and the dimming as the panel rises) is one Box recorded as a
+backdrop (`playerGlass`), and everything on it refracts it: play is a disc
+of clear glass that changes shape between paused (round) and playing (a
+softer square) the way the Original button does; download and cast are
+small glass discs; the skips grow a disc of glass while they're held. The
+pull-up panel (`LiquidPanelContent`) is a floating capsule of glass at
+rest, its five buttons spread along it, and pulled up it grows to the edges
+and up into a sheet of the same glass, the buttons gathering to the right
+and the tab's name coming in at the left, so the name never has to squeeze
+in beside a cover and five buttons (it read "Playin…"). The queue and
+bookmark rows are transparent there, so the glass is the rows' ground.
+
+**Through the pages.** Latest and Downloads are Apple's plain lists in
+Liquid Glass: rows edge to edge on the page, a hairline under each starting
+where the text does, no cards. An episode's length is Apple's play capsule
+(the accent on a faint capsule of it). Page buttons (`chromePill`, the
+Downloads header buttons) are toolbar glass, a light pane lifted off the
+page by a soft shadow; the first build's white panes vanished on white
+pages. The collapsed bar title is plain text over the page's fade, no pill,
+and the top fade now washes back to the page's ground in Liquid Glass as in
+Sea Glass. Sheets have Apple's larger corners, a light (charcoal) pane with
+a rim of light along the top, and the slim grabber.
+
+**Continue listening and History** (a listener asked for a history; Jonathan
+wanted Continue listening in Library). Library opens with a row of what
+you're part way through (`FeedStore.inProgress`, the playing one left out),
+each cover with a line of how far in and the time left; tapping one carries
+on. A History button in Library's bar opens `HistorySheet`: every episode
+listened to, most recent first, under the day (Today, Yesterday, the date),
+each with Played or the time left; tap to play, Clear history to empty it.
+`data/ListenHistory` keeps one entry per episode (guid, show, when), the
+last 300, in `history.json`; the playback service stamps it as it saves the
+place, at most once a minute per episode. The first run starts it from the
+episodes already part way through, dated by their show's last play. Not in
+backups or sync yet.
+
+**Faster refresh.** `refreshAll` fetched one show after another, so a
+library of twenty waited out twenty round trips in a row and a slow server
+held up the rest. It fetches six at a time now, and each show's new
+episodes appear as soon as its own feed is in. Merges go through
+`MutableStateFlow.update` so feeds landing together can't lose one another
+(`updateEpisode` too). The app also refreshes quietly when it comes to the
+front, if it hasn't in fifteen minutes (`refreshIfStale`, phone and TV):
+until now nothing checked on opening. The background check runs hourly
+(it was every three hours); a check is cheap, since an unchanged feed
+answers 304.
+
+**Not done yet:** the show page in Apple's list style (it keeps its cards
+on the cover's colors), Library's Up Next / Downloaded / Bookmarks rows
+from the canvas, Liquid Glass on the TV, and history in backups.
+
+## 2.0, first round: app icons, and Liquid Glass
+
+**Version 2.0 (versionCode 22).** Two things Jonathan designed on a canvas
+first (October 20): app icons you pick in the app, and a third look, Liquid
+Glass, as Apple's 2025 design would draw GlassCast. The canvas, "GlassCast
+App Icons", is an artifact in his claude.ai account.
+
+### App icons
+
+Settings > Appearance > App icon opens a sheet of fifteen icons in three
+families, named like the looks: Original (Original, Midnight, Paper), Sea
+Glass (Sea Glass, Pebble, Shore, Tide, Lagoon, Rose, Amber, Mint) and Liquid
+Glass (Liquid Glass, Prism, Clear Glass, Dark). A grid with the chosen one
+ringed in the Original look and Sea Glass; Apple's list with a check in
+Liquid Glass.
+
+- **Keyline.** Jonathan's rule after the first concepts: no icon may look
+  bigger or smaller than the one people know. The first Sea Glass draft had
+  a 28dp glyph on a pebble inset in the icon, and it read as smaller. Every
+  icon now uses the original's glyph at its size and place (39 × 37 dp,
+  centered in the 108dp layer, 54% of the visible 72dp) with the body edge
+  to edge. The art was rendered in the scratchpad: the Sea Glass family's
+  glyph is the app's own glass body shader (GlassBody's optics, ported to
+  numpy) run on the glyph's distance field; the Liquid Glass family's glyph
+  is the lens below, run the same way. Pebble keeps the first draft's big
+  pebble with the glyph cut into it at full size.
+- **Resources.** Each icon is one 432px WebP in `drawable-nodpi/icon_*.webp`
+  (about 126 KB for all fifteen), used whole as the adaptive icon's
+  background, with a transparent foreground and the usual glyph as the
+  monochrome layer, so themed icons look the same whatever's picked
+  (`mipmap-anydpi-v26/ic_launcher_*.xml`). The original keeps its two
+  layers; `icon_original.webp` is only its picture for the picker.
+- **Switching.** An `<activity-alias>` per icon, all targeting the activity,
+  one enabled at a time (`data/AppIcons`). The activity class is
+  **GlassCastActivity** now (it was MainActivity), and the original's alias
+  is named `.MainActivity`: an icon already on someone's home screen points
+  at that component, and it still exists and is still enabled after the
+  update. The OPML share and open filters stay on the activity itself, which
+  is never disabled. Switching enables the new alias first and disables the
+  rest after (one batch call on Android 13+), with DONT_KILL_APP. The package
+  manager is the record of which icon is on; nothing else stores it.
+- **Shortcuts** are pinned to the active alias (`setActivity`), and published
+  again after a switch, since a dynamic shortcut belongs to one launcher
+  entry and goes with it.
+- **Launchers.** Some (HyperOS's among them) drop a home screen shortcut when
+  its alias is disabled and put the new icon in the drawer. Worth checking
+  on the Xiaomi and the OPPO before release.
+
+### Liquid Glass
+
+`Look.LIQUID_GLASS`, the third tile in Settings > Appearance. The phone only
+for now: the TV shows it as Original (TvActivity maps it), and its pills
+show Original as chosen.
+
+- **Type.** Inter (OFL, `INTER-OFL.txt`), bundled once as the variable font
+  subset to Latin (`res/font/inter.ttf`, 279 KB, `opsz` and `wght` axes;
+  replaced by static files in the second round, above).
+  Apple's San Francisco is licensed for Apple platforms only and can't
+  ship here; Inter is the nearest open face. Two optical sizes, the way SF
+  switches from Text to Display at 20 pt: opsz 16 for text, 32 for titles
+  (`LiquidType`). Tracking follows Inter's dynamic metrics,
+  a + b·e^(c·size) with (-0.0223, 0.185, -0.1745), so large titles close up
+  and small labels open a little, as SF's do. Large titles are 34/41 bold.
+- **Colors.** Apple's system ones (`ui/liquid/Liquid.kt`, `LiquidTokens`,
+  `liquidScheme`): white pages and #F2F2F7 grouped cards by day, black pages
+  and #1C1C1E cards at night, labels at full and secondary strength, the
+  #C6C6C8 / #38383A separator, the 12% / 24% system fill. The accent is
+  GlassCast's purple (or the cover's, or the custom color), not Apple's
+  blue. Settings is a grouped page (gray by day, white cards).
+- **The lens** (`ui/liquid/LiquidLens.kt`). The glass is the lens shader
+  from QWEA0/Liquid-Glass-Android (MIT, `LIQUID-GLASS-ANDROID-LICENSE.txt`),
+  ported to AGSL for Compose. That library is a View (a FrameLayout that
+  records its parent) and its own README sends Compose apps elsewhere, so
+  it's adapted rather than a dependency, as Sea Glass was. The page is
+  recorded into a GraphicsLayer each frame by `Modifier.liquidBackdrop` (on
+  the same Box as `hazeSource`, the way Haze records its source), and each
+  piece of glass (`Modifier.liquidGlass`) draws the part of that layer
+  behind it into its own layer with a RenderEffect: the backdrop blurred,
+  then the lens. The lens, per pixel, from a rounded box's distance field:
+  inside the bevel it samples inward, hardest at the rim (inverse-power
+  falloff, exponent 2), so the rim shows a squeezed mirror of what's just
+  inside it; red, green and blue bend by slightly different amounts (color
+  fringes); the library's vibrancy curve; the tint; and two thin lines of
+  light where the edge faces toward and away from the light (upper left),
+  with a little glow inside the lit one. Bevel and refraction are capped by
+  the piece's short side (the library's adaptive lens scale). Each piece
+  has its own RuntimeShader, since each holds its own uniforms; the effect
+  is rebuilt only when the size, corner or material changes. The page's
+  ground is laid under the backdrop in each piece's layer, because most
+  pages leave their ground to the window and the lens would otherwise see
+  transparent black.
+- **Never glass inside the page it refracts.** A piece that recorded itself
+  would draw itself forever. The backdrop is handed only to the chrome over
+  the page (`LocalLiquidBackdrop`, provided around it alone); glass drawn in
+  a page (a page's bar buttons, `chromePill`) is `liquidPane`, tint and rim
+  without the lens.
+- **Fallbacks.** Android 12: blur, tint and a drawn rim. Below 12, or with
+  hardware drawing off: a tinted pane with the rim. A shader that won't
+  build sets `LensShader.broken` and every piece falls back from then on.
+  The shader is warmed at launch when Liquid Glass is on, and when it's
+  picked.
+- **The chrome** (`ui/liquid/LiquidChrome.kt`, `LiquidChrome` in the root).
+  Apple's 2025 bar: a capsule with an icon over a small label for each tab
+  (Library, Latest, Downloads, Discover, Settings), the selected one in a
+  droplet of clearer glass that slides between them, and Search as its own
+  round button beside the capsule. The mini player is the bar's accessory: a
+  slim capsule above it with the cover, the title over a short piece of the
+  wave, play and skip forward. Its cover hands off to the player with the
+  same key as the Original card, so the cover flies the same way. Both looks'
+  bars share `selectTab`. The page's bottom inset follows
+  (`glassBottomInset`). No bubble: the accessory stays as it is when
+  scrolling, for now.
+- **Controls.** `LiquidSwitch` (51 × 31, the accent when on), Apple's
+  segmented control (`LiquidSegmented`), badges as 30dp rounded squares with
+  white glyphs, inset grouped sections with 26dp corners and the footnote
+  above, 17pt body rows, the tertiary chevron, pills as capsules (the
+  chosen one filled in the accent), row cards as quiet grouped cards. The
+  look and brightness choices are Apple's Display & Brightness: the little
+  screens side by side, a name and a round check under each.
+- **The player** keeps the Original look's layout, as Jonathan asked: the
+  cover across the top half dissolving into its own blur. The transport
+  loses its tiles: the symbols sit on the blur, play larger.
+
+**Not done yet** (next rounds, with screenshots): the player's panel and
+sheets in glass, the show page and Latest's rows in Apple's list style,
+Library's Up Next / Downloaded / Bookmarks rows from the canvas, the bar
+minimizing on scroll, Liquid Glass on the TV. The lens shader was compiled
+and run by Skia (skia-python) over a real page and draws as the canvas
+does, but no phone's AGSL compiler has seen it yet; if it fails there, the
+bars fall back to tinted panes and nothing crashes.
+
+## 1.9, after release: Sea Glass on the website
+
+Jonathan's wish after seeing 1.9 on his phone: a Sea Glass switch on the
+website. `site/glasscast/` has one in the top bar of both pages. It sets
+`<html data-look="sea">` (an inline script in `<head>` does it before the
+first paint for a returning visitor or `?look=sea`), and `sea.css` hangs
+everything off that: paper and the tide's ink, the cover glows as pastel
+washes, Newsreader titles (loaded only when Sea Glass is on), buttons as CSS
+glass pebbles (frost grain, top-left light, the piece's own color in its
+shadow, each worn a little differently), and real glass pieces on the page
+rendered with the app's shader (`pebbles/`). `sea.js` swaps every
+screenshot for its Sea Glass twin (`shots/sea/`, from Jonathan's
+screenshots) and, where the browser has view transitions, opens the new
+look in a circle from the switch. The mini player's bubble becomes the
+app's pebble: `mini.js` ports `GlassContour`'s outline with the bubble's
+seed and tumble, turning once every 7 seconds.
+
+Found while testing: the mini player's progress ring had never shown on the
+live page, in either look. `mini.js` set the ring's inline `display` to ""
+to show it, which handed it back to the stylesheet's `display: none`.
+
 ## 1.9, third round: the bubble as a pebble, more color, the car and the TV
 
 Still 1.9 (versionCode 21). From Jonathan's notes on the second build

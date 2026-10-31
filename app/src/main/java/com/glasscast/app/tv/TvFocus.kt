@@ -24,6 +24,7 @@ import androidx.compose.ui.graphics.drawOutline
 import androidx.compose.ui.graphics.drawscope.ContentDrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.scale
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.node.DrawModifierNode
 import androidx.compose.ui.node.ModifierNodeElement
 import androidx.compose.ui.node.invalidateDraw
@@ -81,7 +82,7 @@ fun Modifier.tvFocusable(
     val interaction = remember { MutableInteractionSource() }
     return this
         .then(if (onLongClick != null && enabled) Modifier.holdSelect(onClick, onLongClick) else Modifier)
-        .then(FocusIndicationElement(shape, accent, scale, 3.dp, Color.Transparent))
+        .then(FocusIndicationElement(shape, accent, scale, 3.dp, Color.Transparent, glass = tvLiquid()))
         .clip(shape)
         .focusable(enabled = enabled, interactionSource = interaction)
         .clickable(
@@ -111,7 +112,7 @@ fun Modifier.tvFocusableRow(
     val interaction = remember { MutableInteractionSource() }
     return this
         .then(if (onLongClick != null && enabled) Modifier.holdSelect(onClick, onLongClick) else Modifier)
-        .then(FocusIndicationElement(shape, accent, 1f, 2.dp, surface.copy(alpha = 0.12f)))
+        .then(FocusIndicationElement(shape, accent, 1f, 2.dp, surface.copy(alpha = 0.12f), glass = tvLiquid()))
         .clip(shape)
         .focusable(enabled = enabled, interactionSource = interaction)
         .clickable(
@@ -127,10 +128,12 @@ private data class FocusIndicationElement(
     val accent: Color,
     val scale: Float,
     val ringWidth: Dp,
-    val fill: Color
+    val fill: Color,
+    /** The Glass look: focus is glass catching the light, not a ring (see [FocusIndicationNode.drawGlass]). */
+    val glass: Boolean = false
 ) : ModifierNodeElement<FocusIndicationNode>() {
-    override fun create() = FocusIndicationNode(shape, accent, scale, ringWidth, fill)
-    override fun update(node: FocusIndicationNode) = node.update(shape, accent, scale, ringWidth, fill)
+    override fun create() = FocusIndicationNode(shape, accent, scale, ringWidth, fill, glass)
+    override fun update(node: FocusIndicationNode) = node.update(shape, accent, scale, ringWidth, fill, glass)
 }
 
 private class FocusIndicationNode(
@@ -138,7 +141,8 @@ private class FocusIndicationNode(
     private var accent: Color,
     private var growTo: Float,
     private var ringWidth: Dp,
-    private var fill: Color
+    private var fill: Color,
+    private var glass: Boolean
 ) : Modifier.Node(), FocusEventModifierNode, DrawModifierNode {
 
     private val level = Animatable(0f)
@@ -148,13 +152,14 @@ private class FocusIndicationNode(
     private var outlineSize = Size.Unspecified
     private var outlineDirection: LayoutDirection? = null
 
-    fun update(shape: Shape, accent: Color, scale: Float, ringWidth: Dp, fill: Color) {
+    fun update(shape: Shape, accent: Color, scale: Float, ringWidth: Dp, fill: Color, glass: Boolean) {
         if (shape != this.shape) outline = null
         this.shape = shape
         this.accent = accent
         this.growTo = scale
         this.ringWidth = ringWidth
         this.fill = fill
+        this.glass = glass
         invalidateDraw()
     }
 
@@ -188,6 +193,10 @@ private class FocusIndicationNode(
         }
         val shapeOutline = outline!!
         val grow = 1f + (growTo - 1f) * p
+        if (glass) {
+            scale(grow) { this@draw.drawGlass(shapeOutline, p) }
+            return
+        }
         scale(grow) {
             if (fill.alpha > 0f) drawOutline(shapeOutline, fill.copy(alpha = fill.alpha * p))
             this@draw.drawContent()
@@ -197,6 +206,77 @@ private class FocusIndicationNode(
                 style = Stroke(width = ringWidth.toPx() * p)
             )
         }
+    }
+
+    /**
+     * Glass focus. A row lights up as a pane of glass under it (a body with
+     * a breath of the cover's color, light along its top, a rim of light);
+     * a cover or a card, which fills its shape, rises with a soft shadow
+     * under it and catches the light: a sheen over its top, a glare in its
+     * top left and a bright rim, as tvOS lifts a poster. No ring.
+     */
+    private fun ContentDrawScope.drawGlass(shapeOutline: Outline, p: Float) {
+        if (fill.alpha > 0f) {
+            drawOutline(shapeOutline, androidx.compose.ui.graphics.lerp(Color.White, accent, 0.25f).copy(alpha = 0.14f * p))
+            drawOutline(
+                shapeOutline,
+                androidx.compose.ui.graphics.Brush.verticalGradient(
+                    0f to Color.White.copy(alpha = 0.12f * p),
+                    0.5f to Color.White.copy(alpha = 0f),
+                    startY = 0f,
+                    endY = size.height
+                )
+            )
+            this.drawContent()
+            drawOutline(
+                shapeOutline,
+                androidx.compose.ui.graphics.Brush.linearGradient(
+                    0f to Color.White.copy(alpha = 0.6f * p),
+                    0.5f to Color.White.copy(alpha = 0.05f * p),
+                    1f to Color.White.copy(alpha = 0.25f * p),
+                    start = androidx.compose.ui.geometry.Offset.Zero,
+                    end = androidx.compose.ui.geometry.Offset(size.width, size.height)
+                ),
+                style = Stroke(width = 1.5.dp.toPx())
+            )
+            return
+        }
+        val drop = 4.dp.toPx()
+        for (i in 1..3) {
+            translate(0f, drop * i * 0.8f) {
+                drawOutline(shapeOutline, Color.Black.copy(alpha = 0.16f * p / i))
+            }
+        }
+        this.drawContent()
+        drawOutline(
+            shapeOutline,
+            androidx.compose.ui.graphics.Brush.verticalGradient(
+                0f to Color.White.copy(alpha = 0.22f * p),
+                0.42f to Color.White.copy(alpha = 0f),
+                startY = 0f,
+                endY = size.height
+            )
+        )
+        drawOutline(
+            shapeOutline,
+            androidx.compose.ui.graphics.Brush.radialGradient(
+                0f to Color.White.copy(alpha = 0.20f * p),
+                1f to Color.White.copy(alpha = 0f),
+                center = androidx.compose.ui.geometry.Offset(size.width * 0.15f, size.height * 0.12f),
+                radius = maxOf(size.minDimension * 0.75f, 1f)
+            )
+        )
+        drawOutline(
+            shapeOutline,
+            androidx.compose.ui.graphics.Brush.linearGradient(
+                0f to Color.White.copy(alpha = 0.9f * p),
+                0.5f to Color.White.copy(alpha = 0.15f * p),
+                1f to Color.White.copy(alpha = 0.45f * p),
+                start = androidx.compose.ui.geometry.Offset.Zero,
+                end = androidx.compose.ui.geometry.Offset(size.width, size.height)
+            ),
+            style = Stroke(width = 2.5.dp.toPx() * p)
+        )
     }
 }
 

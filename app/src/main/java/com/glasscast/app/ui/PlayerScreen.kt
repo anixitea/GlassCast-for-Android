@@ -116,6 +116,10 @@ import androidx.compose.ui.geometry.Offset
 import com.glasscast.app.ui.seaglass.coverPool
 import com.glasscast.app.ui.seaglass.seaGlass
 import androidx.compose.animation.core.FastOutLinearInEasing
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import com.glasscast.app.ui.liquid.liquidBackdrop
+import com.glasscast.app.ui.liquid.liquidGlass
 
 private val OnPlayer = Color(0xFFF7F7F9)
 private val PlayGlyph = Color(0xFF141418)
@@ -214,6 +218,16 @@ fun PlayerScreen(
     } else {
         null
     }
+    /*
+     * Liquid Glass keeps the Original player's picture (the cover across the
+     * top, dissolving into its own blur) and makes everything that sits on
+     * it glass: the panel at the foot, play, the buttons by the title. The
+     * picture is recorded as their backdrop (playerGlass) the way the page
+     * is for the tab bar.
+     */
+    val liquidPlayer = com.glasscast.app.ui.liquid.LocalLiquid.current != null
+    val playerBackdrop = remember { com.glasscast.app.ui.liquid.LiquidBackdrop() }
+    val playerGlass = if (liquidPlayer && tokens == null) playerBackdrop else null
     val onPlayer = tokens?.ink ?: OnPlayer
     val onPlayerDim = tokens?.muted ?: OnPlayer.copy(alpha = 0.66f)
     // Sea Glass: the cover's own ink for the small type, the line and the
@@ -457,12 +471,20 @@ fun PlayerScreen(
                     modifier = Modifier.fillMaxSize()
                 )
             } else {
+            // One box, so Liquid Glass can record the whole picture for its glass.
+            val screenW = maxWidth
+            val screenH = maxHeight
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .liquidBackdrop(playerGlass)
+            ) {
             PlayerBackdrop(
                 url = art,
                 band = if (landscape) artWidth else artHeight,
-                length = if (landscape) maxWidth else maxHeight,
+                length = if (landscape) screenW else screenH,
                 sideways = landscape,
-                aspect = if (landscape) maxHeight / artWidth else artHeight / maxWidth,
+                aspect = if (landscape) screenH / artWidth else artHeight / screenW,
                 modifier = Modifier.fillMaxSize()
             )
 
@@ -495,6 +517,17 @@ fun PlayerScreen(
                         )
                     )
             )
+            // Liquid Glass: the dimming as the panel rises is part of the
+            // picture, so the glass sees it too.
+            if (playerGlass != null && !landscape) {
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .graphicsLayer { alpha = expand.value }
+                        .background(Color.Black.copy(alpha = 0.46f))
+                )
+            }
+            }
             }
 
             // The handle is the dismiss affordance now, in place of a chevron:
@@ -618,7 +651,7 @@ fun PlayerScreen(
             // the compact controls sit over the blur, never the cover — a
             // dimmed column read as a dark box cut out of the screen. (Sea
             // Glass: the paper comes back over the cover instead.)
-            if (e > 0f && !landscape) {
+            if (e > 0f && !landscape && playerGlass == null) {
                 Box(
                     Modifier
                         .fillMaxSize()
@@ -762,22 +795,22 @@ fun PlayerScreen(
                         .offset(colLeft + colW - iconsWidth, titleTop + 8.dp)
                         .width(iconsWidth)
                         .graphicsLayer { alpha = fade },
-                    horizontalArrangement = Arrangement.End,
+                    horizontalArrangement = Arrangement.spacedBy(if (playerGlass != null) 8.dp else 0.dp, Alignment.End),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    DownloadIconButton(download, tint = onPlayer) {
+                    DownloadIconButton(download, tint = onPlayer, glass = playerGlass) {
                         haptics.play(Haptic.Tap)
                         if (download == null || download.state == com.glasscast.app.data.DownloadState.FAILED) onDownload()
                         else onRemoveDownload()
                     }
-                    PlayerIconButton(Icons.Filled.Cast, tr("Play on another device"), tint = onPlayer) {
+                    PlayerIconButton(Icons.Filled.Cast, tr("Play on another device"), tint = onPlayer, glass = playerGlass) {
                         haptics.play(Haptic.Tap)
                         showDevices = true
                     }
                 }
             }
 
-            // The wave, thinning into the header's.
+            // The wave (a rod of glass in the Glass look), thinning into the header's.
             val sliderRect = mix(
                 DpRect(colLeft, sliderTop, colW, 30.dp),
                 DpRect(cLeft, compactWaveTop, cW, 18.dp),
@@ -789,6 +822,8 @@ fun PlayerScreen(
                 color = seaInk ?: onPlayer,
                 thumbGlass = pigment,
                 thumbGlassDark = tokens?.dark == true,
+                // Glass: a still rod of glass that swells under the finger.
+                glassLine = playerGlass != null,
                 enabled = durationMs > 0,
                 height = sliderRect.h,
                 amplitude = mix(4.dp, 3.dp, e),
@@ -853,7 +888,10 @@ fun PlayerScreen(
                 animationSpec = spring(dampingRatio = 0.55f, stiffness = 380f),
                 label = "playShapeSmall"
             )
-            val quiet = if (tokens != null) Color.Transparent else OnPlayer.copy(alpha = 0.16f)
+            // Liquid Glass: Apple's player has no tiles under its controls,
+            // just the symbols on the picture's own blur.
+            val liquidLook = com.glasscast.app.ui.liquid.LocalLiquid.current != null
+            val quiet = if (tokens != null || liquidLook) Color.Transparent else OnPlayer.copy(alpha = 0.16f)
             val leftEdge = compactSlots[0].copy(w = 0.dp)
             val rightEdge = compactSlots[2].copy(x = compactSlots[2].x + compactSlots[2].w, w = 0.dp)
             // Sea Glass: the skips are clear pebbles, drawn once at their full
@@ -866,7 +904,7 @@ fun PlayerScreen(
                     corners = Corners(30.dp, 10.dp, 10.dp, 30.dp),
                     container = quiet, content = onPlayer,
                     icon = Icons.Filled.SkipPrevious, description = tr("Restart episode"),
-                    iconSize = 24.dp, alpha = fade
+                    iconSize = 24.dp, alpha = fade, glassBackdrop = playerGlass
                 ) {
                     haptics.play(Haptic.SkipBack)
                     onRestartEpisode()
@@ -877,8 +915,9 @@ fun PlayerScreen(
                 corners = mix(Corners(10.dp, 10.dp, 10.dp, 10.dp), Corners(20.dp, 8.dp, 8.dp, 20.dp), e),
                 container = quiet, content = onPlayer,
                 icon = skipBackIcon(skipSeconds), description = tr("Back {0} seconds", skipSeconds),
-                iconSize = mix(28.dp, 20.dp, e),
-                glass = skipGlass?.copy(seed = 32)
+                iconSize = if (liquidLook) mix(36.dp, 22.dp, e) else mix(28.dp, 20.dp, e),
+                glass = skipGlass?.copy(seed = 32),
+                glassBackdrop = playerGlass
             ) {
                 haptics.play(Haptic.SkipBack)
                 onSeekBy(-skipSeconds * 1_000L)
@@ -913,13 +952,51 @@ fun PlayerScreen(
                         haptics.play(if (isPlaying) Haptic.Pause else Haptic.Resume)
                         onPlayPause()
                     }
+                } else if (playerGlass != null) {
+                    // Liquid Glass: play is a disc of clear glass on the
+                    // picture, round while paused and a softer square while
+                    // playing (the Original button's change of shape), and it
+                    // gives a little under the finger.
+                    val disc = minOf(mix(fullSlots[2].w, compactSlots[1].w, e), mix(fullSlots[2].h, compactSlots[1].h, e))
+                    val interaction = remember { MutableInteractionSource() }
+                    val pressed by interaction.collectIsPressedAsState()
+                    val squash by animateFloatAsState(
+                        targetValue = if (pressed) 0.92f else 1f,
+                        animationSpec = spring(dampingRatio = 0.55f),
+                        label = "liquidPlayPress"
+                    )
+                    Box(
+                        Modifier
+                            .align(Alignment.Center)
+                            .size(disc)
+                            .graphicsLayer {
+                                scaleX = squash
+                                scaleY = squash
+                            }
+                            .liquidGlass(playerGlass, com.glasscast.app.ui.liquid.LiquidMaterial.disc(), corner = c, dark = true)
+                            .clip(RoundedCornerShape(c))
+                            .clickable(interactionSource = interaction, indication = null) {
+                                haptics.play(if (isPlaying) Haptic.Pause else Haptic.Resume)
+                                onPlayPause()
+                            }
+                            .semantics { contentDescription = if (isPlaying) tr("Pause") else tr("Play") },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                            contentDescription = null,
+                            tint = OnPlayer,
+                            modifier = Modifier.size(mix(42.dp, 26.dp, e))
+                        )
+                    }
                 } else {
                 MorphButton(
                     rect = DpRect(0.dp, 0.dp, mix(fullSlots[2].w, compactSlots[1].w, e), mix(fullSlots[2].h, compactSlots[1].h, e)),
                     corners = Corners(c, c, c, c),
-                    container = OnPlayer, content = PlayGlyph,
+                    container = OnPlayer,
+                    content = PlayGlyph,
                     icon = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                    description = if (isPlaying) "Pause" else tr("Play"),
+                    description = if (isPlaying) tr("Pause") else tr("Play"),
                     iconSize = mix(38.dp, 24.dp, e)
                 ) {
                     haptics.play(if (isPlaying) Haptic.Pause else Haptic.Resume)
@@ -929,7 +1006,7 @@ fun PlayerScreen(
                 if (buffering) {
                     CircularProgressIndicator(
                         strokeWidth = 2.5.dp,
-                        color = (pigment?.ink ?: PlayGlyph).copy(alpha = 0.55f),
+                        color = (pigment?.ink ?: if (playerGlass != null) OnPlayer else PlayGlyph).copy(alpha = 0.55f),
                         modifier = Modifier
                             .align(Alignment.Center)
                             .size(mix(52.dp, 32.dp, e))
@@ -941,8 +1018,9 @@ fun PlayerScreen(
                 corners = mix(Corners(10.dp, 10.dp, 10.dp, 10.dp), Corners(8.dp, 20.dp, 20.dp, 8.dp), e),
                 container = quiet, content = onPlayer,
                 icon = skipForwardIcon(skipSeconds), description = tr("Forward {0} seconds", skipSeconds),
-                iconSize = mix(28.dp, 20.dp, e),
-                glass = skipGlass?.copy(seed = 33)
+                iconSize = if (liquidLook) mix(36.dp, 22.dp, e) else mix(28.dp, 20.dp, e),
+                glass = skipGlass?.copy(seed = 33),
+                glassBackdrop = playerGlass
             ) {
                 haptics.play(Haptic.SkipForward)
                 onSeekBy(skipSeconds * 1_000L)
@@ -953,8 +1031,8 @@ fun PlayerScreen(
                     corners = Corners(10.dp, 30.dp, 30.dp, 10.dp),
                     container = quiet, content = onPlayer,
                     icon = Icons.Filled.SkipNext,
-                    description = if (upNextCount > 0) "Next episode" else tr("Nothing queued"),
-                    iconSize = 24.dp, alpha = fade, enabled = upNextCount > 0
+                    description = if (upNextCount > 0) tr("Next episode") else tr("Nothing queued"),
+                    iconSize = 24.dp, alpha = fade, enabled = upNextCount > 0, glassBackdrop = playerGlass
                 ) {
                     haptics.play(Haptic.SkipForward)
                     onSkipNext()
@@ -985,6 +1063,7 @@ fun PlayerScreen(
                 accent = panelAccent,
                 ink = onPlayer,
                 glass = pigment,
+                glassBackdrop = playerGlass,
                 onTab = { openPanel(it) },
                 onDrag = { dragPanel(it) },
                 onDragEnd = { settlePanel(it) },
@@ -1000,7 +1079,8 @@ fun PlayerScreen(
                     PanelTab.UP_NEXT -> PanelQueue(
                         upNext = upNext,
                         feedFor = feedFor,
-                        surface = panelColor,
+                        // On glass the rows are the glass itself.
+                        surface = if (playerGlass != null) Color.Transparent else panelColor,
                         onPlayAt = onPlayFromUpNext,
                         onRemove = onRemoveFromQueue,
                         onClear = onClearQueue,
@@ -1020,7 +1100,7 @@ fun PlayerScreen(
                     PanelTab.BOOKMARKS -> PanelBookmarks(
                         bookmarks = bookmarks,
                         positionMs = positionMs,
-                        surface = panelColor,
+                        surface = if (playerGlass != null) Color.Transparent else panelColor,
                         accent = panelAccent,
                         onAdd = onAddBookmark,
                         onSeekTo = onSeekTo,
@@ -1106,6 +1186,8 @@ private fun MorphButton(
     enabled: Boolean = true,
     /** Sea Glass: a pebble instead of the filled shape. */
     glass: SkipGlass? = null,
+    /** Liquid Glass: a disc of glass rises under the symbol while it's held. */
+    glassBackdrop: com.glasscast.app.ui.liquid.LiquidBackdrop? = null,
     onClick: () -> Unit
 ) {
     val interaction = remember { MutableInteractionSource() }
@@ -1179,6 +1261,26 @@ private fun MorphButton(
             ),
         contentAlignment = Alignment.Center
     ) {
+        if (glassBackdrop != null) {
+            val lift by animateFloatAsState(
+                targetValue = if (pressed) 1f else 0f,
+                animationSpec = tween(if (pressed) 110 else 320),
+                label = "morphLiquid"
+            )
+            if (lift > 0.01f) {
+                Box(
+                    Modifier
+                        .size(minOf(rect.w, rect.h) * 0.92f)
+                        .graphicsLayer {
+                            this.alpha = lift
+                            val k = 0.82f + 0.18f * lift
+                            scaleX = k
+                            scaleY = k
+                        }
+                        .liquidGlass(glassBackdrop, com.glasscast.app.ui.liquid.LiquidMaterial.disc(), dark = true)
+                )
+            }
+        }
         Icon(
             imageVector = icon,
             contentDescription = description,
@@ -1343,15 +1445,24 @@ private fun PlayerArtwork(url: String, modifier: Modifier = Modifier, sideways: 
     }
 }
 
+/** Liquid Glass: a small disc of glass under a player button, refracting the picture. */
+private fun Modifier.playerDisc(glass: com.glasscast.app.ui.liquid.LiquidBackdrop?): Modifier =
+    if (glass == null) this
+    else this
+        .padding(2.dp)
+        .liquidGlass(glass, com.glasscast.app.ui.liquid.LiquidMaterial.disc(), dark = true)
+
 @Composable
 private fun DownloadIconButton(
     entry: com.glasscast.app.data.DownloadEntry?,
     tint: Color = OnPlayer,
+    glass: com.glasscast.app.ui.liquid.LiquidBackdrop? = null,
     onClick: () -> Unit
 ) {
     Box(
         Modifier
             .size(44.dp)
+            .playerDisc(glass)
             .clip(CircleShape)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center
@@ -1378,16 +1489,18 @@ private fun PlayerIconButton(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     description: String,
     tint: Color = OnPlayer,
+    glass: com.glasscast.app.ui.liquid.LiquidBackdrop? = null,
     onClick: () -> Unit
 ) {
     Box(
         Modifier
             .size(44.dp)
+            .playerDisc(glass)
             .clip(CircleShape)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
-        Icon(icon, contentDescription = description, tint = tint, modifier = Modifier.size(24.dp))
+        Icon(icon, contentDescription = description, tint = tint, modifier = Modifier.size(if (glass != null) 21.dp else 24.dp))
     }
 }
 

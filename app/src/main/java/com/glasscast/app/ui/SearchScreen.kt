@@ -274,8 +274,7 @@ private fun SearchField(
                 Modifier
                     .fillMaxWidth()
                     .height(54.dp)
-                    .clip(RoundedCornerShape(27.dp))
-                    .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                    .glassField(MaterialTheme.colorScheme.surfaceContainerHigh, 27.dp)
                     .border(1.5.dp, border, RoundedCornerShape(27.dp))
                     .padding(horizontal = 18.dp),
                 verticalAlignment = Alignment.CenterVertically

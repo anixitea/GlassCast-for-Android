@@ -34,6 +34,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -62,19 +63,115 @@ fun GlassSheet(
 ) {
     val statusTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val tallest = (LocalConfiguration.current.screenHeightDp.dp - statusTop - 96.dp).coerceAtLeast(240.dp)
+    // Liquid Glass: Apple's sheet. Larger corners, a lifted light (or
+    // charcoal) pane with the glass's rim of light along its top edge, and
+    // Apple's slim grabber.
+    val liquid = com.glasscast.app.ui.liquid.LocalLiquid.current
+    // Frosted Glass: the sheet is frosted glass over the app. Its window
+    // blurs what's behind it (Android 12+, where the phone allows blurring
+    // across windows), and the sheet itself is translucent over that blur.
+    // Without the blur it stays solid: translucent over a sharp page reads
+    // as a mistake, not glass.
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val frosted = liquid != null && androidx.compose.runtime.remember(context) { crossWindowBlur(context) }
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = containerColor,
+        shape = if (liquid != null) RoundedCornerShape(topStart = 34.dp, topEnd = 34.dp) else BottomSheetDefaults.ExpandedShape,
+        containerColor = if (liquid != null && containerColor == MaterialTheme.colorScheme.surfaceContainer) {
+            // The liquid finish: clearer glass over a lighter blur.
+            val clear = com.glasscast.app.ui.liquid.GlassFinish.liquid
+            if (liquid.dark) Color(0xFF1C1C1E).copy(alpha = if (frosted) (if (clear) 0.66f else 0.78f) else 1f)
+            else Color.White.copy(alpha = if (frosted) (if (clear) 0.70f else 0.80f) else 1f)
+        } else {
+            containerColor
+        },
         contentColor = contentColor,
-        dragHandle = dragHandle
+        // The rim of light rides on the grabber's row, the top of the sheet
+        // itself. It used to be drawn by a modifier on the sheet, which sits
+        // outside the sheet's slide: the rim stayed at the top of the screen
+        // as a white line while the sheet came up under it (2.0).
+        dragHandle = if (liquid != null) {
+            {
+                androidx.compose.foundation.layout.Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .drawBehind {
+                            val r = 34.dp.toPx()
+                            drawRoundRect(
+                                brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+                                    0f to Color.White.copy(
+                                        alpha = ((if (liquid.dark) 0.22f else 0.9f) * com.glasscast.app.ui.liquid.PaneFinish.light).coerceAtMost(1f)
+                                    ),
+                                    1f to Color.White.copy(alpha = 0f),
+                                    startY = 0f,
+                                    endY = 30.dp.toPx()
+                                ),
+                                size = androidx.compose.ui.geometry.Size(size.width, size.height + r),
+                                cornerRadius = androidx.compose.ui.geometry.CornerRadius(r),
+                                style = androidx.compose.ui.graphics.drawscope.Stroke(1.dp.toPx())
+                            )
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (dragHandle != null) {
+                        androidx.compose.foundation.layout.Box(
+                            Modifier
+                                .padding(top = 7.dp, bottom = 10.dp)
+                                .size(width = 36.dp, height = 5.dp)
+                                .clip(RoundedCornerShape(50))
+                                .background(liquid.tertiary)
+                        )
+                    }
+                }
+            }
+        } else {
+            dragHandle
+        }
     ) {
+        if (frosted) BlurBehindWindow(radius = if (com.glasscast.app.ui.liquid.GlassFinish.liquid) 18.dp else 28.dp)
         Column(
             Modifier
                 .fillMaxWidth()
                 .heightIn(max = tallest),
             content = content
         )
+    }
+}
+
+/** Whether this phone blurs across windows right now (Android 12+; battery saver and some phones turn it off). */
+private fun crossWindowBlur(context: android.content.Context): Boolean =
+    android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S &&
+        runCatching {
+            context.getSystemService(android.view.WindowManager::class.java)?.isCrossWindowBlurEnabled == true
+        }.getOrDefault(false)
+
+/**
+ * Blurs everything behind the window this is composed in: the sheet's own
+ * dialog window, found by walking up from the composition's view.
+ */
+@Composable
+private fun BlurBehindWindow(radius: androidx.compose.ui.unit.Dp) {
+    val view = androidx.compose.ui.platform.LocalView.current
+    val px = with(androidx.compose.ui.platform.LocalDensity.current) { radius.roundToPx() }
+    androidx.compose.runtime.DisposableEffect(view, px) {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+            var v: android.view.ViewParent? = view as? android.view.ViewParent
+            var window: android.view.Window? = null
+            while (v != null && window == null) {
+                window = (v as? androidx.compose.ui.window.DialogWindowProvider)?.window
+                v = v.parent
+            }
+            window?.let { w ->
+                runCatching {
+                    w.addFlags(android.view.WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
+                    val attributes = w.attributes
+                    attributes.blurBehindRadius = px
+                    w.attributes = attributes
+                }
+            }
+        }
+        onDispose { }
     }
 }
 

@@ -1,5 +1,6 @@
 package com.glasscast.app.ui
 
+import com.glasscast.app.ui.liquid.liquidBackdrop
 import com.glasscast.app.ui.seaglass.drawSeaWash
 import com.glasscast.app.ui.seaglass.clearGlass
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -367,6 +368,11 @@ fun FeedScreen(
     // Portrait is as it always was — the header scrolls with the list.
     val config = LocalConfiguration.current
     val twoPane = config.screenWidthDp > config.screenHeightDp && config.screenHeightDp >= 480
+    // Frosted Glass: the back and info buttons are real glass over the page
+    // (rememberPageBackdrop). The glass sees the cover's wash where the list
+    // leaves the page bare, as the buttons sit at the top.
+    val pageGlass = com.glasscast.app.ui.liquid.rememberPageBackdrop(washColors.wash)
+    val glassDark = washColors.wash.luminance() < 0.5f
 
     Box(
         Modifier
@@ -389,7 +395,11 @@ fun FeedScreen(
 
         if (twoPane) {
             if (tokens == null) ArtworkBackdrop(url = feed.imageUrl, colors = washColors, modifier = Modifier.fillMaxSize())
-            Row(Modifier.fillMaxSize()) {
+            Row(
+                Modifier
+                    .fillMaxSize()
+                    .liquidBackdrop(pageGlass)
+            ) {
                 Box(
                     Modifier
                         .weight(0.42f)
@@ -418,7 +428,9 @@ fun FeedScreen(
         LazyColumn(
             state = listState,
             contentPadding = PaddingValues(bottom = bottomInset + 24.dp),
-            modifier = Modifier.fillMaxSize()
+            modifier = Modifier
+                .fillMaxSize()
+                .liquidBackdrop(pageGlass)
         ) {
             item {
                 /*
@@ -486,6 +498,17 @@ fun FeedScreen(
             ) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = tr("Back"), tint = tokens.ink, modifier = Modifier.size(22.dp))
             }
+        } else if (pageGlass != null) {
+            com.glasscast.app.ui.liquid.LiquidGlassButton(
+                backdrop = pageGlass,
+                icon = Icons.AutoMirrored.Filled.ArrowBack,
+                description = tr("Back"),
+                dark = glassDark,
+                modifier = Modifier
+                    .statusBarsPadding()
+                    .padding(start = 14.dp, top = 6.dp),
+                onClick = onBack
+            )
         } else
         Box(
             Modifier
@@ -522,6 +545,18 @@ fun FeedScreen(
             ) {
                 Icon(Icons.Outlined.Info, contentDescription = tr("Info"), tint = tokens.ink, modifier = Modifier.size(22.dp))
             }
+        } else if ((feed.description.isNotBlank() || feed.categories.isNotEmpty() || showSettings) && pageGlass != null) {
+            com.glasscast.app.ui.liquid.LiquidGlassButton(
+                backdrop = pageGlass,
+                icon = Icons.Outlined.Info,
+                description = tr("Info"),
+                dark = glassDark,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .statusBarsPadding()
+                    .padding(end = 14.dp, top = 6.dp),
+                onClick = { showInfo = true }
+            )
         } else if (feed.description.isNotBlank() || feed.categories.isNotEmpty() || showSettings) {
             Box(
                 Modifier
@@ -728,11 +763,27 @@ private fun EpisodeRow(
      * itself would let the reveal show through every played row.
      */
     val tokens = com.glasscast.app.ui.seaglass.LocalSea.current
+    // Frosted Glass: a card of frosted glass in the show's colors, the
+    // page's wash showing softly through it, with the rim's light.
+    val liquid = com.glasscast.app.ui.liquid.LocalLiquid.current
     Column(
         Modifier
             .fillMaxWidth()
+            .then(
+                if (liquid != null) {
+                    with(com.glasscast.app.ui.liquid.FrostedGlass) {
+                        Modifier.frosted(
+                            colors.card.takeOrElse { colors.elevated }.copy(alpha = 0.80f),
+                            colors.background.luminance() < 0.4f,
+                            20.dp
+                        )
+                    }
+                } else {
+                    Modifier
+                }
+            )
             .clip(RoundedCornerShape(20.dp))
-            .background(colors.card.takeOrElse { colors.elevated })
+            .then(if (liquid == null) Modifier.background(colors.card.takeOrElse { colors.elevated }) else Modifier)
             .then(if (tokens != null) Modifier.border(0.75.dp, tokens.hairline, RoundedCornerShape(20.dp)) else Modifier)
             .combinedClickable(onClick = onClick, onLongClick = onLongClick)
             .padding(horizontal = 18.dp, vertical = 14.dp)
@@ -784,7 +835,7 @@ private fun EpisodeRow(
             } else {
                 formatCompact(episode.durationMs)
             }
-            if (label.isNotBlank()) Pill(label = label)
+            if (label.isNotBlank()) LengthPill(label = label)
             if (download != null) {
                 Spacer(Modifier.width(8.dp))
                 DownloadBadge(download)

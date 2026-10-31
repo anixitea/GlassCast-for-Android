@@ -27,7 +27,7 @@ import com.glasscast.app.ui.rememberArtworkColors
 import com.glasscast.app.ui.theme.AccentPurple
 import com.glasscast.app.ui.theme.GlassCastTheme
 
-class MainActivity : ComponentActivity() {
+class GlassCastActivity : ComponentActivity() {
 
     private val app: GlassCastApp get() = application as GlassCastApp
 
@@ -43,7 +43,11 @@ class MainActivity : ComponentActivity() {
         if (app.settings.look.value == com.glasscast.app.data.Look.SEA_GLASS) {
             lifecycleScope.launch(Dispatchers.Default) { com.glasscast.app.ui.seaglass.GlassBody.warm() }
         }
-        lifecycleScope.launch(Dispatchers.IO) { Shortcuts.publish(this@MainActivity) }
+        // Liquid Glass's lens likewise, so the first bar doesn't wait on it.
+        if (app.settings.look.value == com.glasscast.app.data.Look.LIQUID_GLASS) {
+            lifecycleScope.launch(Dispatchers.Default) { com.glasscast.app.ui.liquid.LensShader.warm() }
+        }
+        lifecycleScope.launch(Dispatchers.IO) { Shortcuts.publish(this@GlassCastActivity) }
 
         setContent {
             val themeMode by app.settings.theme.collectAsStateWithLifecycle()
@@ -144,6 +148,8 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         if (GOOGLE_SIGN_IN) lifecycleScope.launch(Dispatchers.IO) { app.account.syncSoon() }
+        // New episodes as the app opens, at most every quarter hour.
+        lifecycleScope.launch { runCatching { app.feedStore.refreshIfStale() } }
     }
 
     override fun onStop() {

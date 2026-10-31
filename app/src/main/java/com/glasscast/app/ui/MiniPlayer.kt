@@ -234,7 +234,8 @@ fun MiniPlayer(
                 clipPath(cardClip) { this@drawWithContent.drawContent() }
                 // Sea Glass: the progress line round the pebble. It draws
                 // itself in round the shape as the cover settles, then the
-                // played part runs in the cover's ink, with a dot at its head.
+                // played part runs in the cover's ink (the color says where
+                // you are; no dot at its head, as in the Original look).
                 if (f.ringAlpha > 0f && tokens != null && pigment != null) {
                     val stroke = m.ringStroke * 0.86f
                     seaBubbleOutline(
@@ -254,7 +255,6 @@ fun MiniPlayer(
                             seaArc.reset()
                             seaMeasure.getSegment(0f, played, seaArc, true)
                             drawPath(seaArc, lit, style = Stroke(stroke, cap = StrokeCap.Round))
-                            drawCircle(lit, radius = stroke * 0.95f, center = seaMeasure.getPosition(played))
                         }
                     }
                 } else if (f.ringAlpha > 0f) {
